@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}Scenario — Deep Thought{% endblock %}
+
+{% block content %}
+<div x-data="scenarioDetail({{ scenario_id }})" x-init="init()" class="px-8 py-6 max-w-[1240px]">
+
+  <div x-show="loading" class="smallcaps text-stone-400 py-8 text-center">Loading…</div>
+
+  <template x-if="!loading && scenario">
+    <div class="grid gap-7" style="grid-template-columns: 1fr 280px;">
+
+      <!-- Main column -->
+      <div>
+        <!-- Header -->
+        <div class="flex items-start justify-between mb-6">
+          <div>
+            <div class="smallcaps text-stone-500 mb-1"
+                 x-text="'SC-' + String(scenario.id).padStart(3,'0')"></div>
+            <h1 class="text-[26px] font-semibold tracking-tight" x-text="scenario.title"></h1>
+            <p class="text-stone-500 text-[14px] mt-1" x-text="scenario.description || ''"></p>
+            <div class="flex flex-wrap gap-1 mt-2">
+              <template x-for="tag in (scenario.tags || [])" :key="tag">
+                <span class="pill text-[10px] bg-stone-100 text-stone-600" x-text="tag"></span>
+              </template>
+            </div>
+          </div>
+          <div class="flex gap-2 shrink-0" x-show="isF">
+            <a :href="'/scenarios/' + scenario.id + '/edit'"
+               class="btn btn-ghost h-8 px-3 text-[13px]">Edit</a>
+            <a :href="'/api/scenarios/' + scenario.id + '/export'" target="_blank"
+               class="btn btn-ghost h-8 px-3 text-[13px]">Export JSON</a>
+          </div>
+        </div>
+
+        <!-- Inject tree -->
+        <div class="section-title mb-4">
+          <h2 class="smallcaps text-stone-500">Inject tree</h2>
+        </div>
+
+        <div class="space-y-1.5">
+          <template x-for="row in treeRows" :key="row.node.id + '-' + row.depth">
+            <div :style="'padding-left: ' + (row.depth * 22) + 'px'">
+              <div class="node">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="mono text-[11px] text-stone-400" x-text="row.node.id"></span>
+                  <template x-if="row.node.id === scenario.definition.start_inject_id">
+                    <span class="pill text-[10px]" style="background:#dcfce7; color:#166534; box-shadow: inset 0 0 0 1px #bbf7d0;">start</span>
+                  </template>
+                  <template x-if="row.node.options && row.node.options.length > 1">
+                    <span class="pill text-[10px]"
+                          style="background: oklch(0.74 0.14 70 / .12); color: var(--accent-d); box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .3);">branch</span>
+                  </template>
+                  <template x-if="!row.node.options || row.node.options.length === 0">
+                    <span class="pill text-[10px]" style="background:#e6eef8; color:#2f5b8a; box-shadow: inset 0 0 0 1px #c5d7ec;">end</span>
+                  </template>
+                  <!-- Team pills -->
+                  <div class="flex flex-wrap gap-1 ml-auto">
+                    <template x-for="t in (row.node.target_teams || [])" :key="t">
+                      <span class="pill mono text-[10px]" :class="teamColor(t)" x-text="t"></span>
+                    </template>
+                  </div>
+                </div>
+                <div class="text-[13.5px] font-medium" x-text="row.node.title"></div>
+                <p class="text-[12.5px] text-stone-500 mt-0.5 line-clamp-2" x-text="row.node.content"></p>
+
+                <!-- Options -->
+                <template x-if="row.node.options && row.node.options.length">
+                  <div class="mt-2 space-y-1">
+                    <template x-for="opt in row.node.options" :key="opt.id">
+                      <div class="flex items-center gap-2 text-[12px] text-stone-500">
+                        <span class="text-stone-300 mono">→</span>
+                        <span x-text="opt.label"></span>
+                        <span class="mono text-[10.5px] text-stone-400 ml-auto"
+                              x-text="opt.next_inject_id ? opt.next_inject_id : '(end)'"></span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+
+                <!-- Expected actions -->
+                <template x-if="row.node.expected_actions && row.node.expected_actions.length">
+                  <div class="mt-2 pt-2 border-t rule">
+                    <div class="smallcaps text-stone-400 mb-1">Expected actions</div>
+                    <ul class="space-y-0.5">
+                      <template x-for="act in row.node.expected_actions" :key="act">
+                        <li class="flex items-start gap-1.5 text-[12px] text-stone-600">
+                          <span class="dot mt-1 shrink-0" style="background: var(--accent-d);"></span>
+                          <span x-text="act"></span>
+                        </li>
+                      </template>
+                    </ul>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <div x-show="treeRows.length === 0"
+               class="smallcaps text-stone-400 text-center py-8">
+            No injects defined.
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar -->
+      <div class="space-y-5">
+
+        <!-- Stats -->
+        <div class="paper ring-rule rounded-lg p-4 space-y-3">
+          <div class="smallcaps text-stone-500 mb-2">Summary</div>
+          <div class="flex justify-between text-[13px]">
+            <span class="text-stone-500">Injects</span>
+            <span class="mono font-medium" x-text="scenario.definition?.injects?.length || 0"></span>
+          </div>
+          <div class="flex justify-between text-[13px]">
+            <span class="text-stone-500">Branch points</span>
+            <span class="mono font-medium" x-text="branchCount"></span>
+          </div>
+          <div class="flex justify-between text-[13px]">
+            <span class="text-stone-500">End nodes</span>
+            <span class="mono font-medium" x-text="endCount"></span>
+          </div>
+        </div>
+
+        <!-- Teams involved -->
+        <div class="paper ring-rule rounded-lg p-4">
+          <div class="smallcaps text-stone-500 mb-3">Teams involved</div>
+          <div class="flex flex-wrap gap-1.5">
+            <template x-for="t in teamsInvolved" :key="t">
+              <span class="pill mono text-[10.5px]" :class="teamColor(t)" x-text="t"></span>
+            </template>
+            <span x-show="teamsInvolved.length === 0" class="text-[12.5px] text-stone-400">None specified</span>
+          </div>
+        </div>
+
+        <!-- Validation -->
+        <div class="paper ring-rule rounded-lg p-4">
+          <div class="smallcaps text-stone-500 mb-3">Validation</div>
+          <template x-if="validationIssues.length === 0">
+            <div class="flex items-center gap-2 text-[13px]" style="color:#166534;">
+              <span class="dot" style="background:#22c55e;"></span>
+              No issues found
+            </div>
+          </template>
+          <template x-if="validationIssues.length > 0">
+            <div class="space-y-2">
+              <template x-for="issue in validationIssues" :key="issue">
+                <div class="flex items-start gap-2 text-[12.5px]" style="color:#b91c1c;">
+                  <span class="dot shrink-0 mt-1" style="background:#ef4444;"></span>
+                  <span x-text="issue"></span>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+
+      </div>
+    </div>
+  </template>
+
+  <template x-if="!loading && !scenario">
+    <p class="text-[13.5px]" style="color:#b91c1c;">Scenario not found.</p>
+  </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function scenarioDetail(id) {
+  return {
+    loading: true, scenario: null, isF: false,
+
+    async init() {
+      const [me, r] = await Promise.all([
+        apiFetch('/auth/me'),
+        apiFetch('/scenarios/' + id),
+      ]);
+      if (me && me.ok) { const d = await me.json(); this.isF = d.role === 'facilitator'; }
+      if (r && r.ok) this.scenario = await r.json();
+      this.loading = false;
+    },
+
+    get treeRows() {
+      if (!this.scenario) return [];
+      const def = this.scenario.definition;
+      if (!def || !def.injects) return [];
+      const byId = Object.fromEntries(def.injects.map(i => [i.id, i]));
+      const rows = [];
+      const visited = new Set();
+      const walk = (id, depth) => {
+        if (!id || visited.has(id)) return;
+        visited.add(id);
+        const node = byId[id];
+        if (!node) return;
+        rows.push({ node, depth });
+        for (const opt of (node.options || [])) {
+          if (opt.next_inject_id) walk(opt.next_inject_id, depth + 1);
+        }
+      };
+      walk(def.start_inject_id, 0);
+      // Include any disconnected injects
+      for (const inj of def.injects) {
+        if (!visited.has(inj.id)) rows.push({ node: inj, depth: 0 });
+      }
+      return rows;
+    },
+
+    get branchCount() {
+      if (!this.scenario) return 0;
+      return (this.scenario.definition?.injects || []).filter(i => i.options && i.options.length > 1).length;
+    },
+
+    get endCount() {
+      if (!this.scenario) return 0;
+      return (this.scenario.definition?.injects || []).filter(i => !i.options || i.options.length === 0).length;
+    },
+
+    get teamsInvolved() {
+      if (!this.scenario) return [];
+      const teams = new Set();
+      for (const inj of (this.scenario.definition?.injects || [])) {
+        for (const t of (inj.target_teams || [])) teams.add(t);
+      }
+      return [...teams];
+    },
+
+    get validationIssues() {
+      if (!this.scenario) return [];
+      const def = this.scenario.definition;
+      const issues = [];
+      if (!def || !def.injects || def.injects.length === 0) {
+        issues.push('No injects defined');
+        return issues;
+      }
+      if (!def.start_inject_id) issues.push('No start inject set');
+      const ids = new Set(def.injects.map(i => i.id));
+      for (const inj of def.injects) {
+        for (const opt of (inj.options || [])) {
+          if (opt.next_inject_id && !ids.has(opt.next_inject_id)) {
+            issues.push(`Inject "${inj.id}" references unknown next inject "${opt.next_inject_id}"`);
+          }
+        }
+      }
+      return issues;
+    },
+
+    teamColor(t) { return teamColor(t); },
+  }
+}
+</script>
+{% endblock %}

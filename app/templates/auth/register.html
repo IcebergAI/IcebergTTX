@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Register — Deep Thought{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center" style="background: var(--bg);">
+  <div x-data="registerForm()" class="paper ring-rule rounded-xl p-8 w-full max-w-sm shadow-sm">
+
+    <div class="flex items-center gap-2.5 mb-7">
+      <div class="h-8 w-8 rounded-md flex items-center justify-center mono text-[13px] font-semibold"
+           style="background: var(--accent); color: #1a1814;">42</div>
+      <div>
+        <div class="text-[15px] font-semibold leading-tight" style="color: var(--ink);">Deep Thought</div>
+        <div class="smallcaps text-stone-500 leading-tight">TTX control</div>
+      </div>
+    </div>
+
+    <h1 class="text-[20px] font-semibold tracking-tight mb-5">Create account</h1>
+
+    <div x-show="error"
+         class="mb-4 rounded-md px-3 py-2.5 text-[13px]"
+         style="background:#fee2e2; color:#b91c1c;"
+         x-text="error"></div>
+
+    <form @submit.prevent="submit()" class="space-y-3.5">
+      <div>
+        <label class="block smallcaps text-stone-500 mb-1">Email</label>
+        <input type="email" x-model="email" required autocomplete="email"
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300" />
+      </div>
+      <div>
+        <label class="block smallcaps text-stone-500 mb-1">Display name</label>
+        <input type="text" x-model="display_name" required autocomplete="name"
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300" />
+      </div>
+      <div>
+        <label class="block smallcaps text-stone-500 mb-1">Password</label>
+        <input type="password" x-model="password" required autocomplete="new-password"
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300" />
+      </div>
+      <div>
+        <label class="block smallcaps text-stone-500 mb-1">Role</label>
+        <select x-model="role"
+                class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300">
+          <option value="participant">Participant</option>
+          <option value="facilitator">Facilitator</option>
+          <option value="observer">Observer</option>
+        </select>
+      </div>
+      <div>
+        <label class="block smallcaps text-stone-500 mb-1">
+          Team / department
+          <span class="text-stone-400 normal-case font-normal">(optional)</span>
+        </label>
+        <input type="text" x-model="team" placeholder="e.g. IT Operations"
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300" />
+      </div>
+      <button type="submit" :disabled="loading"
+              class="btn btn-primary w-full h-9 text-[13.5px] justify-center disabled:opacity-50 mt-1">
+        <span x-text="loading ? 'Creating account…' : 'Create account'"></span>
+      </button>
+    </form>
+
+    <p class="mt-5 text-[13px] text-center text-stone-500">
+      Already have an account?
+      <a href="/login" class="text-stone-700 font-medium hover:underline">Sign in</a>
+    </p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function registerForm() {
+  return {
+    email: '', display_name: '', password: '', role: 'participant', team: '',
+    loading: false, error: '',
+    async submit() {
+      this.loading = true; this.error = '';
+      const body = { email: this.email, display_name: this.display_name, password: this.password, role: this.role };
+      if (this.team) body.team = this.team;
+      const resp = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      this.loading = false;
+      if (resp.ok) {
+        window.location.href = '/login';
+      } else {
+        const data = await resp.json();
+        this.error = data.detail || 'Registration failed.';
+      }
+    }
+  }
+}
+</script>
+{% endblock %}

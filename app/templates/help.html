@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}Help — Deep Thought{% endblock %}
+
+{% block content %}
+<div class="px-8 py-6 max-w-[860px]">
+
+  <div class="mb-8">
+    <div class="smallcaps text-stone-500">Documentation</div>
+    <h1 class="text-[26px] font-semibold tracking-tight leading-tight mt-1">Help</h1>
+    <p class="text-stone-500 text-[14px] mt-1">How to run tabletop exercises with Deep Thought.</p>
+  </div>
+
+  <!-- Quick links -->
+  <div class="grid grid-cols-3 gap-3 mb-10">
+    <a href="#roles" class="paper ring-rule rounded-lg p-4 hover:bg-stone-50/80">
+      <div class="smallcaps text-stone-500 mb-1">Roles</div>
+      <div class="text-[13.5px] text-stone-700">Facilitator · Participant · Observer</div>
+    </a>
+    <a href="#workflow" class="paper ring-rule rounded-lg p-4 hover:bg-stone-50/80">
+      <div class="smallcaps text-stone-500 mb-1">Workflow</div>
+      <div class="text-[13.5px] text-stone-700">Create → Run → Review</div>
+    </a>
+    <a href="#scenarios" class="paper ring-rule rounded-lg p-4 hover:bg-stone-50/80">
+      <div class="smallcaps text-stone-500 mb-1">Scenarios</div>
+      <div class="text-[13.5px] text-stone-700">JSON format & branching</div>
+    </a>
+  </div>
+
+  <!-- Roles -->
+  <section id="roles" class="mb-10">
+    <div class="section-title mb-4">
+      <h2 class="smallcaps text-stone-500">Roles</h2>
+    </div>
+    <div class="space-y-3">
+      <div class="paper ring-rule rounded-lg p-5">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="pill" style="background: oklch(0.74 0.14 70 / .12); color: var(--accent-d); box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .3);">Facilitator</span>
+        </div>
+        <p class="text-[13.5px] text-stone-700 leading-relaxed">Runs the exercise. Creates and imports scenarios, starts exercises, adds participants, and controls the inject feed — deciding when each inject is released and which branch to follow. Can inject simulated inbound communications, view all participant responses, and export transcripts.</p>
+      </div>
+      <div class="paper ring-rule rounded-lg p-5">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="pill bg-stone-100 text-stone-600">Participant</span>
+        </div>
+        <p class="text-[13.5px] text-stone-700 leading-relaxed">Receives injects as they are released and submits responses — choosing a stance (if options are provided) and writing free-text reasoning. Sees only the injects assigned to their team. Cannot see other participants' responses.</p>
+      </div>
+      <div class="paper ring-rule rounded-lg p-5">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="pill bg-stone-100 text-stone-500">Observer</span>
+        </div>
+        <p class="text-[13.5px] text-stone-700 leading-relaxed">Watches the exercise in read-only mode. Sees all injects but cannot submit responses. Useful for senior stakeholders, auditors, or training evaluators.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Workflow -->
+  <section id="workflow" class="mb-10">
+    <div class="section-title mb-4">
+      <h2 class="smallcaps text-stone-500">Workflow</h2>
+    </div>
+
+    <div class="space-y-4">
+
+      <div class="paper ring-rule rounded-lg p-5">
+        <div class="flex items-start gap-4">
+          <div class="mono text-[13px] font-semibold text-stone-400 shrink-0 w-5 pt-0.5">1</div>
+          <div>
+            <div class="text-[14px] font-semibold mb-1">Create or import a scenario</div>
+            <p class="text-[13.5px] text-stone-600 leading-relaxed">Go to <strong>Scenarios → New scenario</strong> to build an inject tree in the editor, or use <strong>Import JSON</strong> to load a pre-built scenario file. Each inject has a title, content, optional target teams, and branch options that point to the next inject. See <a href="#scenarios" class="underline hover:text-stone-800">Scenario format</a> for the JSON schema.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="paper ring-rule rounded-lg p-5">
+        <div class="flex items-start gap-4">
+          <div class="mono text-[13px] font-semibold text-stone-400 shrink-0 w-5 pt-0.5">2</div>
+          <div>
+            <div class="text-[14px] font-semibold mb-1">Create an exercise</div>
+            <p class="text-[13.5px] text-stone-600 leading-relaxed">Go to <strong>Exercises → New exercise</strong>, give it a title, and select a scenario. Optionally enable <strong>LLM assessment</strong> to have Claude evaluate each response and suggest follow-up injects (requires <code class="mono text-[12.5px]">ANTHROPIC_API_KEY</code> in your <code class="mono text-[12.5px]">.env</code>).</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="paper ring-rule rounded-lg p-5">
+        <div class="flex items-start gap-4">
+          <div class="mono text-[13px] font-semibold text-stone-400 shrink-0 w-5 pt-0.5">3</div>
+          <div>
+            <div class="text-[14px] font-semibold mb-1">Add participants</div>
+            <p class="text-[13.5px] text-stone-600 leading-relaxed">Open the facilitator console and use the <strong>Participants</strong> panel (right pane) to search for registered users and enrol them. Each participant is assigned a team. Share the exercise link <code class="mono text-[12.5px]">/exercises/{id}/participate</code> with participants, or invite them to the <code class="mono text-[12.5px]">/register</code> page first.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="paper ring-rule rounded-lg p-5">
+        <div class="flex items-start gap-4">
+          <div class="mono text-[13px] font-semibold text-stone-400 shrink-0 w-5 pt-0.5">4</div>
+          <div>
+            <div class="text-[14px] font-semibold mb-1">Start the exercise and release injects</div>
+            <p class="text-[13.5px] text-stone-600 leading-relaxed">Hit <strong>Start</strong> from the exercises list or the facilitator console. Injects appear in the left pane as <strong>pending</strong> nodes. Press <strong>Release</strong> to push an inject to participants — they'll receive it instantly via WebSocket. Once they respond, review the responses in the middle pane and choose which branch to release next. You can <strong>Pause</strong> the exercise at any point to halt new submissions.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="paper ring-rule rounded-lg p-5">
+        <div class="flex items-start gap-4">
+          <div class="mono text-[13px] font-semibold text-stone-400 shrink-0 w-5 pt-0.5">5</div>
+          <div>
+            <div class="text-[14px] font-semibold mb-1">Inject communications</div>
+            <p class="text-[13.5px] text-stone-600 leading-relaxed">Open <strong>Communications</strong> from the sidebar. As facilitator, click <strong>Inject inbound</strong> to simulate an incoming message from an external entity (ICO, NCSC, CEO, etc.) targeted at specific teams. Participants see these in their own Communications inbox. Outbound messages generated automatically by triggered communications in the scenario definition also appear here.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="paper ring-rule rounded-lg p-5">
+        <div class="flex items-start gap-4">
+          <div class="mono text-[13px] font-semibold text-stone-400 shrink-0 w-5 pt-0.5">6</div>
+          <div>
+            <div class="text-[14px] font-semibold mb-1">Complete and export</div>
+            <p class="text-[13.5px] text-stone-600 leading-relaxed">When all injects are resolved, click <strong>Complete</strong> to close the exercise. From the facilitator console's right pane, export the full <strong>transcript</strong> (JSON), <strong>responses</strong> (CSV), or <strong>AI assessments</strong> (JSON) for post-exercise review and reporting.</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Scenarios -->
+  <section id="scenarios" class="mb-10">
+    <div class="section-title mb-4">
+      <h2 class="smallcaps text-stone-500">Scenario format</h2>
+    </div>
+    <p class="text-[13.5px] text-stone-600 leading-relaxed mb-4">Scenarios are imported and exported as JSON. The top-level structure:</p>
+
+    <div class="paper ring-rule rounded-lg overflow-hidden mb-4">
+      <div class="px-4 py-2.5 border-b rule smallcaps text-stone-400">scenario.json</div>
+      <pre class="px-4 py-4 text-[12.5px] mono text-stone-700 overflow-x-auto leading-relaxed">{
+  "schema_version": "1.0",
+  "title": "Ransomware incident",
+  "description": "A simulated ransomware attack affecting core infrastructure.",
+  "tags": ["cyber", "ransomware"],
+  "participant_teams": [
+    { "id": "it_ops", "label": "IT Operations" },
+    { "id": "legal",  "label": "Legal & Compliance" }
+  ],
+  "start_inject_id": "inject_01",
+  "injects": [ ... ],
+  "debrief_notes": "Key learning: notify ICO within 72 hours."
+}</pre>
+    </div>
+
+    <p class="text-[13.5px] text-stone-600 leading-relaxed mb-4">Each inject in the <code class="mono text-[12.5px]">injects</code> array:</p>
+
+    <div class="paper ring-rule rounded-lg overflow-hidden mb-4">
+      <pre class="px-4 py-4 text-[12.5px] mono text-stone-700 overflow-x-auto leading-relaxed">{
+  "id": "inject_01",
+  "title": "Ransomware detected",
+  "content": "SOC has detected encrypted files on 3 servers...",
+  "target_teams": ["it_ops"],
+  "free_text_response": true,
+  "sequence_order": 1,
+  "options": [
+    { "id": "opt_isolate", "label": "Isolate affected systems immediately", "next_inject_id": "inject_02a" },
+    { "id": "opt_monitor", "label": "Monitor and gather more information",  "next_inject_id": "inject_02b" }
+  ],
+  "triggers_communications": [
+    {
+      "direction": "inbound",
+      "external_entity": "NCSC",
+      "subject": "Ransomware advisory",
+      "body": "We have been made aware of a campaign targeting...",
+      "delay_seconds": 120,
+      "visible_to_teams": ["it_ops"]
+    }
+  ]
+}</pre>
+    </div>
+
+    <div class="space-y-2">
+      <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
+        <div class="smallcaps text-stone-500 pt-0.5">target_teams</div>
+        <div class="text-stone-600">IDs from <code class="mono text-[12px]">participant_teams</code>. Blank array means all teams receive the inject.</div>
+      </div>
+      <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
+        <div class="smallcaps text-stone-500 pt-0.5">options</div>
+        <div class="text-stone-600">Branch choices shown to participants. <code class="mono text-[12px]">next_inject_id: null</code> ends the branch.</div>
+      </div>
+      <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
+        <div class="smallcaps text-stone-500 pt-0.5">triggers_communications</div>
+        <div class="text-stone-600">Messages automatically injected into the comms inbox when this inject is released. <code class="mono text-[12px]">delay_seconds</code> staggers delivery.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LLM -->
+  <section id="llm" class="mb-10">
+    <div class="section-title mb-4">
+      <h2 class="smallcaps text-stone-500">LLM assessment</h2>
+    </div>
+    <p class="text-[13.5px] text-stone-600 leading-relaxed mb-3">When enabled on an exercise, Claude evaluates each participant response and produces:</p>
+    <ul class="space-y-2 mb-4">
+      <li class="flex items-start gap-2 text-[13.5px] text-stone-600">
+        <span class="dot mt-1.5 shrink-0" style="background: var(--accent-d);"></span>
+        A <strong>decision quality</strong> rating — <em>strong</em>, <em>acceptable</em>, or <em>poor</em>
+      </li>
+      <li class="flex items-start gap-2 text-[13.5px] text-stone-600">
+        <span class="dot mt-1.5 shrink-0" style="background: var(--accent-d);"></span>
+        A brief <strong>assessment</strong> of the reasoning
+      </li>
+      <li class="flex items-start gap-2 text-[13.5px] text-stone-600">
+        <span class="dot mt-1.5 shrink-0" style="background: var(--accent-d);"></span>
+        A suggested <strong>follow-up inject</strong> the facilitator can approve and queue
+      </li>
+    </ul>
+    <p class="text-[13.5px] text-stone-600 leading-relaxed">Set <code class="mono text-[12.5px]">ANTHROPIC_API_KEY</code> in your <code class="mono text-[12.5px]">.env</code> file to enable. Assessments appear in the AI assessment column of each response card in the facilitator console, and in the right pane's AI suggestions widget.</p>
+  </section>
+
+  <!-- Tips -->
+  <section id="tips" class="mb-10">
+    <div class="section-title mb-4">
+      <h2 class="smallcaps text-stone-500">Tips</h2>
+    </div>
+    <div class="space-y-2">
+      <div class="flex items-start gap-3 text-[13.5px] text-stone-600 py-2 border-b rule">
+        <span class="dot mt-1.5 shrink-0" style="background:#5b86b8;"></span>
+        <span>The sidebar <strong>Communications</strong> link always opens the communications inbox for the currently active exercise. If no exercise is live it falls back to the exercises list.</span>
+      </div>
+      <div class="flex items-start gap-3 text-[13.5px] text-stone-600 py-2 border-b rule">
+        <span class="dot mt-1.5 shrink-0" style="background:#5b86b8;"></span>
+        <span>A <strong>paused</strong> exercise disables participant response submission but keeps the WebSocket connection alive — participants see the yellow "Paused" banner and the form becomes read-only.</span>
+      </div>
+      <div class="flex items-start gap-3 text-[13.5px] text-stone-600 py-2 border-b rule">
+        <span class="dot mt-1.5 shrink-0" style="background:#5b86b8;"></span>
+        <span>Scenarios can be exported from the scenario detail page and re-imported into a different Deep Thought instance — useful for sharing scenario packs between teams.</span>
+      </div>
+      <div class="flex items-start gap-3 text-[13.5px] text-stone-600 py-2 border-b rule">
+        <span class="dot mt-1.5 shrink-0" style="background:#5b86b8;"></span>
+        <span>The inject tree editor validates that all <code class="mono text-[12px]">next_inject_id</code> references exist. The scenario detail page also shows a live validation sidebar — fix any issues before running an exercise.</span>
+      </div>
+      <div class="flex items-start gap-3 text-[13.5px] text-stone-600 py-2">
+        <span class="dot mt-1.5 shrink-0" style="background:#5b86b8;"></span>
+        <span>Use the <strong>Filter</strong> tabs in the facilitator response feed (<em>All / Current node / Flagged</em>) to focus on responses that need attention. "Flagged" shows responses the AI rated as <em>poor</em>.</span>
+      </div>
+    </div>
+  </section>
+
+</div>
+{% endblock %}

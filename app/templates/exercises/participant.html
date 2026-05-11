@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% block title %}Exercise — Deep Thought{% endblock %}
+
+{% block content %}
+<div x-data="participantView({{ exercise_id }})" x-init="init()">
+  <div x-show="loading" class="flex items-center justify-center py-16">
+    <span class="smallcaps text-stone-400">Loading…</span>
+  </div>
+
+  <template x-if="!loading && exercise">
+    <div class="max-w-[760px] mx-auto px-8 py-8">
+
+      <!-- Header -->
+      <div class="flex items-center gap-3 mb-1">
+        <template x-if="exercise.state === 'active'">
+          <span class="pill bg-st-active"><span class="live-dot"></span>Live</span>
+        </template>
+        <template x-if="exercise.state === 'paused'">
+          <span class="pill bg-st-paused"><span class="dot" style="background:#c08a26"></span>Paused</span>
+        </template>
+        <template x-if="exercise.state === 'draft'">
+          <span class="pill bg-st-draft"><span class="dot" style="background:#9a958a"></span>Draft</span>
+        </template>
+        <template x-if="exercise.state === 'completed'">
+          <span class="pill bg-st-completed"><span class="dot" style="background:#5b86b8"></span>Completed</span>
+        </template>
+
+        <span class="mono text-[11.5px] text-stone-500">EX-<span x-text="String(exercise.id).padStart(3,'0')"></span></span>
+
+        <template x-if="isObserver">
+          <span class="pill bg-stone-100 text-stone-500">Observer — read only</span>
+        </template>
+
+        <div class="ml-auto flex items-center gap-3">
+          <a :href="'/exercises/' + exercise.id + '/communications'"
+             class="text-[12.5px] text-stone-500 hover:text-stone-800">Communications</a>
+          <span class="flex items-center gap-1.5 smallcaps"
+                :class="wsConnected ? 'text-stone-400' : 'text-red-400'">
+            <span :class="wsConnected ? 'live-dot' : 'dot bg-red-400'"
+                  :style="wsConnected ? 'width:6px;height:6px;' : ''"></span>
+            <span x-text="wsConnected ? 'Live' : 'Disconnected'"></span>
+          </span>
+        </div>
+      </div>
+
+      <h1 class="text-[24px] font-semibold tracking-tight" x-text="exercise.title"></h1>
+      <p class="text-stone-500 text-[14px] mt-1">Updates appear here as the facilitator releases them. Take your time.</p>
+
+      <!-- State banners -->
+      <div x-show="exercise.state === 'draft'"
+           class="mt-5 rounded-lg p-4 text-[13.5px]" style="background:#fef4e0; color:#8a5a0d;">
+        This exercise hasn't started yet. Wait for the facilitator to begin.
+      </div>
+      <div x-show="exercise.state === 'completed'"
+           class="mt-5 rounded-lg p-4 text-[13.5px]" style="background:#e6eef8; color:#2f5b8a;">
+        This exercise has concluded. Thank you for participating.
+      </div>
+      <div x-show="exercise.state === 'paused'"
+           class="mt-5 rounded-lg p-4 text-[13.5px]" style="background:#fef4e0; color:#8a5a0d;">
+        Exercise is paused. Responses are disabled until the facilitator resumes.
+      </div>
+
+      <!-- Inject feed -->
+      <div x-show="exercise.state === 'active' || exercise.state === 'paused'"
+           class="mt-7 space-y-5">
+
+        <!-- Inject cards — most recent first (index 0) is active -->
+        <template x-for="(inj, idx) in injects" :key="inj.id">
+          <article class="briefing" :class="idx === 0 && inj.state === 'released' ? 'released' : ''">
+            <div class="p-5">
+              <template x-if="idx === 0 && inj.state === 'released'">
+                <div class="flex items-center gap-2 mb-1.5">
+                  <span class="smallcaps" style="color: var(--accent-d);">New brief</span>
+                  <span class="mono text-[11px] text-stone-400"
+                        x-text="(inj.scenario_node_id || '') + ' · ' + fmtTime(inj.released_at)"></span>
+                </div>
+              </template>
+              <template x-if="idx > 0 || inj.state === 'resolved'">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="smallcaps text-stone-500">Earlier · resolved</span>
+                  <span class="mono text-[11px] text-stone-400"
+                        x-text="(inj.scenario_node_id || '') + ' · ' + fmtTime(inj.released_at)"></span>
+                </div>
+              </template>
+
+              <h2 class="font-semibold tracking-tight"
+                  :class="idx === 0 ? 'text-[18px] mt-1' : 'text-[16px]'"
+                  x-text="inj.title"></h2>
+              <p class="text-stone-800 mt-2 leading-relaxed"
+                 :class="idx === 0 ? 'text-[14.5px]' : 'text-[13.5px] text-stone-700'"
+                 x-text="inj.content"></p>
+
+              <!-- Submitted confirmation for resolved injects -->
+              <template x-if="(idx > 0 || inj.state === 'resolved') && submitted[inj.id]">
+                <div class="mt-3 flex items-center gap-2 text-[12.5px] text-stone-500">
+                  <span class="dot" style="background:#3b8e5a"></span>
+                  You submitted a response
+                </div>
+              </template>
+
+              <!-- Observer read-only notice -->
+              <template x-if="isObserver && idx === 0">
+                <p class="mt-3 text-[13px] text-stone-400 italic">Viewing as observer — responses disabled.</p>
+              </template>
+
+              <!-- Response form for active (index 0) inject, non-observer, not yet submitted -->
+              <template x-if="!isObserver && idx === 0 && inj.state === 'released' && !submitted[inj.id]">
+                <div class="mt-5 rounded-md p-4 ring-rule" style="background: #fbf9f2;">
+
+                  <!-- Branch options -->
+                  <template x-if="inj._options && inj._options.length">
+                    <div class="mb-4">
+                      <div class="smallcaps text-stone-500 mb-2">Choose a stance</div>
+                      <div class="space-y-1.5">
+                        <template x-for="opt in inj._options" :key="opt.id">
+                          <label class="flex items-center gap-2.5 text-[13.5px] cursor-pointer">
+                            <input type="radio" :name="'opt_' + inj.id" :value="opt.id"
+                                   x-model="selectedOption[inj.id]"
+                                   :disabled="exercise.state === 'paused'"
+                                   class="accent-stone-700" />
+                            <span x-text="opt.label"></span>
+                          </label>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+
+                  <div class="smallcaps text-stone-500 mb-1.5">Your reasoning</div>
+                  <textarea :id="'resp_' + inj.id" x-model="freeText[inj.id]"
+                            placeholder="Brief the facilitator on how you intend to handle this…"
+                            rows="4"
+                            :disabled="exercise.state === 'paused'"
+                            class="w-full rounded-md ring-rule px-3 py-2 text-[13.5px] resize-none bg-white disabled:opacity-50"></textarea>
+
+                  <div class="flex items-center gap-3 mt-3">
+                    <button @click="submitResponse(inj)"
+                            :disabled="exercise.state === 'paused' || submitting[inj.id] || !freeText[inj.id]"
+                            class="btn btn-primary h-8 px-3.5 text-[13px] disabled:opacity-40">
+                      <span x-text="submitting[inj.id] ? 'Submitting…' : 'Submit response'"></span>
+                    </button>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Submitted confirmation for active inject -->
+              <template x-if="!isObserver && idx === 0 && submitted[inj.id]">
+                <div class="mt-4 flex items-center gap-2 text-[13px]" style="color:#3b8e5a;">
+                  <span class="dot" style="background:#3b8e5a"></span>
+                  Response submitted.
+                </div>
+              </template>
+            </div>
+          </article>
+        </template>
+
+        <!-- Waiting placeholder -->
+        <div x-show="injects.length === 0 || (injects.length > 0 && injects[0].state !== 'released')"
+             class="rounded-md py-6 text-center smallcaps text-stone-400 ring-rule"
+             style="background: var(--paper);">
+          Waiting for the facilitator…
+        </div>
+      </div>
+
+    </div>
+  </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function participantView(exerciseId) {
+  return {
+    loading: true,
+    exercise: null,
+    role: '',
+    injects: [],
+    freeText: {},
+    selectedOption: {},
+    submitting: {},
+    submitted: {},
+    ws: null,
+    wsConnected: false,
+    pingInterval: null,
+
+    get isObserver() { return this.role === 'observer'; },
+
+    async init() {
+      const [me, er, ir] = await Promise.all([
+        apiFetch('/auth/me'),
+        apiFetch(`/exercises/${exerciseId}`),
+        apiFetch(`/exercises/${exerciseId}/injects`),
+      ]);
+      if (me && me.ok) { const d = await me.json(); this.role = d.role; }
+      if (er && er.ok) this.exercise = await er.json();
+      if (ir && ir.ok) {
+        const all = await ir.json();
+        for (const inj of all.filter(i => i.state === 'released' || i.state === 'resolved')) {
+          await this._enrichAndAdd(inj);
+        }
+      }
+      this.loading = false;
+      this.connectWs();
+    },
+
+    async _enrichAndAdd(inj) {
+      inj._options = await this._fetchOptions(inj.scenario_node_id, inj.exercise_id);
+      if (!this.injects.find(i => i.id === inj.id)) this.injects.unshift(inj);
+    },
+
+    async _fetchOptions(nodeId, exId) {
+      if (!nodeId) return [];
+      const r = await apiFetch(`/exercises/${exId}`);
+      if (!r || !r.ok) return [];
+      const ex = await r.json();
+      const sr = await apiFetch(`/scenarios/${ex.scenario_id}`);
+      if (!sr || !sr.ok) return [];
+      const sc = await sr.json();
+      const def = sc.definition || null;
+      if (!def) return [];
+      const node = def.injects.find(n => n.id === nodeId);
+      return node ? node.options : [];
+    },
+
+    connectWs() {
+      const token = localStorage.getItem('dt_token');
+      if (!token) return;
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?token=${token}`);
+
+      this.ws.onopen = () => {
+        this.wsConnected = true;
+        this.pingInterval = setInterval(() => {
+          if (this.ws && this.ws.readyState === WebSocket.OPEN)
+            this.ws.send(JSON.stringify({ type: 'ping' }));
+        }, 30000);
+      };
+
+      this.ws.onclose = () => {
+        this.wsConnected = false;
+        clearInterval(this.pingInterval);
+        setTimeout(() => this.connectWs(), 3000);
+      };
+
+      this.ws.onmessage = async (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'inject_released') {
+          await this._enrichAndAdd(msg.payload);
+        }
+        if (msg.type === 'exercise_state_change') {
+          this.exercise = { ...this.exercise, state: msg.payload.state };
+        }
+      };
+    },
+
+    async submitResponse(inj) {
+      const content = (this.freeText[inj.id] || '').trim();
+      if (!content) return;
+      this.submitting[inj.id] = true;
+      const r = await apiFetch(`/exercises/${exerciseId}/responses`, {
+        method: 'POST',
+        body: JSON.stringify({
+          inject_id: inj.id,
+          content,
+          selected_option: this.selectedOption[inj.id] || null,
+        }),
+      });
+      this.submitting[inj.id] = false;
+      if (r && r.ok) this.submitted[inj.id] = true;
+    },
+
+    fmtTime(s) { return fmtTime(s); },
+  }
+}
+</script>
+{% endblock %}

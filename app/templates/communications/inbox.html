@@ -1,0 +1,339 @@
+{% extends "base.html" %}
+{% block title %}Communications — Deep Thought{% endblock %}
+
+{% block content %}
+<div x-data="commsInbox({{ exercise_id }})" x-init="init()" class="px-8 py-6 max-w-[1240px]">
+
+  <div class="flex items-end justify-between mb-5">
+    <div>
+      <div class="smallcaps text-stone-500">EX-<span x-text="String({{ exercise_id }}).padStart(3,'0')"></span></div>
+      <h1 class="text-[26px] font-semibold tracking-tight leading-tight mt-1">Communications</h1>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="flex items-center gap-1.5 smallcaps"
+            :class="wsConnected ? 'text-stone-400' : 'text-red-400'">
+        <span :class="wsConnected ? 'live-dot' : 'dot bg-red-400'"
+              :style="wsConnected ? 'width:6px;height:6px;' : ''"></span>
+        <span x-text="wsConnected ? 'Live' : 'Disconnected'"></span>
+      </span>
+      <template x-if="!isF">
+        <button @click="showSend = true"
+                class="btn btn-ghost h-8 px-3 text-[13px]">+ Send message</button>
+      </template>
+      <template x-if="isF">
+        <button @click="showCompose = true"
+                class="btn btn-ghost h-8 px-3 text-[13px]">Inject inbound</button>
+      </template>
+    </div>
+  </div>
+
+  <!-- Two-pane layout -->
+  <div class="grid paper ring-rule rounded-lg overflow-hidden"
+       style="grid-template-columns: 340px 1fr; height: calc(100vh - 180px);">
+
+    <!-- Message list -->
+    <div class="border-r rule overflow-y-auto">
+      <div class="px-4 pt-3 pb-2 flex items-center gap-2 border-b rule">
+        <input x-model="commSearch"
+               class="flex-1 bg-transparent text-[13px] outline-none placeholder:text-stone-400"
+               placeholder="Filter messages…" />
+        <span class="smallcaps text-stone-400" x-text="filteredComms.length"></span>
+      </div>
+
+      <div x-show="filteredComms.length === 0"
+           class="px-4 py-8 text-center smallcaps text-stone-400">No messages.</div>
+
+      <template x-for="c in filteredComms" :key="c.id">
+        <div @click="open(c)"
+             class="px-4 py-3 border-b rule cursor-pointer hover:bg-stone-50/70"
+             :class="selected && selected.id === c.id ? 'bg-amber-50/40' : ''">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="dot shrink-0"
+                  :style="c.direction === 'inbound' ? 'background: var(--accent-d)' : 'background:#5b86b8'"></span>
+            <span class="smallcaps truncate"
+                  :class="c.direction === 'inbound' ? 'text-stone-700' : 'text-stone-500'"
+                  x-text="(c.direction === 'inbound' ? 'In · ' : 'Out · ') + (c.external_entity || 'Internal')"></span>
+            <span class="mono text-[10.5px] text-stone-400 ml-auto shrink-0"
+                  x-text="fmtAgo(c.sent_at)"></span>
+          </div>
+          <div class="text-[13.5px] truncate"
+               :class="c.read_by && c.read_by.length ? 'text-stone-600 font-normal' : 'font-medium'"
+               x-text="c.subject"></div>
+          <div class="text-[12px] text-stone-500 truncate mt-0.5" x-text="c.body"></div>
+          <template x-if="c.triggered_by_inject_id">
+            <div class="mono text-[10.5px] text-stone-400 mt-1"
+                 x-text="'triggered by inject #' + c.triggered_by_inject_id"></div>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <!-- Reader pane -->
+    <div class="overflow-y-auto p-8">
+      <template x-if="!selected">
+        <div class="flex items-center justify-center h-full">
+          <p class="smallcaps text-stone-400">Select a message to read.</p>
+        </div>
+      </template>
+
+      <template x-if="selected">
+        <div>
+          <div class="flex items-center gap-2 mb-4">
+            <span class="pill"
+                  :style="selected.direction === 'inbound'
+                    ? 'background: oklch(0.74 0.14 70 / .15); color: var(--accent-d); box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .35);'
+                    : 'background: #e6eef8; color: #2f5b8a; box-shadow: inset 0 0 0 1px #c5d7ec;'">
+              <span class="dot"
+                    :style="selected.direction === 'inbound' ? 'background: var(--accent-d)' : 'background:#5b86b8'"></span>
+              <span x-text="(selected.direction === 'inbound' ? 'Inbound · ' : 'Outbound · ') + (selected.external_entity || 'Internal')"></span>
+            </span>
+            <span class="mono text-[11.5px] text-stone-500"
+                  x-text="'MSG-' + String(selected.id).padStart(3,'0') + (selected.triggered_by_inject_id ? ' · triggered by inject #' + selected.triggered_by_inject_id : '')"></span>
+            <span class="mono text-[11.5px] text-stone-400 ml-auto" x-text="fmtTime(selected.sent_at)"></span>
+          </div>
+
+          <!-- Metadata grid -->
+          <div class="grid gap-x-4 gap-y-2 text-[13px] mb-6"
+               style="grid-template-columns: 80px 1fr;">
+            <div class="smallcaps text-stone-500 pt-0.5"
+                 x-text="selected.direction === 'inbound' ? 'From' : 'To'"></div>
+            <div x-text="selected.external_entity || 'Internal'"></div>
+            <template x-if="selected.visible_to_teams && selected.visible_to_teams.length">
+              <div class="smallcaps text-stone-500 pt-0.5">Visible to</div>
+              <div class="flex flex-wrap gap-1">
+                <template x-for="t in selected.visible_to_teams" :key="t">
+                  <span class="pill mono ring-1 ring-inset text-[10px]"
+                        :class="teamColor(t)" x-text="t"></span>
+                </template>
+              </div>
+            </template>
+          </div>
+
+          <div class="smallcaps text-stone-500 mb-1">Subject</div>
+          <h2 class="text-[20px] font-semibold tracking-tight mb-5" x-text="selected.subject"></h2>
+
+          <article class="text-[14.5px] leading-relaxed text-stone-800 whitespace-pre-wrap"
+                   x-text="selected.body"></article>
+
+          <!-- Participant reply (non-facilitators, inbound messages only) -->
+          <template x-if="!isF && selected.direction === 'inbound'">
+            <div class="mt-7 border-t rule pt-5">
+              <div class="smallcaps text-stone-500 mb-2">Send reply</div>
+              <p class="text-[12.5px] text-stone-500 mb-3">Send an outbound message in response.</p>
+              <button @click="openSendReply(selected)"
+                      class="btn btn-ghost h-8 px-3 text-[13px]">Reply to <span x-text="selected.external_entity || 'sender'"></span></button>
+            </div>
+          </template>
+
+          <!-- Facilitator follow-up -->
+          <template x-if="isF">
+            <div class="mt-7 border-t rule pt-5">
+              <div class="smallcaps text-stone-500 mb-2">Inject follow-up</div>
+              <p class="text-[12.5px] text-stone-500 mb-3">Inject a new inbound message to participants.</p>
+              <button @click="showCompose = true"
+                      class="btn btn-ghost h-8 px-3 text-[13px]">Inject inbound message</button>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Participant send modal (inside x-data scope) -->
+  <div x-show="showSend" x-cloak
+       class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+       @keydown.escape.window="showSend = false">
+    <div class="paper ring-rule rounded-xl w-full max-w-lg p-6 shadow-xl" @click.stop>
+      <h2 class="text-[18px] font-semibold mb-4">Send message</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="block smallcaps text-stone-500 mb-1">To (recipient)</label>
+          <input type="text" x-model="send.external_entity" placeholder="e.g. ICO, NCSC, CEO, Press office"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+        </div>
+        <div>
+          <label class="block smallcaps text-stone-500 mb-1">Subject</label>
+          <input type="text" x-model="send.subject"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+        </div>
+        <div>
+          <label class="block smallcaps text-stone-500 mb-1">Body</label>
+          <textarea x-model="send.body" rows="5"
+                    class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] resize-none bg-white"></textarea>
+        </div>
+      </div>
+      <div class="flex gap-3 mt-5">
+        <button @click="sendComm()"
+                class="btn btn-primary h-9 px-5 text-[13px]">Send</button>
+        <button @click="showSend = false"
+                class="btn btn-ghost h-9 px-4 text-[13px]">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Facilitator inject modal (inside x-data scope) -->
+  <div x-show="showCompose" x-cloak
+       class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+       @keydown.escape.window="showCompose = false">
+    <div class="paper ring-rule rounded-xl w-full max-w-lg p-6 shadow-xl" @click.stop>
+      <h2 class="text-[18px] font-semibold mb-4">Inject inbound message</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="block smallcaps text-stone-500 mb-1">From (external entity)</label>
+          <input type="text" x-model="compose.external_entity" placeholder="e.g. ICO, NCSC, CEO"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+        </div>
+        <div>
+          <label class="block smallcaps text-stone-500 mb-1">Subject</label>
+          <input type="text" x-model="compose.subject"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+        </div>
+        <div>
+          <label class="block smallcaps text-stone-500 mb-1">Body</label>
+          <textarea x-model="compose.body" rows="4"
+                    class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] resize-none bg-white"></textarea>
+        </div>
+        <div>
+          <label class="block smallcaps text-stone-500 mb-1">Visible to teams (blank = all)</label>
+          <input type="text" x-model="compose.visible_to_teams"
+                 placeholder="it_ops, legal  (comma-separated)"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+        </div>
+      </div>
+      <div class="flex gap-3 mt-5">
+        <button @click="injectComm()"
+                class="btn btn-primary h-9 px-5 text-[13px]">Send</button>
+        <button @click="showCompose = false"
+                class="btn btn-ghost h-9 px-4 text-[13px]">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function commsInbox(exerciseId) {
+  return {
+    comms: [],
+    commSearch: '',
+    selected: null,
+    isF: false,
+    showCompose: false,
+    showSend: false,
+    ws: null,
+    wsConnected: false,
+    pingInterval: null,
+    compose: { external_entity: '', subject: '', body: '', visible_to_teams: '' },
+    send: { external_entity: '', subject: '', body: '' },
+
+    get filteredComms() {
+      const q = this.commSearch.toLowerCase();
+      if (!q) return this.comms;
+      return this.comms.filter(c =>
+        c.subject.toLowerCase().includes(q) || c.body.toLowerCase().includes(q)
+      );
+    },
+
+    async init() {
+      const me = await apiFetch('/auth/me');
+      if (me && me.ok) {
+        const d = await me.json();
+        this.isF = d.role === 'facilitator';
+      }
+      await this.load();
+      this.connectWs();
+    },
+
+    async load() {
+      const r = await apiFetch(`/exercises/${exerciseId}/communications`);
+      if (r && r.ok) this.comms = await r.json();
+    },
+
+    async open(c) {
+      const r = await apiFetch(`/exercises/${exerciseId}/communications/${c.id}`);
+      if (r && r.ok) {
+        const updated = await r.json();
+        const idx = this.comms.findIndex(x => x.id === c.id);
+        if (idx !== -1) this.comms[idx] = updated;
+        this.selected = updated;
+      }
+    },
+
+    openSendReply(comm) {
+      this.send.external_entity = comm.external_entity || '';
+      this.send.subject = comm.subject.startsWith('Re: ') ? comm.subject : 'Re: ' + comm.subject;
+      this.send.body = '';
+      this.showSend = true;
+    },
+
+    async sendComm() {
+      const r = await apiFetch(`/exercises/${exerciseId}/communications`, {
+        method: 'POST',
+        body: JSON.stringify({
+          direction: 'outbound',
+          external_entity: this.send.external_entity,
+          subject: this.send.subject,
+          body: this.send.body,
+        }),
+      });
+      if (r && r.ok) {
+        this.showSend = false;
+        this.send = { external_entity: '', subject: '', body: '' };
+      }
+    },
+
+    async injectComm() {
+      const teams = this.compose.visible_to_teams
+        ? this.compose.visible_to_teams.split(',').map(t => t.trim()).filter(Boolean)
+        : null;
+      const r = await apiFetch(`/exercises/${exerciseId}/communications/inject`, {
+        method: 'POST',
+        body: JSON.stringify({
+          external_entity: this.compose.external_entity,
+          subject: this.compose.subject,
+          body: this.compose.body,
+          visible_to_teams: teams,
+        }),
+      });
+      if (r && r.ok) {
+        this.showCompose = false;
+        this.compose = { external_entity: '', subject: '', body: '', visible_to_teams: '' };
+      }
+    },
+
+    connectWs() {
+      const token = localStorage.getItem('dt_token');
+      if (!token) return;
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?token=${token}`);
+
+      this.ws.onopen = () => {
+        this.wsConnected = true;
+        this.pingInterval = setInterval(() => {
+          if (this.ws && this.ws.readyState === WebSocket.OPEN)
+            this.ws.send(JSON.stringify({ type: 'ping' }));
+        }, 30000);
+      };
+
+      this.ws.onclose = () => {
+        this.wsConnected = false;
+        clearInterval(this.pingInterval);
+        setTimeout(() => this.connectWs(), 3000);
+      };
+
+      this.ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'communication_received') {
+          this.comms.unshift(msg.payload);
+        }
+      };
+    },
+
+    fmtAgo(s)  { return fmtAgo(s); },
+    fmtTime(s) { return fmtTime(s); },
+    teamColor(t){ return teamColor(t); },
+  }
+}
+</script>
+{% endblock %}

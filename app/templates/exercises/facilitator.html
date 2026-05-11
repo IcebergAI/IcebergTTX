@@ -1,0 +1,548 @@
+{% extends "base.html" %}
+{% block title %}Facilitate — Deep Thought{% endblock %}
+
+{% block content %}
+<div x-data="facilitatorConsole({{ exercise_id }})" x-init="init()"
+     class="flex flex-col" style="height: 100vh;">
+
+  <!-- Ticker bar -->
+  <div class="h-12 flex items-center gap-4 border-b px-5 shrink-0 rule"
+       style="background: var(--paper);">
+
+    <template x-if="exercise && exercise.state === 'active'">
+      <div class="flex items-center gap-2">
+        <span class="live-dot"></span>
+        <span class="smallcaps" style="color: var(--accent-d);">Live · <span x-text="elapsedStr"></span></span>
+      </div>
+    </template>
+    <template x-if="!exercise || exercise.state !== 'active'">
+      <div class="flex items-center gap-2">
+        <span class="dot" style="background:#9a958a"></span>
+        <span class="smallcaps text-stone-500" x-text="exercise?.state || 'loading'"></span>
+      </div>
+    </template>
+
+    <div class="w-px h-5 border-l rule-2"></div>
+
+    <div class="flex items-center gap-2 min-w-0">
+      <span class="smallcaps text-stone-500">Exercise</span>
+      <span class="text-[13.5px] font-medium truncate" x-text="exercise?.title || '…'"></span>
+      <span class="mono text-[11.5px] text-stone-400"
+            x-text="exercise ? 'EX-' + String(exercise.id).padStart(3,'0') : ''"></span>
+    </div>
+
+    <template x-if="exercise?.current_node_id">
+      <div class="flex items-center gap-2">
+        <div class="w-px h-5 border-l rule-2"></div>
+        <span class="smallcaps text-stone-500">Node</span>
+        <span class="mono text-[12.5px] font-medium" x-text="exercise.current_node_id"></span>
+      </div>
+    </template>
+
+    <div class="ml-auto flex items-center gap-2">
+      <template x-if="wsConnected">
+        <span class="flex items-center gap-1.5 smallcaps text-stone-400">
+          <span class="live-dot" style="width:6px;height:6px;"></span>Live
+        </span>
+      </template>
+      <template x-if="!wsConnected">
+        <span class="smallcaps text-red-400">Disconnected</span>
+      </template>
+      <div class="w-px h-5 border-l rule-2 mx-1"></div>
+      <a :href="exercise ? '/exercises/' + exercise.id + '/communications' : '#'"
+         class="btn btn-ghost h-7 px-3 text-[12.5px]">Communications</a>
+      <button x-show="exercise?.state === 'draft'" @click="transition('start')"
+              class="btn btn-accent h-7 px-3 text-[12.5px]">Start</button>
+      <button x-show="exercise?.state === 'active'" @click="transition('pause')"
+              class="btn btn-ghost h-7 px-3 text-[12.5px]">Pause</button>
+      <button x-show="exercise?.state === 'paused'" @click="transition('resume')"
+              class="btn btn-accent h-7 px-3 text-[12.5px]">Resume</button>
+      <button x-show="exercise?.state === 'active' || exercise?.state === 'paused'"
+              @click="transition('complete')"
+              class="btn btn-ghost h-7 px-3 text-[12.5px]">Complete</button>
+    </div>
+  </div>
+
+  <!-- 3-pane body -->
+  <div class="grid flex-1 min-h-0" style="grid-template-columns: 320px 1fr 320px;">
+
+    <!-- LEFT: inject tree + ad-hoc form -->
+    <div class="border-r rule overflow-y-auto" style="background: var(--paper);">
+      <div class="px-4 pt-4 pb-2 flex items-center justify-between">
+        <div class="smallcaps text-stone-500">Inject queue</div>
+        <span class="mono text-[11px] text-stone-400"
+              x-text="injects.filter(i => i.state !== 'pending').length + '/' + injects.length + ' live'"></span>
+      </div>
+
+      <div class="px-3 pb-3 space-y-2">
+        <template x-for="inj in injects" :key="inj.id">
+          <div class="node"
+               :class="{'current': inj.state === 'released', 'done': inj.state === 'resolved'}">
+            <div class="flex items-start gap-2">
+              <span class="mono text-[10.5px] text-stone-500 w-[52px] shrink-0 pt-0.5"
+                    x-text="inj.scenario_node_id || '—'"></span>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="text-[13px] font-medium" x-text="inj.title"></span>
+                  <span x-show="inj.state === 'released'" class="live-dot"></span>
+                </div>
+                <div class="flex flex-wrap gap-1 mt-1" x-show="inj.target_teams && inj.target_teams.length">
+                  <template x-for="t in (inj.target_teams || [])" :key="t">
+                    <span class="pill mono ring-1 ring-inset text-[10px]"
+                          :class="teamColor(t)" x-text="t"></span>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <!-- Expected actions (from scenario definition) -->
+            <template x-if="nodeMap[inj.scenario_node_id] && nodeMap[inj.scenario_node_id].expected_actions && nodeMap[inj.scenario_node_id].expected_actions.length">
+              <div class="mt-2 pt-2 border-t" style="border-color: var(--rule);">
+                <div class="smallcaps text-stone-400 mb-1">Expected</div>
+                <ul class="space-y-0.5">
+                  <template x-for="act in nodeMap[inj.scenario_node_id].expected_actions" :key="act">
+                    <li class="flex items-start gap-1.5 text-[11.5px] text-stone-600">
+                      <span class="dot mt-1 shrink-0" style="background: var(--accent-d); width:5px; height:5px;"></span>
+                      <span x-text="act"></span>
+                    </li>
+                  </template>
+                </ul>
+              </div>
+            </template>
+
+            <button x-show="inj.state === 'pending'"
+                    @click="releaseInject(inj)"
+                    class="mt-2 btn btn-primary h-6 px-2.5 text-[11.5px] w-full justify-center">
+              Release
+            </button>
+            <div x-show="inj.state === 'released'"
+                 class="mt-2 flex items-center justify-between mono text-[10.5px] text-stone-500">
+              <span x-text="'released ' + fmtTime(inj.released_at)"></span>
+            </div>
+            <div x-show="inj.state === 'resolved'"
+                 class="mt-2 mono text-[10.5px] text-stone-400">resolved</div>
+          </div>
+        </template>
+
+        <div x-show="injects.length === 0 && !loading"
+             class="text-center py-4 smallcaps text-stone-400">No injects yet.</div>
+
+        <!-- Ad-hoc inject -->
+        <div x-show="exercise?.state === 'active' || exercise?.state === 'paused'"
+             class="mt-1 p-3 rounded-lg stripe border border-dashed rule-2">
+          <div class="smallcaps text-stone-500 mb-2">+ Add ad-hoc inject</div>
+          <input type="text" x-model="newTitle" placeholder="Title…"
+                 class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] mb-1.5 bg-white" />
+          <textarea rows="2" x-model="newContent" placeholder="Content…"
+                    class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] resize-none bg-white mb-1.5"></textarea>
+          <div class="flex items-center gap-2">
+            <input type="text" x-model="newTeams" placeholder="teams (comma-separated)"
+                   class="flex-1 rounded-md ring-rule px-2 py-1 text-[12px] bg-white" />
+            <button @click="addInject()"
+                    class="btn btn-primary h-6 px-3 text-[11.5px]">Add</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MIDDLE: response feed -->
+    <div class="overflow-y-auto">
+      <div class="px-6 pt-5 pb-3 flex items-baseline gap-3">
+        <h2 class="text-[18px] font-semibold tracking-tight">Responses</h2>
+        <span class="mono text-[12px] text-stone-500"
+              x-text="responses.length + ' total'"></span>
+        <div class="ml-auto flex items-center gap-2">
+          <button class="smallcaps hover:text-stone-800"
+                  :class="responseFilter === 'all' ? 'text-stone-800' : 'text-stone-400'"
+                  @click="responseFilter = 'all'">All</button>
+          <span class="text-stone-300">·</span>
+          <button class="smallcaps hover:text-stone-800"
+                  :class="responseFilter === 'node' ? 'text-stone-800' : 'text-stone-400'"
+                  @click="responseFilter = 'node'">Current node</button>
+          <span class="text-stone-300">·</span>
+          <button class="smallcaps hover:text-stone-800"
+                  :class="responseFilter === 'flagged' ? 'text-stone-800' : 'text-stone-400'"
+                  @click="responseFilter = 'flagged'">Flagged</button>
+        </div>
+      </div>
+
+      <div class="px-6 pb-6 space-y-3">
+        <div x-show="filteredResponses.length === 0"
+             class="text-center py-8 smallcaps text-stone-400">No responses.</div>
+
+        <template x-for="resp in filteredResponses" :key="resp.id">
+          <div class="paper ring-rule rounded-lg overflow-hidden">
+            <div class="px-4 py-3 flex items-center gap-3 border-b rule">
+              <div class="h-7 w-7 rounded-full grid place-items-center text-[11px] font-semibold shrink-0"
+                   style="background:#e8e4d9; color:#4a4842;"
+                   x-text="('User #' + resp.user_id).slice(0,2)">U</div>
+              <div class="min-w-0">
+                <div class="text-[13.5px] font-medium leading-tight"
+                     x-text="'User #' + resp.user_id"></div>
+                <div class="mono text-[11px] text-stone-500 leading-tight"
+                     x-text="'#' + resp.id + ' · inject #' + resp.inject_id + ' · ' + fmtAgo(resp.submitted_at)"></div>
+              </div>
+              <template x-if="resp.selected_option">
+                <span class="pill mono ml-1" x-text="resp.selected_option"></span>
+              </template>
+            </div>
+            <div class="grid" :style="assessments[resp.id] ? 'grid-template-columns: 1fr 240px' : 'grid-template-columns: 1fr'">
+              <div class="px-4 py-3 text-[13.5px] text-stone-800" x-text="resp.content"></div>
+              <template x-if="assessments[resp.id]">
+                <div class="px-4 py-3 border-l rule" style="background: #fbf9f2;">
+                  <div class="flex items-center gap-2 mb-1.5">
+                    <span class="smallcaps text-stone-500">AI assessment</span>
+                    <span x-show="assessments[resp.id].decision_quality"
+                          class="pill mono"
+                          :style="{
+                            color: assessments[resp.id].decision_quality === 'good' ? '#3b8e5a' : assessments[resp.id].decision_quality === 'adequate' ? '#c08a26' : '#9a3412',
+                            'box-shadow': 'inset 0 0 0 1px ' + (assessments[resp.id].decision_quality === 'good' ? '#3b8e5a33' : assessments[resp.id].decision_quality === 'adequate' ? '#c08a2633' : '#9a341233'),
+                            background: assessments[resp.id].decision_quality === 'good' ? '#3b8e5a10' : assessments[resp.id].decision_quality === 'adequate' ? '#c08a2610' : '#9a341210'
+                          }"
+                          x-text="assessments[resp.id].decision_quality"></span>
+                  </div>
+                  <p class="text-[12.5px] text-stone-700" x-text="assessments[resp.id].assessment_text"></p>
+                </div>
+              </template>
+            </div>
+            <template x-if="resp._next_inject_ids && resp._next_inject_ids.length">
+              <div class="px-4 py-2 border-t rule">
+                <span class="mono text-[11px] text-stone-500"
+                      x-text="'Next: ' + resp._next_inject_ids.join(', ')"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- RIGHT: AI suggestions + participants + export -->
+    <div class="border-l rule overflow-y-auto" style="background: var(--paper);">
+
+      <!-- AI suggestion card -->
+      <template x-if="suggestedInjects.some(s => s.status === 'pending_review')">
+        <div class="m-4 rounded-lg p-3"
+             style="background: oklch(0.74 0.14 70 / .08); box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .35);">
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="smallcaps" style="color: var(--accent-d);">AI suggestions</span>
+            <span class="ml-auto mono text-[10.5px] text-stone-500"
+                  x-text="suggestedInjects.filter(s => s.status === 'pending_review').length + ' pending'"></span>
+          </div>
+          <template x-for="s in suggestedInjects.filter(sg => sg.status === 'pending_review')" :key="s.id">
+            <div class="mb-3 last:mb-0 bg-white/60 rounded-md p-2.5">
+              <div class="text-[13px] font-medium mb-1" x-text="s.title"></div>
+              <p class="text-[12px] text-stone-600 mb-2" x-text="s.content"></p>
+              <div class="flex flex-wrap gap-1 mb-2" x-show="s.target_teams && s.target_teams.length">
+                <template x-for="t in (s.target_teams || [])" :key="t">
+                  <span class="pill mono ring-1 ring-inset text-[10px]"
+                        :class="teamColor(t)" x-text="t"></span>
+                </template>
+              </div>
+              <div class="flex gap-2">
+                <button @click="approveSuggestion(s)"
+                        class="btn btn-accent h-6 px-2.5 text-[11.5px]">Approve &amp; queue</button>
+                <button @click="rejectSuggestion(s)"
+                        class="text-[11.5px] text-stone-500 hover:text-stone-800 ml-auto">Dismiss</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- Participants -->
+      <div class="px-4 pt-3 pb-3">
+        <div class="flex items-center justify-between mb-2">
+          <div class="smallcaps text-stone-500">Participants</div>
+          <span class="mono text-[11px] text-stone-400" x-text="members.length + ' enrolled'"></span>
+        </div>
+
+        <ul class="space-y-1.5 mb-3">
+          <template x-for="m in members" :key="m.user_id">
+            <li class="flex items-center gap-2 text-[13px]">
+              <div class="relative shrink-0">
+                <div class="h-6 w-6 rounded-full grid place-items-center text-[10.5px] font-semibold"
+                     style="background:#e8e4d9; color:#4a4842;">
+                  <template x-if="userFor(m.user_id)">
+                    <span x-text="userFor(m.user_id).display_name.split(' ').map(x=>x[0]).join('').slice(0,2)"></span>
+                  </template>
+                  <template x-if="!userFor(m.user_id)">
+                    <span x-text="'#' + m.user_id"></span>
+                  </template>
+                </div>
+              </div>
+              <div class="min-w-0 flex-1">
+                <template x-if="userFor(m.user_id)">
+                  <span class="truncate" x-text="userFor(m.user_id).display_name"></span>
+                </template>
+                <template x-if="!userFor(m.user_id)">
+                  <span class="text-stone-500" x-text="'User #' + m.user_id"></span>
+                </template>
+              </div>
+              <template x-if="userFor(m.user_id)">
+                <span class="pill mono ring-1 ring-inset text-[10px] shrink-0"
+                      :class="{
+                        'bg-indigo-100/70 text-indigo-700 ring-indigo-200': userFor(m.user_id).role === 'facilitator',
+                        'bg-stone-100 text-stone-600 ring-stone-200': userFor(m.user_id).role === 'participant',
+                        'bg-blue-100/70 text-blue-700 ring-blue-200': userFor(m.user_id).role === 'observer'
+                      }"
+                      x-text="userFor(m.user_id).role"></span>
+              </template>
+              <button @click="removeMember(m.user_id)"
+                      class="text-[11px] text-stone-400 hover:text-red-500 shrink-0">✕</button>
+            </li>
+          </template>
+          <li x-show="members.length === 0" class="text-[13px] text-stone-400">No members yet.</li>
+        </ul>
+
+        <!-- Member search -->
+        <div class="border-t rule pt-3">
+          <input type="text" x-model="memberSearch" placeholder="Add by name or email…"
+                 class="w-full rounded-md ring-rule px-2 py-1 text-[12px] bg-white" />
+          <div x-show="memberSearch.length > 0"
+               class="mt-1 border rule rounded-md bg-white overflow-hidden max-h-40 overflow-y-auto">
+            <template x-for="u in filteredUsers" :key="u.id">
+              <div class="flex items-center gap-2 px-2 py-1.5 text-[12.5px] hover:bg-stone-50">
+                <div class="min-w-0 flex-1">
+                  <span class="font-medium" x-text="u.display_name"></span>
+                  <span class="ml-1 text-stone-400 text-[11px]" x-text="u.role"></span>
+                </div>
+                <button @click="addMember(u.id)"
+                        class="btn btn-primary text-[11px] h-5 px-2 shrink-0">Add</button>
+              </div>
+            </template>
+            <p x-show="filteredUsers.length === 0"
+               class="text-[12px] text-stone-400 text-center py-2">No matching users.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Export -->
+      <div class="px-4 pb-5 border-t rule pt-4">
+        <div class="smallcaps text-stone-500 mb-2">Export</div>
+        <div class="flex flex-col gap-1.5 text-[13px]">
+          <a :href="'/api/exercises/' + (exercise?.id || 0) + '/export'" target="_blank"
+             class="text-stone-700 hover:text-stone-900 inline-flex items-center gap-2">
+            <span class="mono text-stone-400">↓</span>Transcript (JSON)
+          </a>
+          <a :href="'/api/exercises/' + (exercise?.id || 0) + '/export.csv'" target="_blank"
+             class="text-stone-700 hover:text-stone-900 inline-flex items-center gap-2">
+            <span class="mono text-stone-400">↓</span>Responses (CSV)
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function facilitatorConsole(exerciseId) {
+  return {
+    loading: true,
+    exercise: null,
+    members: [],
+    allUsers: [],
+    memberSearch: '',
+    injects: [],
+    responses: [],
+    assessments: {},
+    suggestedInjects: [],
+    nodeMap: {},
+    newTitle: '',
+    newContent: '',
+    newTeams: '',
+    responseFilter: 'all',
+    ws: null,
+    wsConnected: false,
+    pingInterval: null,
+    elapsedStr: '—',
+    elapsedInterval: null,
+
+    get filteredResponses() {
+      if (this.responseFilter === 'node')
+        return this.responses.filter(r => this.injects.find(i => i.id === r.inject_id)?.state === 'released');
+      if (this.responseFilter === 'flagged')
+        return this.responses.filter(r => this.assessments[r.id]?.decision_quality === 'poor');
+      return this.responses;
+    },
+
+    get filteredUsers() {
+      const q = this.memberSearch.toLowerCase();
+      const enrolled = new Set(this.members.map(m => m.user_id));
+      return this.allUsers.filter(u =>
+        !enrolled.has(u.id) &&
+        (u.display_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+      );
+    },
+
+    userFor(userId) {
+      return this.allUsers.find(u => u.id === userId) || null;
+    },
+
+    async init() {
+      await this.load();
+      this.connectWs();
+    },
+
+    async load() {
+      const [er, mr, ir, rr, sir, ur] = await Promise.all([
+        apiFetch(`/exercises/${exerciseId}`),
+        apiFetch(`/exercises/${exerciseId}/members`),
+        apiFetch(`/exercises/${exerciseId}/injects`),
+        apiFetch(`/exercises/${exerciseId}/responses`),
+        apiFetch(`/exercises/${exerciseId}/suggested-injects`),
+        apiFetch('/users'),
+      ]);
+      if (er && er.ok) this.exercise = await er.json();
+      if (mr && mr.ok) this.members = await mr.json();
+      if (ir && ir.ok) this.injects = await ir.json();
+      if (rr && rr.ok) this.responses = await rr.json();
+      if (sir && sir.ok) this.suggestedInjects = await sir.json();
+      if (ur && ur.ok) this.allUsers = await ur.json();
+      if (this.exercise?.scenario_id) {
+        const sr = await apiFetch(`/scenarios/${this.exercise.scenario_id}`);
+        if (sr && sr.ok) {
+          const sc = await sr.json();
+          this.nodeMap = Object.fromEntries((sc.definition?.injects || []).map(n => [n.id, n]));
+        }
+      }
+      this.loading = false;
+      this._startElapsed();
+    },
+
+    _startElapsed() {
+      if (this.elapsedInterval) clearInterval(this.elapsedInterval);
+      if (this.exercise?.started_at) {
+        this.elapsedStr = fmtElapsed(this.exercise.started_at);
+        this.elapsedInterval = setInterval(() => {
+          if (this.exercise?.started_at) this.elapsedStr = fmtElapsed(this.exercise.started_at);
+        }, 10000);
+      }
+    },
+
+    connectWs() {
+      const token = localStorage.getItem('dt_token');
+      if (!token) return;
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?token=${token}`);
+
+      this.ws.onopen = () => {
+        this.wsConnected = true;
+        this.pingInterval = setInterval(() => {
+          if (this.ws && this.ws.readyState === WebSocket.OPEN)
+            this.ws.send(JSON.stringify({ type: 'ping' }));
+        }, 30000);
+      };
+
+      this.ws.onclose = () => {
+        this.wsConnected = false;
+        clearInterval(this.pingInterval);
+        setTimeout(() => this.connectWs(), 3000);
+      };
+
+      this.ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'inject_released') {
+          const idx = this.injects.findIndex(i => i.id === msg.payload.id);
+          if (idx !== -1) this.injects[idx] = msg.payload;
+          else this.injects.push(msg.payload);
+        }
+        if (msg.type === 'response_submitted') {
+          const r = { ...msg.payload.response, _next_inject_ids: msg.payload.next_inject_ids };
+          this.responses.unshift(r);
+        }
+        if (msg.type === 'exercise_state_change') {
+          this.exercise = { ...this.exercise, state: msg.payload.state };
+        }
+        if (msg.type === 'assessment_ready') {
+          this.assessments[msg.payload.response_id] = msg.payload.assessment;
+          this.assessments = { ...this.assessments };
+        }
+        if (msg.type === 'inject_suggested') {
+          this.suggestedInjects.unshift(msg.payload);
+        }
+      };
+    },
+
+    async transition(action) {
+      const r = await apiFetch(`/exercises/${exerciseId}/${action}`, { method: 'POST' });
+      if (r && r.ok) {
+        this.exercise = await r.json();
+        this._startElapsed();
+      }
+    },
+
+    async releaseInject(inj) {
+      const r = await apiFetch(`/exercises/${exerciseId}/injects/${inj.id}/release`, { method: 'POST' });
+      if (r && r.ok) {
+        const updated = await r.json();
+        const idx = this.injects.findIndex(i => i.id === inj.id);
+        if (idx !== -1) this.injects[idx] = updated;
+      }
+    },
+
+    async addInject() {
+      if (!this.newTitle || !this.newContent) return;
+      const teams = this.newTeams
+        ? this.newTeams.split(',').map(t => t.trim()).filter(Boolean)
+        : null;
+      const r = await apiFetch(`/exercises/${exerciseId}/injects`, {
+        method: 'POST',
+        body: JSON.stringify({
+          title: this.newTitle,
+          content: this.newContent,
+          target_teams: teams,
+          sequence_order: this.injects.length,
+        }),
+      });
+      if (r && r.ok) {
+        this.injects.push(await r.json());
+        this.newTitle = ''; this.newContent = ''; this.newTeams = '';
+      }
+    },
+
+    async addMember(userId) {
+      const r = await apiFetch(`/exercises/${exerciseId}/members`, {
+        method: 'POST',
+        body: JSON.stringify({ user_id: userId }),
+      });
+      if (r && r.ok) {
+        this.memberSearch = '';
+        const mr = await apiFetch(`/exercises/${exerciseId}/members`);
+        if (mr && mr.ok) this.members = await mr.json();
+      }
+    },
+
+    async removeMember(userId) {
+      if (!confirm('Remove this member?')) return;
+      await apiFetch(`/exercises/${exerciseId}/members/${userId}`, { method: 'DELETE' });
+      const mr = await apiFetch(`/exercises/${exerciseId}/members`);
+      if (mr && mr.ok) this.members = await mr.json();
+    },
+
+    async approveSuggestion(s) {
+      const r = await apiFetch(`/exercises/${exerciseId}/suggested-injects/${s.id}/approve`, { method: 'POST' });
+      if (r && r.ok) {
+        const newInject = await r.json();
+        this.injects.push(newInject);
+        const idx = this.suggestedInjects.findIndex(x => x.id === s.id);
+        if (idx !== -1) this.suggestedInjects[idx] = { ...s, status: 'approved' };
+      }
+    },
+
+    async rejectSuggestion(s) {
+      const r = await apiFetch(`/exercises/${exerciseId}/suggested-injects/${s.id}/reject`, { method: 'POST' });
+      if (r && r.ok) {
+        const idx = this.suggestedInjects.findIndex(x => x.id === s.id);
+        if (idx !== -1) this.suggestedInjects[idx] = { ...s, status: 'rejected' };
+      }
+    },
+
+    fmtTime(s)  { return fmtTime(s); },
+    fmtAgo(s)   { return fmtAgo(s); },
+    teamColor(t){ return teamColor(t); },
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+{% block title %}{% if scenario_id %}Edit Scenario{% else %}New Scenario{% endif %} — Deep Thought{% endblock %}
+
+{% block content %}
+<div x-data="scenarioEditor({% if scenario_id %}{{ scenario_id }}{% else %}null{% endif %})" x-init="init()"
+     class="px-8 py-6 max-w-[860px]">
+
+  <div class="flex items-end justify-between mb-6">
+    <div>
+      <div class="smallcaps text-stone-500">Scenarios</div>
+      <h1 class="text-[26px] font-semibold tracking-tight leading-tight mt-1"
+          x-text="scenarioId ? 'Edit scenario' : 'New scenario'"></h1>
+    </div>
+    <template x-if="!scenarioId">
+      <label class="btn btn-ghost h-8 px-3 text-[13px] cursor-pointer">
+        Import JSON
+        <input type="file" accept=".json" class="hidden" @change="importFile($event)" />
+      </label>
+    </template>
+  </div>
+
+  <template x-if="error">
+    <div class="mb-4 rounded-md px-4 py-3 text-[13px]" style="background:#fee2e2; color:#b91c1c;"
+         x-text="error"></div>
+  </template>
+  <template x-if="success">
+    <div class="mb-4 rounded-md px-4 py-3 text-[13px]" style="background:#dcfce7; color:#166534;"
+         x-text="success"></div>
+  </template>
+
+  <!-- Metadata -->
+  <div class="paper ring-rule rounded-lg p-5 mb-5 space-y-4">
+    <div class="smallcaps text-stone-500 mb-1">Scenario details</div>
+    <div>
+      <label class="block smallcaps text-stone-500 mb-1">Title <span class="text-red-400">*</span></label>
+      <input type="text" x-model="form.title"
+             class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+    </div>
+    <div>
+      <label class="block smallcaps text-stone-500 mb-1">Description</label>
+      <textarea x-model="form.description" rows="2"
+                class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] resize-none bg-white"></textarea>
+    </div>
+    <div>
+      <label class="block smallcaps text-stone-500 mb-1">
+        Tags
+        <span class="text-stone-400 normal-case font-normal">(comma-separated)</span>
+      </label>
+      <input type="text" x-model="tagsInput" placeholder="cyber, ransomware, GDPR"
+             class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+    </div>
+    <div>
+      <label class="block smallcaps text-stone-500 mb-1">Start inject</label>
+      <select x-model="form.start_inject_id"
+              class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white">
+        <template x-for="inj in form.injects" :key="inj.id">
+          <option :value="inj.id" x-text="inj.id + ' — ' + inj.title"></option>
+        </template>
+      </select>
+    </div>
+    <div>
+      <label class="block smallcaps text-stone-500 mb-1">Debrief notes</label>
+      <textarea x-model="form.debrief_notes" rows="2"
+                class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] resize-none bg-white"></textarea>
+    </div>
+  </div>
+
+  <!-- Participant teams -->
+  <div class="paper ring-rule rounded-lg p-5 mb-5">
+    <div class="flex items-center justify-between mb-3">
+      <div class="smallcaps text-stone-500">Participant teams</div>
+      <button @click="addTeam()" type="button"
+              class="smallcaps text-stone-500 hover:text-stone-800">+ Add team</button>
+    </div>
+    <div class="space-y-2">
+      <template x-for="(team, i) in form.participant_teams" :key="i">
+        <div class="flex gap-2 items-center">
+          <input type="text" x-model="team.id" placeholder="id (e.g. it_ops)"
+                 class="ring-rule rounded-md px-3 py-1.5 text-[13px] bg-white w-40" />
+          <input type="text" x-model="team.label" placeholder="Label"
+                 class="ring-rule rounded-md px-3 py-1.5 text-[13px] bg-white flex-1" />
+          <button @click="removeTeam(i)" type="button"
+                  class="text-red-400 hover:text-red-600 text-[13px]">✕</button>
+        </div>
+      </template>
+      <div x-show="form.participant_teams.length === 0"
+           class="text-[12.5px] text-stone-400">No teams defined — all participants receive all injects.</div>
+    </div>
+  </div>
+
+  <!-- Injects -->
+  <div class="mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <div class="section-title flex-1">
+        <span class="smallcaps text-stone-500">Injects</span>
+      </div>
+      <button @click="addInject()" type="button"
+              class="btn btn-primary h-8 px-3 text-[13px] ml-4">+ Add inject</button>
+    </div>
+
+    <div class="space-y-3">
+      <template x-for="(inj, i) in form.injects" :key="inj._key">
+        <div class="paper ring-rule rounded-lg p-5">
+          <div class="flex items-center justify-between mb-3">
+            <span class="mono text-[11px] text-stone-400" x-text="'#' + (i+1)"></span>
+            <button @click="removeInject(i)" type="button"
+                    class="smallcaps text-red-400 hover:text-red-600">Remove</button>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label class="block smallcaps text-stone-500 mb-1">ID <span class="text-red-400">*</span></label>
+              <input type="text" x-model="inj.id" placeholder="inject_01"
+                     class="w-full ring-rule rounded-md px-2.5 py-1.5 text-[13px] bg-white" />
+            </div>
+            <div>
+              <label class="block smallcaps text-stone-500 mb-1">Title</label>
+              <input type="text" x-model="inj.title"
+                     class="w-full ring-rule rounded-md px-2.5 py-1.5 text-[13px] bg-white" />
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="block smallcaps text-stone-500 mb-1">Content</label>
+            <textarea x-model="inj.content" rows="3"
+                      class="w-full ring-rule rounded-md px-2.5 py-1.5 text-[13px] resize-none bg-white"></textarea>
+          </div>
+
+          <div class="mb-3">
+            <label class="block smallcaps text-stone-500 mb-1">
+              Target teams
+              <span class="text-stone-400 normal-case font-normal">(comma-separated IDs, blank = all)</span>
+            </label>
+            <input type="text" x-model="inj._teamsInput" placeholder="it_ops, legal"
+                   class="w-full ring-rule rounded-md px-2.5 py-1.5 text-[13px] bg-white" />
+          </div>
+
+          <div class="flex items-center gap-2 mb-4">
+            <input type="checkbox" :id="'ftr_' + i" x-model="inj.free_text_response"
+                   class="rounded accent-stone-700" />
+            <label :for="'ftr_' + i" class="text-[13px] text-stone-600">Allow free-text response</label>
+          </div>
+
+          <!-- Options -->
+          <div class="border-t rule pt-4">
+            <div class="flex items-center justify-between mb-2.5">
+              <span class="smallcaps text-stone-500">Branch options</span>
+              <button @click="addOption(inj)" type="button"
+                      class="smallcaps text-stone-500 hover:text-stone-800">+ Add option</button>
+            </div>
+            <div class="space-y-2">
+              <template x-for="(opt, j) in inj.options" :key="j">
+                <div class="flex gap-2 items-center">
+                  <input type="text" x-model="opt.id" placeholder="opt_a"
+                         class="ring-rule rounded-md px-2 py-1 text-[12px] bg-white w-24" />
+                  <input type="text" x-model="opt.label" placeholder="Option label"
+                         class="ring-rule rounded-md px-2 py-1 text-[12px] bg-white flex-1" />
+                  <select x-model="opt.next_inject_id"
+                          class="ring-rule rounded-md px-2 py-1 text-[12px] bg-white w-36">
+                    <option value="">— end —</option>
+                    <template x-for="other in form.injects" :key="other.id">
+                      <option :value="other.id" x-text="other.id"></option>
+                    </template>
+                  </select>
+                  <button @click="inj.options.splice(j, 1)" type="button"
+                          class="text-red-400 hover:text-red-600 text-[12px]">✕</button>
+                </div>
+              </template>
+              <div x-show="inj.options.length === 0"
+                   class="text-[12px] text-stone-400">No options — this inject is a terminal node.</div>
+            </div>
+          </div>
+
+          <!-- Expected actions -->
+          <div class="border-t rule pt-4 mt-4">
+            <div class="flex items-center justify-between mb-2.5">
+              <span class="smallcaps text-stone-500">Expected actions</span>
+              <button @click="inj.expected_actions.push('')" type="button"
+                      class="smallcaps text-stone-500 hover:text-stone-800">+ Add action</button>
+            </div>
+            <div class="space-y-2">
+              <template x-for="(action, k) in inj.expected_actions" :key="k">
+                <div class="flex gap-2 items-center">
+                  <input type="text" x-model="inj.expected_actions[k]"
+                         placeholder="e.g. Notify CISO immediately"
+                         class="ring-rule rounded-md px-2.5 py-1.5 text-[13px] bg-white flex-1" />
+                  <button @click="inj.expected_actions.splice(k, 1)" type="button"
+                          class="text-red-400 hover:text-red-600 text-[12px]">✕</button>
+                </div>
+              </template>
+              <div x-show="inj.expected_actions.length === 0"
+                   class="text-[12px] text-stone-400">No expected actions defined.</div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <div class="flex gap-3 pb-8">
+    <button @click="save()" :disabled="saving" type="button"
+            class="btn btn-primary h-9 px-5 text-[13px] disabled:opacity-50">
+      <span x-text="saving ? 'Saving…' : (scenarioId ? 'Save changes' : 'Create scenario')"></span>
+    </button>
+    <a href="/scenarios" class="btn btn-ghost h-9 px-4 text-[13px]">Cancel</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _keyCounter = 0;
+
+function makeInject() {
+  return {
+    _key: _keyCounter++,
+    id: '', title: '', content: '',
+    _teamsInput: '',
+    sequence_order: 0,
+    options: [],
+    expected_actions: [],
+    free_text_response: true,
+    triggers_communications: [],
+  };
+}
+
+function scenarioEditor(scenarioId) {
+  return {
+    scenarioId,
+    form: {
+      schema_version: '1.0',
+      title: '',
+      description: '',
+      tags: [],
+      participant_teams: [],
+      injects: [],
+      start_inject_id: '',
+      debrief_notes: '',
+    },
+    tagsInput: '',
+    saving: false,
+    error: '',
+    success: '',
+
+    async init() {
+      if (this.scenarioId) {
+        const r = await apiFetch('/scenarios/' + this.scenarioId);
+        if (r && r.ok) {
+          const data = await r.json();
+          const def = data.definition;
+          this.form = {
+            ...def,
+            injects: def.injects.map(inj => ({
+              ...inj,
+              _key: _keyCounter++,
+              _teamsInput: (inj.target_teams || []).join(', '),
+              expected_actions: inj.expected_actions || [],
+            })),
+          };
+          this.tagsInput = (def.tags || []).join(', ');
+        }
+      } else {
+        this.form.injects = [makeInject()];
+        this.form.start_inject_id = this.form.injects[0].id;
+      }
+    },
+
+    async importFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      let def;
+      try { def = JSON.parse(text); } catch { this.error = 'Invalid JSON file.'; return; }
+      this.form = {
+        schema_version: def.schema_version || '1.0',
+        title: def.title || '',
+        description: def.description || '',
+        tags: def.tags || [],
+        participant_teams: def.participant_teams || [],
+        injects: (def.injects || []).map(inj => ({
+          ...inj,
+          _key: _keyCounter++,
+          _teamsInput: (inj.target_teams || []).join(', '),
+          expected_actions: inj.expected_actions || [],
+        })),
+        start_inject_id: def.start_inject_id || '',
+        debrief_notes: def.debrief_notes || '',
+      };
+      this.tagsInput = (def.tags || []).join(', ');
+      this.error = '';
+      event.target.value = '';
+    },
+
+    addInject() {
+      const inj = makeInject();
+      this.form.injects.push(inj);
+      if (!this.form.start_inject_id) this.form.start_inject_id = inj.id;
+    },
+    removeInject(i) { this.form.injects.splice(i, 1); },
+    addOption(inj) { inj.options.push({ id: '', label: '', next_inject_id: null }); },
+    addTeam() { this.form.participant_teams.push({ id: '', label: '' }); },
+    removeTeam(i) { this.form.participant_teams.splice(i, 1); },
+
+    buildPayload() {
+      const injects = this.form.injects.map(inj => ({
+        id: inj.id,
+        title: inj.title,
+        content: inj.content,
+        target_teams: inj._teamsInput.split(',').map(t => t.trim()).filter(Boolean),
+        sequence_order: inj.sequence_order || 0,
+        options: inj.options.map(opt => ({
+          id: opt.id,
+          label: opt.label,
+          next_inject_id: opt.next_inject_id || null,
+        })),
+        free_text_response: inj.free_text_response,
+        triggers_communications: inj.triggers_communications || [],
+        expected_actions: (inj.expected_actions || []).filter(Boolean),
+      }));
+      const validIds = new Set(injects.map(i => i.id).filter(Boolean));
+      const start_inject_id = validIds.has(this.form.start_inject_id)
+        ? this.form.start_inject_id
+        : (injects.find(i => i.id)?.id || '');
+      return { ...this.form, start_inject_id, injects, tags: this.tagsInput.split(',').map(t => t.trim()).filter(Boolean) };
+    },
+
+    async save() {
+      this.error = ''; this.success = ''; this.saving = true;
+      const payload = this.buildPayload();
+      const url = this.scenarioId ? '/scenarios/' + this.scenarioId : '/scenarios';
+      const method = this.scenarioId ? 'PUT' : 'POST';
+      const r = await apiFetch(url, { method, body: JSON.stringify(payload) });
+      this.saving = false;
+      if (r && r.ok) {
+        const data = await r.json();
+        if (!this.scenarioId) {
+          window.location.href = '/scenarios/' + data.id;
+        } else {
+          this.success = 'Saved successfully.';
+        }
+      } else if (r) {
+        const data = await r.json();
+        this.error = data.detail || 'Save failed.';
+      }
+    }
+  }
+}
+</script>
+{% endblock %}

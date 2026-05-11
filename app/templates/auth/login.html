@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Log in — Deep Thought{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center" style="background: var(--bg);">
+  <div x-data="loginForm()" class="paper ring-rule rounded-xl p-8 w-full max-w-sm shadow-sm">
+
+    <div class="flex items-center gap-2.5 mb-7">
+      <div class="h-8 w-8 rounded-md flex items-center justify-center mono text-[13px] font-semibold"
+           style="background: var(--accent); color: #1a1814;">42</div>
+      <div>
+        <div class="text-[15px] font-semibold leading-tight" style="color: var(--ink);">Deep Thought</div>
+        <div class="smallcaps text-stone-500 leading-tight">TTX control</div>
+      </div>
+    </div>
+
+    <h1 class="text-[20px] font-semibold tracking-tight mb-5">Sign in</h1>
+
+    <div x-show="error"
+         class="mb-4 rounded-md px-3 py-2.5 text-[13px]"
+         style="background:#fee2e2; color:#b91c1c;"
+         x-text="error"></div>
+
+    <form @submit.prevent="submit()" class="space-y-3.5">
+      <div>
+        <label class="block smallcaps text-stone-500 mb-1">Email</label>
+        <input type="email" x-model="email" required autocomplete="email"
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300" />
+      </div>
+      <div>
+        <label class="block smallcaps text-stone-500 mb-1">Password</label>
+        <input type="password" x-model="password" required autocomplete="current-password"
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300" />
+      </div>
+      <button type="submit" :disabled="loading"
+              class="btn btn-primary w-full h-9 text-[13.5px] justify-center disabled:opacity-50 mt-1">
+        <span x-text="loading ? 'Signing in…' : 'Sign in'"></span>
+      </button>
+    </form>
+
+    <p class="mt-5 text-[13px] text-center text-stone-500">
+      No account?
+      <a href="/register" class="text-stone-700 font-medium hover:underline">Register</a>
+    </p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function loginForm() {
+  return {
+    email: '', password: '', loading: false, error: '',
+    async submit() {
+      this.loading = true; this.error = '';
+      const resp = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: this.email, password: this.password }),
+      });
+      this.loading = false;
+      if (resp.ok) {
+        const data = await resp.json();
+        localStorage.setItem('dt_token', data.access_token);
+        window.location.href = '/dashboard';
+      } else {
+        this.error = 'Invalid email or password.';
+      }
+    }
+  }
+}
+</script>
+{% endblock %}

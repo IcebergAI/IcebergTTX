@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Scenarios — Deep Thought{% endblock %}
+
+{% block content %}
+<div x-data="scenarioList()" x-init="init()" class="px-8 py-6 max-w-[1240px]">
+
+  <div class="flex items-end justify-between mb-6">
+    <div>
+      <div class="smallcaps text-stone-500">Workspace</div>
+      <h1 class="text-[26px] font-semibold tracking-tight leading-tight mt-1">Scenarios</h1>
+    </div>
+    <div class="flex items-center gap-2" x-show="isF">
+      <template x-if="isF">
+        <label class="btn btn-ghost h-8 px-3 text-[13px] cursor-pointer">
+          Import JSON
+          <input type="file" accept=".json" class="hidden" @change="importFile($event)" />
+        </label>
+      </template>
+      <a href="/scenarios/new" class="btn btn-primary h-8 px-3 text-[13px]">+ New scenario</a>
+    </div>
+  </div>
+
+  <template x-if="importError">
+    <div class="mb-4 rounded-md px-4 py-3 text-[13px]" style="background:#fee2e2; color:#b91c1c;"
+         x-text="importError"></div>
+  </template>
+  <template x-if="importSuccess">
+    <div class="mb-4 rounded-md px-4 py-3 text-[13px]" style="background:#dcfce7; color:#166534;"
+         x-text="importSuccess"></div>
+  </template>
+
+  <div x-show="loading" class="smallcaps text-stone-400 py-8 text-center">Loading…</div>
+
+  <div x-show="!loading" class="paper ring-rule rounded-lg overflow-hidden">
+    <!-- Table header -->
+    <div class="grid gap-x-4 px-5 py-2.5 border-b rule"
+         style="grid-template-columns: 1fr 140px 120px 130px 100px;">
+      <div class="smallcaps text-stone-500">Scenario</div>
+      <div class="smallcaps text-stone-500">Tags</div>
+      <div class="smallcaps text-stone-500 text-right">Injects / branches</div>
+      <div class="smallcaps text-stone-500 text-right">Updated</div>
+      <div class="smallcaps text-stone-500 text-right">Actions</div>
+    </div>
+
+    <template x-if="!loading && scenarios.length === 0">
+      <div class="px-5 py-10 text-center smallcaps text-stone-400">
+        No scenarios yet. <a href="/scenarios/new" class="underline hover:text-stone-700">Create one.</a>
+      </div>
+    </template>
+
+    <template x-for="s in scenarios" :key="s.id">
+      <div class="grid gap-x-4 px-5 py-3.5 items-center border-b rule hover:bg-stone-50/70"
+           style="grid-template-columns: 1fr 140px 120px 130px 100px;">
+
+        <!-- Scenario name + ID -->
+        <div>
+          <a :href="'/scenarios/' + s.id"
+             class="text-[14px] font-medium hover:text-stone-900" x-text="s.title"></a>
+          <div class="mono text-[11px] text-stone-400 mt-0.5"
+               x-text="'SC-' + String(s.id).padStart(3,'0')"></div>
+        </div>
+
+        <!-- Tags -->
+        <div class="flex flex-wrap gap-1">
+          <template x-for="tag in (s.tags || [])" :key="tag">
+            <span class="pill text-[10px] bg-stone-100 text-stone-600" x-text="tag"></span>
+          </template>
+          <span x-show="!s.tags || s.tags.length === 0" class="text-stone-300 text-[12px]">—</span>
+        </div>
+
+        <!-- Injects / branches -->
+        <div class="mono text-[12.5px] text-stone-600 text-right"
+             x-text="(s.definition?.injects?.length || 0) + ' / ' + branchCount(s)"></div>
+
+        <!-- Updated -->
+        <div class="mono text-[12px] text-stone-500 text-right" x-text="fmtAgo(s.updated_at)"></div>
+
+        <!-- Actions -->
+        <div class="flex items-center justify-end gap-3" x-show="isF">
+          <a :href="'/scenarios/' + s.id + '/edit'"
+             class="smallcaps text-stone-400 hover:text-stone-700">Edit</a>
+          <a :href="'/api/scenarios/' + s.id + '/export'" target="_blank"
+             class="smallcaps text-stone-400 hover:text-stone-700">Export</a>
+          <button @click="deleteScenario(s.id)"
+                  class="smallcaps text-red-400 hover:text-red-600">Delete</button>
+        </div>
+        <div x-show="!isF"></div>
+      </div>
+    </template>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function scenarioList() {
+  return {
+    loading: true, scenarios: [], isF: false,
+    importError: '', importSuccess: '',
+
+    async init() {
+      const me = await apiFetch('/auth/me');
+      if (!me) return;
+      const meData = await me.json();
+      this.isF = meData.role === 'facilitator';
+      await this.load();
+    },
+
+    async load() {
+      this.loading = true;
+      const r = await apiFetch('/scenarios');
+      if (r && r.ok) this.scenarios = await r.json();
+      this.loading = false;
+    },
+
+    branchCount(s) {
+      const injects = s.definition?.injects || [];
+      return injects.filter(i => i.options && i.options.length > 1).length;
+    },
+
+    async importFile(event) {
+      this.importError = ''; this.importSuccess = '';
+      const file = event.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      let definition;
+      try {
+        definition = JSON.parse(text);
+      } catch {
+        this.importError = 'Invalid JSON file.';
+        event.target.value = '';
+        return;
+      }
+      const resp = await apiFetch('/scenarios/import', {
+        method: 'POST',
+        body: JSON.stringify({ definition }),
+      });
+      if (resp && resp.ok) {
+        this.importSuccess = 'Scenario imported successfully.';
+        await this.load();
+      } else {
+        const data = resp ? await resp.json() : null;
+        this.importError = (data && data.detail) || 'Import failed.';
+      }
+      event.target.value = '';
+    },
+
+    async deleteScenario(id) {
+      if (!confirm('Delete this scenario?')) return;
+      await apiFetch('/scenarios/' + id, { method: 'DELETE' });
+      await this.load();
+    },
+
+    fmtAgo(s) { return fmtAgo(s); },
+  }
+}
+</script>
+{% endblock %}
