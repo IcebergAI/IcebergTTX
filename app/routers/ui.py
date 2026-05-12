@@ -13,7 +13,11 @@ router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="app/templates")
 
 
-def _optional_user(access_token: Annotated[str | None, Cookie()] = None) -> dict | None:
+def _optional_user(
+    access_token: Annotated[str | None, Cookie()] = None,
+    view_role: Annotated[str | None, Cookie(alias="dt_view_role")] = None,
+    view_team: Annotated[str | None, Cookie(alias="dt_view_team")] = None,
+) -> dict | None:
     """Return a minimal user dict from the cookie without raising on missing token."""
     if not access_token:
         return None
@@ -21,12 +25,29 @@ def _optional_user(access_token: Annotated[str | None, Cookie()] = None) -> dict
         from app.services.auth_service import decode_access_token
 
         payload = decode_access_token(access_token)
-        return {"email": payload.get("sub"), "role": payload.get("role")}
+        actual_role = payload.get("role")
+        role = actual_role
+        if actual_role == "facilitator" and view_role in {"facilitator", "participant", "observer"}:
+            role = view_role
+        return {
+            "email": payload.get("sub"),
+            "role": role,
+            "actual_role": actual_role,
+            "team": view_team,
+        }
     except Exception:
         return None
 
 
 UserContext = Annotated[dict | None, Depends(_optional_user)]
+
+
+def _is_facilitator(user: dict | None) -> bool:
+    return bool(user and user.get("role") == "facilitator")
+
+
+def _is_actual_facilitator(user: dict | None) -> bool:
+    return bool(user and user.get("actual_role", user.get("role")) == "facilitator")
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -61,6 +82,8 @@ def dashboard(request: Request, user: UserContext):
 def scenarios_list(request: Request, user: UserContext):
     if not user:
         return RedirectResponse("/login")
+    if not _is_actual_facilitator(user):
+        return RedirectResponse("/dashboard")
     return templates.TemplateResponse(request, "scenarios/list.html", {"user": user})
 
 
@@ -68,6 +91,8 @@ def scenarios_list(request: Request, user: UserContext):
 def scenario_new(request: Request, user: UserContext):
     if not user:
         return RedirectResponse("/login")
+    if not _is_actual_facilitator(user):
+        return RedirectResponse("/dashboard")
     return templates.TemplateResponse(
         request, "scenarios/editor.html", {"user": user, "scenario_id": None}
     )
@@ -77,6 +102,8 @@ def scenario_new(request: Request, user: UserContext):
 def scenario_detail(scenario_id: int, request: Request, user: UserContext):
     if not user:
         return RedirectResponse("/login")
+    if not _is_actual_facilitator(user):
+        return RedirectResponse("/dashboard")
     return templates.TemplateResponse(
         request, "scenarios/detail.html", {"user": user, "scenario_id": scenario_id}
     )
@@ -86,6 +113,8 @@ def scenario_detail(scenario_id: int, request: Request, user: UserContext):
 def scenario_edit(scenario_id: int, request: Request, user: UserContext):
     if not user:
         return RedirectResponse("/login")
+    if not _is_actual_facilitator(user):
+        return RedirectResponse("/dashboard")
     return templates.TemplateResponse(
         request, "scenarios/editor.html", {"user": user, "scenario_id": scenario_id}
     )
@@ -102,6 +131,8 @@ def exercises_list(request: Request, user: UserContext):
 def exercise_new(request: Request, user: UserContext):
     if not user:
         return RedirectResponse("/login")
+    if not _is_facilitator(user):
+        return RedirectResponse("/dashboard")
     return templates.TemplateResponse(
         request, "exercises/list.html", {"user": user, "show_create": True}
     )
@@ -111,6 +142,8 @@ def exercise_new(request: Request, user: UserContext):
 def exercise_facilitate(exercise_id: int, request: Request, user: UserContext):
     if not user:
         return RedirectResponse("/login")
+    if not _is_facilitator(user):
+        return RedirectResponse("/dashboard")
     return templates.TemplateResponse(
         request, "exercises/facilitator.html", {"user": user, "exercise_id": exercise_id}
     )
@@ -139,3 +172,10 @@ def help_page(request: Request, user: UserContext):
     if not user:
         return RedirectResponse("/login")
     return templates.TemplateResponse(request, "help.html", {"user": user})
+
+
+@router.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, user: UserContext):
+    if not user:
+        return RedirectResponse("/login")
+    return templates.TemplateResponse(request, "settings.html", {"user": user})

@@ -70,6 +70,30 @@ def test_get_me(client: TestClient, facilitator_token: str, facilitator: User):
     data = resp.json()
     assert data["email"] == facilitator.email
     assert data["role"] == "facilitator"
+    assert data["actual_role"] == "facilitator"
+    assert data["can_switch_roles"] is True
+
+
+def test_facilitator_can_preview_participant_role(client: TestClient, facilitator_token: str):
+    client.cookies.set("dt_view_role", "participant")
+    client.cookies.set("dt_view_team", "it_ops")
+    resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {facilitator_token}"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["role"] == "participant"
+    assert data["actual_role"] == "facilitator"
+    assert data["team"] == "it_ops"
+    assert data["can_switch_roles"] is True
+
+
+def test_participant_cannot_preview_facilitator_role(client: TestClient, participant_token: str):
+    client.cookies.set("dt_view_role", "facilitator")
+    resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {participant_token}"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["role"] == "participant"
+    assert data["actual_role"] == "participant"
+    assert data["can_switch_roles"] is False
 
 
 def test_get_me_no_token(client: TestClient):

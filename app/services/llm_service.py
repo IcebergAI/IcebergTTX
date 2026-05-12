@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import anthropic
 
@@ -67,7 +68,7 @@ async def _call(system: str, cached_context: str, user_prompt: str) -> str:
         ],
         extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
     )
-    return msg.content[0].text
+    return cast(Any, msg.content[0]).text
 
 
 async def assess_response(session, response, inject, definition):

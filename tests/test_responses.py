@@ -71,6 +71,53 @@ def test_submit_response_invalid_inject(
     assert r.status_code == 404
 
 
+def test_submit_response_unreleased_inject_forbidden(
+    client: TestClient, participant_token: str, facilitator_token: str, active_exercise: Exercise
+):
+    injects = client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    ).json()
+    inject_id = next(i["id"] for i in injects if i["scenario_node_id"] == "inject_01")
+    r = _submit(client, participant_token, active_exercise.id, inject_id)
+    assert r.status_code == 404
+
+
+def test_submit_response_wrong_team_inject_forbidden(
+    client: TestClient, participant_token: str, facilitator_token: str, active_exercise: Exercise
+):
+    injects = client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    ).json()
+    legal_inject = next(i for i in injects if i["scenario_node_id"] == "inject_02")
+    client.post(
+        f"/api/exercises/{active_exercise.id}/injects/{legal_inject['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    r = _submit(client, participant_token, active_exercise.id, legal_inject["id"])
+    assert r.status_code == 404
+
+
+def test_submit_response_invalid_option_rejected(
+    client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+):
+    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
+    r = _submit(
+        client, participant_token, active_exercise.id, inject_id, selected_option="not_real"
+    )
+    assert r.status_code == 422
+
+
+def test_submit_response_duplicate_rejected(
+    client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+):
+    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
+    assert _submit(client, participant_token, active_exercise.id, inject_id).status_code == 201
+    r = _submit(client, participant_token, active_exercise.id, inject_id, "Second response")
+    assert r.status_code == 409
+
+
 # ── List ──────────────────────────────────────────────────────────────────────
 
 def test_facilitator_sees_all_responses(
@@ -108,11 +155,14 @@ def test_participant_sees_only_own_responses(
         display_name="Other",
         hashed_password=hash_password("pw"),
         role=UserRole.participant,
-        team="legal",
+        team="it_ops",
     )
     session.add(other)
     session.commit()
     session.refresh(other)
+    from app.services.exercise_service import enrol_member
+
+    enrol_member(session, exercise=active_exercise, user_id=other.id)
     other_token = create_access_token(subject=other.email, role=other.role.value)
 
     inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
@@ -163,11 +213,14 @@ def test_participant_cannot_get_other_response(
         display_name="Other2",
         hashed_password=hash_password("pw"),
         role=UserRole.participant,
-        team="legal",
+        team="it_ops",
     )
     session.add(other)
     session.commit()
     session.refresh(other)
+    from app.services.exercise_service import enrol_member
+
+    enrol_member(session, exercise=active_exercise, user_id=other.id)
     other_token = create_access_token(subject=other.email, role=other.role.value)
 
     inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)

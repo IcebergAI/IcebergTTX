@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.dependencies import get_current_user
+from app.dependencies import get_current_actual_user, get_current_user
 from app.models.user import User
 from app.schemas.auth import (
     LoginRequest,
@@ -59,7 +59,7 @@ def get_me(current_user: Annotated[User, Depends(get_current_user)]):
 @router.put("/me", response_model=UserResponse)
 def update_me(
     body: UpdateMeRequest,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_actual_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
     if body.display_name is not None:

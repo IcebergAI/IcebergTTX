@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.dependencies import get_current_user, require_role
+from app.dependencies import get_current_user, require_actual_role
 from app.models.scenario import Scenario
 from app.models.user import User, UserRole
 from app.schemas.scenario_json import ScenarioDefinition
@@ -26,18 +26,22 @@ class _ImportBody(_BaseModel):
 
 router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 
-FacilitatorDep = Annotated[User, Depends(require_role(UserRole.facilitator))]
+FacilitatorDep = Annotated[User, Depends(require_actual_role(UserRole.facilitator))]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
 def _scenario_summary(scenario: Scenario) -> dict:
+    definition = json.loads(scenario.definition)
+    injects = definition.get("injects", [])
     return {
         "id": scenario.id,
         "title": scenario.title,
         "description": scenario.description,
         "version": scenario.version,
         "tags": json.loads(scenario.tags) if scenario.tags else [],
+        "inject_count": len(injects),
+        "branch_count": sum(1 for inj in injects if len(inj.get("options", [])) > 1),
         "created_by": scenario.created_by,
         "created_at": scenario.created_at.isoformat(),
         "updated_at": scenario.updated_at.isoformat(),
@@ -60,7 +64,7 @@ def _get_or_404(session: Session, scenario_id: int) -> Scenario:
 # ── List ──────────────────────────────────────────────────────────────────────
 
 @router.get("")
-def list_scenarios(_: CurrentUserDep, session: SessionDep):
+def list_scenarios(_: FacilitatorDep, session: SessionDep):
     scenarios = session.exec(select(Scenario)).all()
     return [_scenario_summary(s) for s in scenarios]
 
@@ -69,6 +73,7 @@ def list_scenarios(_: CurrentUserDep, session: SessionDep):
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create(body: ScenarioDefinition, current_user: FacilitatorDep, session: SessionDep):
+    assert current_user.id is not None
     scenario = create_scenario(session, definition=body, created_by=current_user.id)
     return _scenario_detail(scenario)
 
@@ -77,6 +82,7 @@ def create(body: ScenarioDefinition, current_user: FacilitatorDep, session: Sess
 
 @router.post("/import", status_code=status.HTTP_201_CREATED)
 def import_scenario(body: _ImportBody, current_user: FacilitatorDep, session: SessionDep):
+    assert current_user.id is not None
     scenario = create_scenario(session, definition=body.definition, created_by=current_user.id)
     return _scenario_detail(scenario)
 
@@ -84,7 +90,7 @@ def import_scenario(body: _ImportBody, current_user: FacilitatorDep, session: Se
 # ── Get ───────────────────────────────────────────────────────────────────────
 
 @router.get("/{scenario_id}")
-def get_scenario(scenario_id: int, _: CurrentUserDep, session: SessionDep):
+def get_scenario(scenario_id: int, _: FacilitatorDep, session: SessionDep):
     return _scenario_detail(_get_or_404(session, scenario_id))
 
 

@@ -23,6 +23,7 @@ from app.routers import (
     injects,
     responses,
     scenarios,
+    settings,
     suggested_injects,
     ui,
     users,
@@ -59,6 +60,7 @@ app.include_router(ui.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(scenarios.router, prefix="/api")
+app.include_router(settings.router, prefix="/api")
 app.include_router(exercises.router, prefix="/api")
 app.include_router(injects.router, prefix="/api")
 app.include_router(responses.router, prefix="/api")

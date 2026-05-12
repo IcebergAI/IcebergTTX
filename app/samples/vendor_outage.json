@@ -1,0 +1,102 @@
+{
+  "schema_version": "1.0",
+  "title": "Critical Vendor Outage",
+  "description": "A short operational resilience scenario about a third-party SaaS outage during peak demand.",
+  "tags": ["sample", "resilience", "vendor"],
+  "metadata": {
+    "author": "Deep Thought",
+    "estimated_duration_minutes": 35
+  },
+  "participant_teams": [
+    { "id": "it_ops", "label": "IT Operations" },
+    { "id": "legal", "label": "Legal" },
+    { "id": "exec", "label": "Executive" },
+    { "id": "comms", "label": "Communications" }
+  ],
+  "injects": [
+    {
+      "id": "vendor_down",
+      "title": "Vendor Portal Unavailable",
+      "content": "A critical vendor portal used by customer support is unavailable. The vendor status page says they are investigating.",
+      "target_teams": ["it_ops"],
+      "sequence_order": 1,
+      "options": [
+        { "id": "invoke_workaround", "label": "Invoke the manual workaround", "next_inject_id": "customer_impact" },
+        { "id": "wait_vendor", "label": "Wait for the vendor update", "next_inject_id": "sla_warning" }
+      ],
+      "expected_actions": [
+        "Confirm scope of outage",
+        "Open vendor escalation ticket",
+        "Assess workaround capacity"
+      ]
+    },
+    {
+      "id": "customer_impact",
+      "title": "Customer Queues Rising",
+      "content": "The workaround is operating but customer wait times are increasing. Communications asks whether to publish a service advisory.",
+      "target_teams": ["comms", "exec"],
+      "sequence_order": 2,
+      "options": [
+        { "id": "publish", "label": "Publish a transparent service advisory", "next_inject_id": "contract_review" },
+        { "id": "hold", "label": "Hold messaging until impact is clearer", "next_inject_id": "social_media" }
+      ],
+      "expected_actions": [
+        "Define customer impact statement",
+        "Set update frequency",
+        "Prioritise high-risk customer cases"
+      ]
+    },
+    {
+      "id": "sla_warning",
+      "title": "SLA Window at Risk",
+      "content": "The vendor says restoration may take several hours. Internal service levels will be missed without workaround activation.",
+      "target_teams": ["it_ops", "exec"],
+      "sequence_order": 3,
+      "options": [
+        { "id": "activate_now", "label": "Activate workaround now", "next_inject_id": "customer_impact" }
+      ],
+      "expected_actions": [
+        "Escalate vendor governance",
+        "Brief executives on SLA exposure",
+        "Activate continuity plan"
+      ]
+    },
+    {
+      "id": "contract_review",
+      "title": "Contract and Reporting Review",
+      "content": "Legal asks for evidence needed to support vendor breach discussions and any customer reporting obligations.",
+      "target_teams": ["legal", "exec"],
+      "sequence_order": 4,
+      "options": [],
+      "expected_actions": [
+        "Preserve outage timeline",
+        "Collect vendor communications",
+        "Map contractual notification duties"
+      ]
+    },
+    {
+      "id": "social_media",
+      "title": "Social Media Complaint",
+      "content": "A high-profile customer posts that your company is hiding a service outage. The post is gaining attention.",
+      "target_teams": ["comms", "exec"],
+      "sequence_order": 5,
+      "options": [],
+      "triggers_communications": [
+        {
+          "external_entity": "Customer success lead",
+          "direction": "inbound",
+          "subject": "VIP account escalation",
+          "body": "The account team needs an approved message for a strategic customer within 15 minutes.",
+          "delay_after_release_seconds": 2
+        }
+      ],
+      "expected_actions": [
+        "Approve public response",
+        "Brief customer-facing teams",
+        "Update executive stakeholder map"
+      ]
+    }
+  ],
+  "start_inject_id": "vendor_down",
+  "debrief_notes": "Focus debrief on vendor escalation, continuity triggers, customer transparency, and evidence capture."
+}

@@ -1,99 +1,55 @@
 {% extends "base.html" %}
-{% block title %}Command center — Deep Thought{% endblock %}
+{% block title %}Home — Deep Thought{% endblock %}
 
 {% block content %}
-<div x-data="dashboard()" x-init="init()" class="px-8 py-6 max-w-[1240px]">
+<div x-data="dashboard()" x-init="init()" class="workspace">
 
-  <div class="flex items-end justify-between mb-6">
+  <div class="page-head">
     <div>
-      <div class="smallcaps text-stone-500">Workspace</div>
-      <h1 class="text-[26px] font-semibold tracking-tight leading-tight mt-1">Command center</h1>
+      <h1 class="page-title">Home</h1>
+      <p class="text-[13.5px] text-stone-500 mt-1">Start from the one exercise that needs attention.</p>
     </div>
-    <div class="flex items-center gap-2" x-show="isF">
-      <a href="/scenarios/new" class="btn btn-ghost h-8 px-3 text-[13px]">Import scenario</a>
-      <a href="/exercises" class="btn btn-primary h-8 px-3 text-[13px]">+ New exercise</a>
+    <div class="flex items-center gap-2" x-show="canManageScenarios">
+      <a href="/scenarios/new" class="btn btn-ghost h-8 px-3 text-[13px]">Scenario</a>
+      <a href="/exercises" class="btn btn-primary h-8 px-3 text-[13px]">New exercise</a>
     </div>
   </div>
 
-  <!-- Live exercise hero card -->
+  <!-- Live exercise focus card -->
   <template x-if="liveExercise">
-    <div class="briefing released rounded-[10px] p-5 mb-7">
-      <div class="flex items-start gap-6">
+    <div class="surface p-5 mb-8">
+      <div class="flex items-center gap-6">
         <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2">
-            <span class="pill bg-st-active"><span class="live-dot"></span>Live</span>
-            <span class="mono text-[11.5px] text-stone-500" x-text="'EX-' + String(liveExercise.id).padStart(2,'0')"></span>
-            <template x-if="liveExercise.current_node_id">
-              <span class="flex items-center gap-1 text-stone-300">
-                <span>·</span>
-                <span class="mono text-[11.5px] text-stone-500" x-text="'node ' + liveExercise.current_node_id"></span>
-              </span>
-            </template>
-          </div>
-          <h2 class="text-[20px] font-semibold mt-2 tracking-tight" x-text="liveExercise.title"></h2>
+          <div class="smallcaps" style="color: var(--accent-d);">Live exercise</div>
+          <h2 class="text-[21px] font-semibold mt-1 tracking-tight" x-text="liveExercise.title"></h2>
           <p class="text-stone-500 text-[13.5px] mt-0.5"
              x-text="(liveExercise.scenario_title || '') + (liveExercise.started_at ? ' · started ' + fmtTime(liveExercise.started_at) : '')"></p>
-
-          <div class="grid grid-cols-4 gap-6 mt-5">
-            <div>
-              <div class="smallcaps text-stone-500">Elapsed</div>
-              <div class="mono text-[22px] mt-0.5" x-text="liveElapsed"></div>
-            </div>
-            <div>
-              <div class="smallcaps text-stone-500">Exercises</div>
-              <div class="mono text-[22px] mt-0.5">
-                <span x-text="exercises.filter(e => e.state === 'active').length"></span>
-                <span class="text-stone-400 text-[15px]" x-text="' / ' + exercises.length"></span>
-              </div>
-            </div>
-            <div>
-              <div class="smallcaps text-stone-500">Scenarios</div>
-              <div class="mono text-[22px] mt-0.5" x-text="scenarios.length"></div>
-            </div>
-            <div>
-              <div class="smallcaps text-stone-500">Paused</div>
-              <div class="mono text-[22px] mt-0.5" x-text="exercises.filter(e => e.state === 'paused').length"></div>
-            </div>
+          <div class="flex items-center gap-4 mt-4 text-[12.5px] text-stone-500">
+            <span><span class="mono text-stone-800" x-text="liveElapsed"></span> elapsed</span>
+            <span x-show="liveExercise.current_node_id">Current node <span class="mono text-stone-800" x-text="liveExercise.current_node_id"></span></span>
           </div>
         </div>
-
-        <div class="w-px self-stretch border-l rule"></div>
-
-        <div class="w-[220px] shrink-0">
-          <div class="smallcaps text-stone-500 mb-2">Recent exercises</div>
-          <div class="space-y-2">
-            <template x-for="ex in exercises.slice(0, 4)" :key="ex.id">
-              <div class="flex items-center gap-2 text-[12.5px]">
-                <span x-html="stateBadge(ex.state)"></span>
-                <span class="truncate text-stone-700" x-text="ex.title"></span>
-              </div>
-            </template>
-          </div>
-          <a :href="'/exercises/' + liveExercise.id + '/facilitate'"
-             class="inline-flex items-center gap-1 mt-4 text-[13px] font-medium"
-             style="color: var(--accent-d);">
-            Open console <span class="mono">→</span>
-          </a>
-        </div>
+        <a :href="isF ? '/exercises/' + liveExercise.id + '/facilitate' : '/exercises/' + liveExercise.id + '/participate'"
+           class="btn btn-primary h-9 px-4 text-[13px] shrink-0">Open</a>
       </div>
     </div>
   </template>
 
   <!-- No live exercise placeholder -->
   <template x-if="!liveExercise && !loading">
-    <div class="ring-rule rounded-[10px] p-5 mb-7 text-center" style="background: var(--paper);">
-      <p class="text-stone-400 text-[13.5px]">No active exercise. <a href="/exercises" class="underline hover:text-stone-700">Start one →</a></p>
+    <div class="surface p-5 mb-8">
+      <p class="text-stone-500 text-[13.5px]">No active exercise. <a href="/exercises" class="underline hover:text-stone-700">Create or open an exercise.</a></p>
     </div>
   </template>
 
   <!-- Two-column: exercises + scenarios -->
-  <div class="grid grid-cols-5 gap-7">
-    <div class="col-span-3">
+  <div class="grid grid-cols-5 gap-6">
+    <div :class="canManageScenarios ? 'col-span-3' : 'col-span-5'">
       <div class="section-title mb-3">
         <h3 class="smallcaps text-stone-500">Exercises</h3>
         <a href="/exercises" class="smallcaps text-stone-400 hover:text-stone-700">View all</a>
       </div>
-      <div class="paper ring-rule rounded-lg divide-y rule overflow-hidden">
+      <div class="surface divide-y rule overflow-hidden">
         <template x-if="loading">
           <div class="px-5 py-4 text-sm text-stone-400">Loading…</div>
         </template>
@@ -103,7 +59,7 @@
           </div>
         </template>
         <template x-for="ex in exercises.slice(0, 5)" :key="ex.id">
-          <div class="px-4 py-3 flex items-center gap-4">
+          <div class="px-4 py-3 flex items-center gap-4 quiet-row">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <span class="text-[14px] font-medium truncate" x-text="ex.title"></span>
@@ -122,23 +78,23 @@
       </div>
     </div>
 
-    <div class="col-span-2">
+    <div class="col-span-2" x-show="canManageScenarios">
       <div class="section-title mb-3">
         <h3 class="smallcaps text-stone-500">Scenario library</h3>
         <a href="/scenarios" class="smallcaps text-stone-400 hover:text-stone-700">View all</a>
       </div>
-      <div class="paper ring-rule rounded-lg divide-y rule overflow-hidden">
+      <div class="surface divide-y rule overflow-hidden">
         <template x-if="!loading && scenarios.length === 0">
           <div class="px-5 py-6 text-center text-stone-400 text-[13px]">
             No scenarios. <a href="/scenarios/new" class="underline hover:text-stone-700">Create one.</a>
           </div>
         </template>
         <template x-for="s in scenarios.slice(0, 5)" :key="s.id">
-          <a :href="'/scenarios/' + s.id" class="block px-4 py-3 hover:bg-stone-50/80">
+          <a :href="'/scenarios/' + s.id" class="block px-4 py-3 quiet-row">
             <div class="text-[13.5px] font-medium truncate" x-text="s.title"></div>
             <div class="flex items-center gap-2 mt-1">
               <span class="mono text-[11px] text-stone-500"
-                    x-text="(s.definition?.injects?.length || 0) + ' injects'"></span>
+                    x-text="(s.inject_count || 0) + ' injects'"></span>
               <span class="mono text-[11px] text-stone-400" x-text="'· ' + fmtAgo(s.updated_at)"></span>
             </div>
           </a>
@@ -158,6 +114,7 @@ function dashboard() {
     scenarios: [],
     exercises: [],
     isF: false,
+    canManageScenarios: false,
     liveElapsedInterval: null,
     liveElapsed: '—',
 
@@ -166,17 +123,20 @@ function dashboard() {
     },
 
     async init() {
-      const [mr, sr, er] = await Promise.all([
+      const [mr, er] = await Promise.all([
         apiFetch('/auth/me'),
-        apiFetch('/scenarios'),
         apiFetch('/exercises'),
       ]);
       if (mr && mr.ok) {
-        const me = await mr.json();
-        this.isF = me.role === 'facilitator';
+        const me = await readJson(mr);
+        this.isF = me?.role === 'facilitator';
+        this.canManageScenarios = me?.actual_role === 'facilitator' || this.isF;
       }
-      if (sr && sr.ok) this.scenarios = await sr.json();
-      if (er && er.ok) this.exercises = await er.json();
+      if (er && er.ok) this.exercises = await readJson(er, []);
+      if (this.canManageScenarios) {
+        const sr = await apiFetch('/scenarios');
+        if (sr && sr.ok) this.scenarios = await readJson(sr, []);
+      }
       this.loading = false;
 
       if (this.liveExercise) {

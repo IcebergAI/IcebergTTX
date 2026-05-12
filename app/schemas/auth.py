@@ -1,18 +1,32 @@
-from pydantic import BaseModel, EmailStr
+import re
+
+from pydantic import BaseModel, field_validator
 
 from app.models.user import UserRole
 
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-class RegisterRequest(BaseModel):
-    email: EmailStr
+
+class EmailMixin(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        email = v.strip().lower()
+        if not EMAIL_RE.match(email):
+            raise ValueError("Enter a valid email address.")
+        return email
+
+
+class RegisterRequest(EmailMixin):
     display_name: str
     password: str
     role: UserRole = UserRole.participant
     team: str | None = None
 
 
-class LoginRequest(BaseModel):
-    email: EmailStr
+class LoginRequest(EmailMixin):
     password: str
 
 
@@ -27,6 +41,9 @@ class UserResponse(BaseModel):
     display_name: str
     role: UserRole
     team: str | None
+    actual_role: UserRole | None = None
+    actual_team: str | None = None
+    can_switch_roles: bool = False
 
     model_config = {"from_attributes": True}
 

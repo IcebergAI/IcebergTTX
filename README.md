@@ -1,6 +1,12 @@
 # Deep Thought
 
+[![CI](https://github.com/richardmhope/deep_thought/actions/workflows/ci.yml/badge.svg)](https://github.com/richardmhope/deep_thought/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.14%2B-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)
+
 A tabletop exercise (TTX) platform for running cyber incident and business resilience scenarios.
+
+![Deep Thought facilitator console](docs/screenshot.png)
 
 ## Features
 
@@ -10,6 +16,8 @@ A tabletop exercise (TTX) platform for running cyber incident and business resil
 - **Simulated communications** — two-pane inbox/outbox for regulatory, press, and executive comms
 - **LLM assessment** — Claude evaluates participant decisions and suggests follow-up injects
 - **Role-based access** — facilitator, participant, and observer roles
+- **Role preview** — facilitators can view the app as a participant or observer without changing accounts
+- **Sample templates** — optional bundled scenarios can be loaded from Settings; the database stays empty by default
 - **Export** — transcript (JSON), responses (CSV), and AI assessments (JSON)
 
 ## Tech Stack
@@ -38,13 +46,13 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-Open [http://localhost:8000](http://localhost:8000). Register a facilitator account, then create a scenario and exercise. In-app help is available at [/help](http://localhost:8000/help).
+Open [http://localhost:8000](http://localhost:8000). Register a facilitator account, then create a scenario and exercise. To try the app quickly, open Settings and load a sample scenario or demo exercise. In-app help is available at [/help](http://localhost:8000/help).
 
 ## Running Tests
 
 ```bash
-pytest                        # all API tests (123)
-pytest tests/ --ignore=tests/test_ui.py   # skip Playwright tests (require live server)
+pytest
+pytest tests/ --ignore=tests/test_ui.py   # skip live Playwright tests
 ```
 
 ## Rebuilding CSS
@@ -67,10 +75,12 @@ app/
 ├── schemas/         # Pydantic request/response schemas
 ├── routers/         # FastAPI routers (one per resource) + ui.py (Jinja2 pages)
 ├── services/        # Business logic (auth, scenario, exercise, inject, response, comms, llm, ws_manager)
+├── samples/         # Bundled quick-start scenario templates (loaded only on demand)
 └── templates/       # Jinja2 HTML templates
     ├── base.html            # Persistent dark sidebar, CSS vars, shared JS helpers
     ├── dashboard.html       # Command center
     ├── help.html            # In-app help & documentation
+    ├── settings.html        # Profile, theme, role preview, and sample loader
     ├── auth/                # login.html, register.html
     ├── scenarios/           # list, detail, editor
     ├── exercises/           # list, facilitator console, participant view

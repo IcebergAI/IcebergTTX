@@ -154,9 +154,11 @@ def draft_exercise_fixture(session: Session, facilitator: User, sample_scenario:
 
 
 @pytest.fixture(name="active_exercise")
-def active_exercise_fixture(session: Session, facilitator: User, sample_scenario: Scenario):
+def active_exercise_fixture(
+    session: Session, facilitator: User, participant: User, sample_scenario: Scenario
+):
     from app.models.exercise import ExerciseState
-    from app.services.exercise_service import create_exercise, transition_state
+    from app.services.exercise_service import create_exercise, enrol_member, transition_state
 
     ex = create_exercise(
         session,
@@ -164,4 +166,5 @@ def active_exercise_fixture(session: Session, facilitator: User, sample_scenario
         title="Active Exercise",
         created_by=facilitator.id,
     )
+    enrol_member(session, exercise=ex, user_id=participant.id)
     return transition_state(session, ex, ExerciseState.active)

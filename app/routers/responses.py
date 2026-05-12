@@ -8,12 +8,15 @@ from sqlmodel import Session, select
 from app.database import get_session
 from app.dependencies import get_current_user, require_role
 from app.models.assessment import ResponseAssessment
-from app.models.exercise import Exercise
+from app.models.exercise import Exercise, ExerciseState
+from app.models.inject import InjectState
 from app.models.response import Response
 from app.models.user import User, UserRole
+from app.services.access_control import require_exercise_access, require_inject_visible
 from app.services.inject_service import get_inject_or_404
 from app.services.llm_service import _assessment_payload, run_llm_pipeline
 from app.services.response_service import broadcast_response_submitted, submit_response
+from app.services.scenario_service import export_definition, get_inject_node
 
 router = APIRouter(prefix="/exercises/{exercise_id}/responses", tags=["responses"])
 
@@ -47,6 +50,7 @@ def list_responses(
     current_user: CurrentUserDep,
     session: SessionDep,
 ):
+    require_exercise_access(session, exercise_id, current_user)
     q = select(Response).where(Response.exercise_id == exercise_id)
     if current_user.role == UserRole.participant:
         q = q.where(Response.user_id == current_user.id)
@@ -60,7 +64,51 @@ async def submit(
     current_user: CurrentUserDep,
     session: SessionDep,
 ):
-    get_inject_or_404(session, exercise_id, body.inject_id)
+    assert current_user.id is not None
+    exercise = require_exercise_access(session, exercise_id, current_user)
+    if current_user.role != UserRole.participant:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only participants can submit responses"
+        )
+    if exercise.state != ExerciseState.active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Responses can only be submitted while the exercise is active",
+        )
+
+    inject = get_inject_or_404(session, exercise_id, body.inject_id)
+    require_inject_visible(inject, current_user)
+    if inject.state != InjectState.released:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Responses can only be submitted to released injects",
+        )
+
+    existing = session.exec(
+        select(Response)
+        .where(Response.exercise_id == exercise_id)
+        .where(Response.inject_id == body.inject_id)
+        .where(Response.user_id == current_user.id)
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Response already submitted for this inject",
+        )
+
+    if body.selected_option is not None:
+        from app.models.scenario import Scenario
+
+        scenario = session.get(Scenario, exercise.scenario_id)
+        node = None
+        if scenario and inject.scenario_node_id is not None:
+            node = get_inject_node(export_definition(scenario), inject.scenario_node_id)
+        if not node or body.selected_option not in {option.id for option in node.options}:
+            raise HTTPException(
+                status_code=422,
+                detail="selected_option is not valid for this inject",
+            )
+
     response, next_ids = submit_response(
         session,
         inject_id=body.inject_id,
@@ -73,6 +121,7 @@ async def submit(
 
     exercise = session.get(Exercise, exercise_id)
     if exercise and exercise.llm_enabled:
+        assert response.id is not None
         asyncio.create_task(
             run_llm_pipeline(response.id, body.inject_id, exercise_id)
         )
@@ -87,6 +136,7 @@ def get_response(
     current_user: CurrentUserDep,
     session: SessionDep,
 ):
+    require_exercise_access(session, exercise_id, current_user)
     r = session.get(Response, response_id)
     if not r or r.exercise_id != exercise_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Response not found")

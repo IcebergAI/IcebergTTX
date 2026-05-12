@@ -13,6 +13,11 @@ from app.models.exercise import Exercise, ExerciseMember, ExerciseState
 from app.models.inject import Inject
 from app.models.response import Response
 from app.models.user import User, UserRole
+from app.services.access_control import (
+    get_exercise_or_404,
+    is_actual_facilitator,
+    require_exercise_access,
+)
 from app.services.exercise_service import (
     create_exercise,
     enrol_member,
@@ -71,21 +76,22 @@ def _member_out(m: ExerciseMember) -> dict:
 
 
 def _get_or_404(session: Session, exercise_id: int) -> Exercise:
-    ex = session.get(Exercise, exercise_id)
-    if not ex:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
-    return ex
+    return get_exercise_or_404(session, exercise_id)
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
 @router.get("")
-def list_exercises(_: CurrentUserDep, session: SessionDep):
-    return [_exercise_out(ex) for ex in session.exec(select(Exercise)).all()]
+def list_exercises(current_user: CurrentUserDep, session: SessionDep):
+    q = select(Exercise)
+    if current_user.role != UserRole.facilitator and not is_actual_facilitator(current_user):
+        q = q.join(ExerciseMember).where(ExerciseMember.user_id == current_user.id)
+    return [_exercise_out(ex) for ex in session.exec(q).all()]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create(body: CreateExerciseRequest, current_user: FacilitatorDep, session: SessionDep):
+    assert current_user.id is not None
     ex = create_exercise(
         session,
         scenario_id=body.scenario_id,
@@ -97,8 +103,8 @@ def create(body: CreateExerciseRequest, current_user: FacilitatorDep, session: S
 
 
 @router.get("/{exercise_id}")
-def get_exercise(exercise_id: int, _: CurrentUserDep, session: SessionDep):
-    return _exercise_out(_get_or_404(session, exercise_id))
+def get_exercise(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
+    return _exercise_out(require_exercise_access(session, exercise_id, current_user))
 
 
 @router.put("/{exercise_id}")
@@ -157,8 +163,8 @@ def complete(exercise_id: int, _: FacilitatorDep, session: SessionDep):
 # ── Members ───────────────────────────────────────────────────────────────────
 
 @router.get("/{exercise_id}/members")
-def list_members(exercise_id: int, _: CurrentUserDep, session: SessionDep):
-    _get_or_404(session, exercise_id)
+def list_members(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
+    require_exercise_access(session, exercise_id, current_user)
     members = session.exec(
         select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id)
     ).all()

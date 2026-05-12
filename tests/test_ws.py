@@ -39,6 +39,26 @@ def test_ws_connect_participant(
     assert msg["type"] == "pong"
 
 
+def test_ws_connect_nonmember_rejected(
+    client: TestClient, session: Session, active_exercise: Exercise
+):
+    other = User(
+        email="ws-nonmember@example.com",
+        display_name="Nonmember",
+        hashed_password=hash_password("pw"),
+        role=UserRole.participant,
+        team="it_ops",
+    )
+    session.add(other)
+    session.commit()
+    session.refresh(other)
+    token = create_access_token(subject=other.email, role=other.role.value)
+
+    with pytest.raises(Exception):
+        with client.websocket_connect(_ws_url(active_exercise.id, token)) as ws:
+            ws.receive_json()
+
+
 # ── Heartbeat ─────────────────────────────────────────────────────────────────
 
 def test_ws_ping_pong(
@@ -78,6 +98,7 @@ def test_ws_receives_inject_released(
     assert msg["type"] == "inject_released"
     assert msg["payload"]["id"] == inject_id
     assert msg["payload"]["state"] == "released"
+    assert "options" in msg["payload"]
 
 
 def test_ws_team_targeted_inject_reaches_team_member(
