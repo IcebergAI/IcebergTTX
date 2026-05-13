@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.models.user import User
+from app.models.user import User, UserRole
+from app.services.access_control import require_exercise_access
 from app.services.auth_service import decode_access_token
 from app.services.ws_manager import manager
 
@@ -20,6 +21,8 @@ async def exercise_ws(
     exercise_id: int,
     session: SessionDep,
     token: str = Query(...),
+    view_role: str | None = Query(default=None),
+    view_team: str | None = Query(default=None),
 ):
     try:
         payload = decode_access_token(token)
@@ -36,6 +39,23 @@ async def exercise_ws(
     if not user or not user.is_active:
         await ws.close(code=4001)
         return
+    if user.role == UserRole.facilitator and view_role is not None:
+        try:
+            effective_role = UserRole(view_role)
+        except ValueError:
+            effective_role = user.role
+        user = user.model_copy(
+            update={
+                "role": effective_role,
+                "team": view_team.strip() if view_team and view_team.strip() else user.team,
+            }
+        )
+    try:
+        require_exercise_access(session, exercise_id, user)
+    except Exception:
+        await ws.close(code=4003)
+        return
+    assert user.id is not None
 
     await manager.connect(
         ws, exercise_id, user_id=user.id, role=user.role.value, team=user.team

@@ -80,6 +80,36 @@ def test_list_injects_participant_allowed(
         headers={"Authorization": f"Bearer {participant_token}"},
     )
     assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_participant_sees_only_released_visible_injects(
+    client: TestClient, participant_token: str, facilitator_token: str, active_exercise: Exercise
+):
+    injects = client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    ).json()
+    it_ops_inject = next(i for i in injects if i["scenario_node_id"] == "inject_01")
+    legal_inject = next(i for i in injects if i["scenario_node_id"] == "inject_02")
+
+    client.post(
+        f"/api/exercises/{active_exercise.id}/injects/{it_ops_inject['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    client.post(
+        f"/api/exercises/{active_exercise.id}/injects/{legal_inject['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+
+    r = client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert r.status_code == 200
+    payload = r.json()
+    assert [i["scenario_node_id"] for i in payload] == ["inject_01"]
+    assert payload[0]["options"][0]["id"] == "opt_a"
 
 
 def test_get_inject(

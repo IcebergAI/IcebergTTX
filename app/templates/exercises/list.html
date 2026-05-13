@@ -2,12 +2,12 @@
 {% block title %}Exercises — Deep Thought{% endblock %}
 
 {% block content %}
-<div x-data="exerciseList()" x-init="init()" class="px-8 py-6 max-w-[1240px]">
+<div x-data="exerciseList()" x-init="init()" class="workspace">
 
-  <div class="flex items-end justify-between mb-6">
+  <div class="page-head">
     <div>
-      <div class="smallcaps text-stone-500">Workspace</div>
-      <h1 class="text-[26px] font-semibold tracking-tight leading-tight mt-1">Exercises</h1>
+      <h1 class="page-title">Exercises</h1>
+      <p class="text-[13.5px] text-stone-500 mt-1">Prepare, run, and review tabletop sessions.</p>
     </div>
     <template x-if="isF">
       <button @click="showCreate = true"
@@ -64,7 +64,7 @@
   <!-- Exercise list -->
   <div x-show="loading" class="smallcaps text-stone-400 py-8 text-center">Loading…</div>
 
-  <div x-show="!loading" class="paper ring-rule rounded-lg overflow-hidden">
+  <div x-show="!loading" class="surface overflow-hidden">
     <template x-if="!loading && exercises.length === 0">
       <div class="px-5 py-10 text-center smallcaps text-stone-400">
         No exercises yet.
@@ -138,21 +138,22 @@ function exerciseList() {
     async init() {
       const me = await apiFetch('/auth/me');
       if (!me) return;
-      const meData = await me.json();
+      const meData = await readJson(me);
+      if (!meData) return;
       this.isF = meData.role === 'facilitator';
 
       const [er, sr] = await Promise.all([
         apiFetch('/exercises'),
-        apiFetch('/scenarios'),
+        this.isF ? apiFetch('/scenarios') : Promise.resolve(null),
       ]);
-      if (er && er.ok) this.exercises = await er.json();
-      if (sr && sr.ok) this.scenarios = await sr.json();
+      if (er && er.ok) this.exercises = await readJson(er, []);
+      if (sr && sr.ok) this.scenarios = await readJson(sr, []);
       this.loading = false;
     },
 
     async load() {
       const r = await apiFetch('/exercises');
-      if (r && r.ok) this.exercises = await r.json();
+      if (r && r.ok) this.exercises = await readJson(r, []);
     },
 
     async createExercise() {

@@ -9,45 +9,18 @@
   <div class="h-12 flex items-center gap-4 border-b px-5 shrink-0 rule"
        style="background: var(--paper);">
 
-    <template x-if="exercise && exercise.state === 'active'">
-      <div class="flex items-center gap-2">
-        <span class="live-dot"></span>
-        <span class="smallcaps" style="color: var(--accent-d);">Live · <span x-text="elapsedStr"></span></span>
-      </div>
-    </template>
-    <template x-if="!exercise || exercise.state !== 'active'">
-      <div class="flex items-center gap-2">
-        <span class="dot" style="background:#9a958a"></span>
-        <span class="smallcaps text-stone-500" x-text="exercise?.state || 'loading'"></span>
-      </div>
-    </template>
-
-    <div class="w-px h-5 border-l rule-2"></div>
-
     <div class="flex items-center gap-2 min-w-0">
-      <span class="smallcaps text-stone-500">Exercise</span>
       <span class="text-[13.5px] font-medium truncate" x-text="exercise?.title || '…'"></span>
       <span class="mono text-[11.5px] text-stone-400"
             x-text="exercise ? 'EX-' + String(exercise.id).padStart(3,'0') : ''"></span>
     </div>
 
-    <template x-if="exercise?.current_node_id">
-      <div class="flex items-center gap-2">
-        <div class="w-px h-5 border-l rule-2"></div>
-        <span class="smallcaps text-stone-500">Node</span>
-        <span class="mono text-[12.5px] font-medium" x-text="exercise.current_node_id"></span>
-      </div>
-    </template>
+    <span class="pill mono" x-text="exercise?.state || 'loading'"></span>
+    <span x-show="exercise?.state === 'active'" class="mono text-[12px] text-stone-500" x-text="elapsedStr"></span>
 
     <div class="ml-auto flex items-center gap-2">
-      <template x-if="wsConnected">
-        <span class="flex items-center gap-1.5 smallcaps text-stone-400">
-          <span class="live-dot" style="width:6px;height:6px;"></span>Live
-        </span>
-      </template>
-      <template x-if="!wsConnected">
-        <span class="smallcaps text-red-400">Disconnected</span>
-      </template>
+      <span class="smallcaps" :class="wsConnected ? 'text-stone-400' : 'text-red-400'"
+            x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
       <div class="w-px h-5 border-l rule-2 mx-1"></div>
       <a :href="exercise ? '/exercises/' + exercise.id + '/communications' : '#'"
          class="btn btn-ghost h-7 px-3 text-[12.5px]">Communications</a>
@@ -64,12 +37,15 @@
   </div>
 
   <!-- 3-pane body -->
-  <div class="grid flex-1 min-h-0" style="grid-template-columns: 320px 1fr 320px;">
+  <div class="grid flex-1 min-h-0" style="grid-template-columns: minmax(280px, 300px) 1fr minmax(280px, 300px);">
 
     <!-- LEFT: inject tree + ad-hoc form -->
     <div class="border-r rule overflow-y-auto" style="background: var(--paper);">
       <div class="px-4 pt-4 pb-2 flex items-center justify-between">
-        <div class="smallcaps text-stone-500">Inject queue</div>
+        <div>
+          <div class="smallcaps text-stone-500">Injects</div>
+          <div class="text-[12px] text-stone-400 mt-0.5">Release one item at a time.</div>
+        </div>
         <span class="mono text-[11px] text-stone-400"
               x-text="injects.filter(i => i.state !== 'pending').length + '/' + injects.length + ' live'"></span>
       </div>
@@ -79,7 +55,8 @@
           <div class="node"
                :class="{'current': inj.state === 'released', 'done': inj.state === 'resolved'}">
             <div class="flex items-start gap-2">
-              <span class="mono text-[10.5px] text-stone-500 w-[52px] shrink-0 pt-0.5"
+              <span class="mono text-[10.5px] text-stone-400 w-[52px] shrink-0 pt-0.5 truncate"
+                    :title="inj.scenario_node_id || '—'"
                     x-text="inj.scenario_node_id || '—'"></span>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5 flex-wrap">
@@ -96,7 +73,7 @@
             </div>
 
             <!-- Expected actions (from scenario definition) -->
-            <template x-if="nodeMap[inj.scenario_node_id] && nodeMap[inj.scenario_node_id].expected_actions && nodeMap[inj.scenario_node_id].expected_actions.length">
+            <template x-if="inj.state === 'released' && nodeMap[inj.scenario_node_id] && nodeMap[inj.scenario_node_id].expected_actions && nodeMap[inj.scenario_node_id].expected_actions.length">
               <div class="mt-2 pt-2 border-t" style="border-color: var(--rule);">
                 <div class="smallcaps text-stone-400 mb-1">Expected</div>
                 <ul class="space-y-0.5">
@@ -155,11 +132,11 @@
           <button class="smallcaps hover:text-stone-800"
                   :class="responseFilter === 'all' ? 'text-stone-800' : 'text-stone-400'"
                   @click="responseFilter = 'all'">All</button>
-          <span class="text-stone-300">·</span>
+          <span class="text-stone-300">/</span>
           <button class="smallcaps hover:text-stone-800"
                   :class="responseFilter === 'node' ? 'text-stone-800' : 'text-stone-400'"
                   @click="responseFilter = 'node'">Current node</button>
-          <span class="text-stone-300">·</span>
+          <span class="text-stone-300">/</span>
           <button class="smallcaps hover:text-stone-800"
                   :class="responseFilter === 'flagged' ? 'text-stone-800' : 'text-stone-400'"
                   @click="responseFilter = 'flagged'">Flagged</button>
@@ -171,7 +148,7 @@
              class="text-center py-8 smallcaps text-stone-400">No responses.</div>
 
         <template x-for="resp in filteredResponses" :key="resp.id">
-          <div class="paper ring-rule rounded-lg overflow-hidden">
+          <div class="surface overflow-hidden">
             <div class="px-4 py-3 flex items-center gap-3 border-b rule">
               <div class="h-7 w-7 rounded-full grid place-items-center text-[11px] font-semibold shrink-0"
                    style="background:#e8e4d9; color:#4a4842;"
@@ -250,7 +227,7 @@
       </template>
 
       <!-- Participants -->
-      <div class="px-4 pt-3 pb-3">
+      <div class="px-4 pt-4 pb-3">
         <div class="flex items-center justify-between mb-2">
           <div class="smallcaps text-stone-500">Participants</div>
           <span class="mono text-[11px] text-stone-400" x-text="members.length + ' enrolled'"></span>

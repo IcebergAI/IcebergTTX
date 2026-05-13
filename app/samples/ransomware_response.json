@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "title": "Ransomware Response Quick Start",
+  "description": "A compact tabletop scenario for practising first-hour ransomware decisions.",
+  "tags": ["sample", "cyber", "ransomware"],
+  "metadata": {
+    "author": "Deep Thought",
+    "estimated_duration_minutes": 45
+  },
+  "participant_teams": [
+    { "id": "it_ops", "label": "IT Operations" },
+    { "id": "legal", "label": "Legal" },
+    { "id": "exec", "label": "Executive" },
+    { "id": "comms", "label": "Communications" }
+  ],
+  "injects": [
+    {
+      "id": "initial_alert",
+      "title": "Multiple Workstations Locked",
+      "content": "Service desk reports encrypted files and ransom notes on several finance workstations. Shared drives are intermittently unavailable.",
+      "target_teams": ["it_ops"],
+      "sequence_order": 1,
+      "options": [
+        { "id": "isolate", "label": "Isolate affected systems and preserve evidence", "next_inject_id": "containment" },
+        { "id": "monitor", "label": "Keep monitoring while collecting more detail", "next_inject_id": "spread" }
+      ],
+      "expected_actions": [
+        "Declare a security incident",
+        "Isolate affected endpoints",
+        "Preserve volatile evidence",
+        "Notify the incident lead"
+      ]
+    },
+    {
+      "id": "containment",
+      "title": "Containment Window",
+      "content": "Network telemetry suggests the ransomware has not reached production servers. The business wants a recovery estimate before noon.",
+      "target_teams": ["it_ops", "exec"],
+      "sequence_order": 2,
+      "options": [
+        { "id": "restore", "label": "Start restore validation from offline backups", "next_inject_id": "regulator" },
+        { "id": "delay", "label": "Delay recovery until forensics are complete", "next_inject_id": "pressure" }
+      ],
+      "expected_actions": [
+        "Confirm backup integrity",
+        "Set recovery priorities",
+        "Define executive update cadence"
+      ]
+    },
+    {
+      "id": "spread",
+      "title": "Lateral Movement Confirmed",
+      "content": "Additional servers begin showing encryption activity. The attacker claims to have copied customer records.",
+      "target_teams": ["it_ops", "legal", "exec"],
+      "sequence_order": 3,
+      "options": [
+        { "id": "crisis", "label": "Move to crisis footing and notify legal", "next_inject_id": "regulator" }
+      ],
+      "expected_actions": [
+        "Escalate to crisis management",
+        "Review notification thresholds",
+        "Segment critical systems"
+      ]
+    },
+    {
+      "id": "regulator",
+      "title": "Notification Decision",
+      "content": "Legal asks whether the available evidence meets the threshold for regulator notification. Communications needs approved holding lines.",
+      "target_teams": ["legal", "comms", "exec"],
+      "sequence_order": 4,
+      "options": [],
+      "triggers_communications": [
+        {
+          "external_entity": "Media desk",
+          "direction": "inbound",
+          "subject": "Request for comment",
+          "body": "We are hearing reports of a cyber incident affecting your customer portal. Can you confirm?",
+          "delay_after_release_seconds": 2
+        }
+      ],
+      "expected_actions": [
+        "Document notification rationale",
+        "Prepare regulator and customer messaging",
+        "Approve external holding statement"
+      ]
+    },
+    {
+      "id": "pressure",
+      "title": "Business Pressure Builds",
+      "content": "Finance cannot process payments. The CEO asks whether paying the ransom would speed recovery.",
+      "target_teams": ["exec", "legal"],
+      "sequence_order": 5,
+      "options": [],
+      "expected_actions": [
+        "Assess ransom legal constraints",
+        "Compare payment risk against recovery options",
+        "Record executive decision rationale"
+      ]
+    }
+  ],
+  "start_inject_id": "initial_alert",
+  "debrief_notes": "Focus debrief on incident declaration, containment speed, notification thresholds, and executive decision quality."
+}

@@ -2,18 +2,16 @@
 {% block title %}Communications — Deep Thought{% endblock %}
 
 {% block content %}
-<div x-data="commsInbox({{ exercise_id }})" x-init="init()" class="px-8 py-6 max-w-[1240px]">
+<div x-data="commsInbox({{ exercise_id }})" x-init="init()" class="workspace">
 
-  <div class="flex items-end justify-between mb-5">
+  <div class="page-head">
     <div>
-      <div class="smallcaps text-stone-500">EX-<span x-text="String({{ exercise_id }}).padStart(3,'0')"></span></div>
-      <h1 class="text-[26px] font-semibold tracking-tight leading-tight mt-1">Communications</h1>
+      <h1 class="page-title">Communications</h1>
+      <p class="text-[13.5px] text-stone-500 mt-1">Messages that shape the exercise narrative.</p>
     </div>
     <div class="flex items-center gap-2">
       <span class="flex items-center gap-1.5 smallcaps"
             :class="wsConnected ? 'text-stone-400' : 'text-red-400'">
-        <span :class="wsConnected ? 'live-dot' : 'dot bg-red-400'"
-              :style="wsConnected ? 'width:6px;height:6px;' : ''"></span>
         <span x-text="wsConnected ? 'Live' : 'Disconnected'"></span>
       </span>
       <template x-if="!isF">
@@ -28,7 +26,7 @@
   </div>
 
   <!-- Two-pane layout -->
-  <div class="grid paper ring-rule rounded-lg overflow-hidden"
+  <div class="grid surface overflow-hidden"
        style="grid-template-columns: 340px 1fr; height: calc(100vh - 180px);">
 
     <!-- Message list -->

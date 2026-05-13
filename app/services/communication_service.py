@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Any, cast
 
 from sqlmodel import Session, select
 
@@ -59,7 +60,7 @@ def list_communications(
     comms = session.exec(
         select(Communication)
         .where(Communication.exercise_id == exercise_id)
-        .order_by(Communication.sent_at)
+        .order_by(cast(Any, Communication.sent_at))
     ).all()
 
     if user_team is None:
@@ -111,6 +112,7 @@ def schedule_triggered_comms(
     trigger_comms: list,  # list[TriggerComm] from scenario definition
 ) -> None:
     """Fire asyncio tasks to create each triggered communication after its delay."""
+    assert inject.id is not None
     for tc in trigger_comms:
         asyncio.create_task(
             _delayed_comm(

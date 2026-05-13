@@ -8,6 +8,7 @@ from app.database import get_session
 from app.dependencies import get_current_user, require_role
 from app.models.communication import CommDirection, Communication
 from app.models.user import User, UserRole
+from app.services.access_control import require_exercise_access
 from app.services.communication_service import (
     broadcast_communication,
     comm_payload,
@@ -46,8 +47,19 @@ def _get_comm_or_404(session: Session, exercise_id: int, comm_id: int) -> Commun
     return c
 
 
+def _comm_visible_to_user(comm: Communication, user: User) -> bool:
+    if user.role in (UserRole.facilitator, UserRole.observer):
+        return True
+    if not comm.visible_to_teams:
+        return True
+    import json
+
+    return user.team in json.loads(comm.visible_to_teams)
+
+
 @router.get("")
 def list_comms(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
+    require_exercise_access(session, exercise_id, current_user)
     team = current_user.team if current_user.role == UserRole.participant else None
     return [comm_payload(c) for c in list_communications(session, exercise_id, user_team=team)]
 
@@ -59,6 +71,12 @@ async def send_comm(
     current_user: CurrentUserDep,
     session: SessionDep,
 ):
+    require_exercise_access(session, exercise_id, current_user)
+    if current_user.role != UserRole.participant:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only participants can send outbound communications",
+        )
     comm = create_communication(
         session,
         exercise_id=exercise_id,
@@ -80,6 +98,7 @@ async def inject_comm(
     _: FacilitatorDep,
     session: SessionDep,
 ):
+    require_exercise_access(session, exercise_id, _)
     """Facilitator injects a simulated inbound message (e.g. from ICO, press)."""
     comm = create_communication(
         session,
@@ -101,6 +120,10 @@ def get_comm(
     current_user: CurrentUserDep,
     session: SessionDep,
 ):
+    assert current_user.id is not None
+    require_exercise_access(session, exercise_id, current_user)
     c = _get_comm_or_404(session, exercise_id, comm_id)
+    if not _comm_visible_to_user(c, current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Communication not found")
     updated = mark_read(session, c, current_user.id)
     return comm_payload(updated)

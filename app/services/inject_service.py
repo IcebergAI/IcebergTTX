@@ -58,7 +58,7 @@ async def release_inject(
     session.commit()
     session.refresh(inject)
 
-    await _broadcast_inject_released(inject)
+    await _broadcast_inject_released(session, inject)
     await _trigger_communications(session, inject)
     return inject
 
@@ -86,7 +86,7 @@ async def _trigger_communications(session: Session, inject: Inject) -> None:
         schedule_triggered_comms(session, inject, node.triggers_communications)
 
 
-async def _broadcast_inject_released(inject: Inject) -> None:
+async def _broadcast_inject_released(session: Session, inject: Inject) -> None:
     from app.services.ws_manager import manager
 
     target_teams: list[str] | None = (
@@ -96,7 +96,7 @@ async def _broadcast_inject_released(inject: Inject) -> None:
         "type": "inject_released",
         "exercise_id": inject.exercise_id,
         "timestamp": datetime.now(UTC).isoformat(),
-        "payload": _inject_payload(inject),
+        "payload": _inject_payload(session, inject),
     }
 
     if target_teams:
@@ -105,7 +105,29 @@ async def _broadcast_inject_released(inject: Inject) -> None:
         await manager.broadcast_to_exercise(inject.exercise_id, message)
 
 
-def _inject_payload(inject: Inject) -> dict:
+def _inject_options(session: Session, inject: Inject) -> list[dict]:
+    if not inject.scenario_node_id:
+        return []
+    from app.models.exercise import Exercise
+    from app.models.scenario import Scenario
+    from app.services.scenario_service import export_definition, get_inject_node
+
+    exercise = session.get(Exercise, inject.exercise_id)
+    if not exercise:
+        return []
+    scenario = session.get(Scenario, exercise.scenario_id)
+    if not scenario:
+        return []
+    node = get_inject_node(export_definition(scenario), inject.scenario_node_id)
+    if not node:
+        return []
+    return [
+        {"id": option.id, "label": option.label, "next_inject_id": option.next_inject_id}
+        for option in node.options
+    ]
+
+
+def _inject_payload(session: Session, inject: Inject) -> dict:
     return {
         "id": inject.id,
         "exercise_id": inject.exercise_id,
@@ -117,6 +139,7 @@ def _inject_payload(inject: Inject) -> dict:
         "state": inject.state,
         "released_at": inject.released_at.isoformat() if inject.released_at else None,
         "released_by": inject.released_by,
+        "options": _inject_options(session, inject),
     }
 
 

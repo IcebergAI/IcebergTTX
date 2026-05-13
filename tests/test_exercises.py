@@ -63,6 +63,31 @@ def test_list_exercises_participant_allowed(
 ):
     r = client.get("/api/exercises", headers={"Authorization": f"Bearer {participant_token}"})
     assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_participant_sees_enrolled_exercise(
+    client: TestClient, participant_token: str, active_exercise: Exercise
+):
+    r = client.get("/api/exercises", headers={"Authorization": f"Bearer {participant_token}"})
+    assert r.status_code == 200
+    assert [ex["id"] for ex in r.json()] == [active_exercise.id]
+
+
+def test_facilitator_preview_participant_still_lists_exercises_for_testing(
+    client: TestClient,
+    facilitator_token: str,
+    draft_exercise: Exercise,
+    active_exercise: Exercise,
+):
+    assert draft_exercise.id is not None
+    assert active_exercise.id is not None
+    client.cookies.set("dt_view_role", "participant")
+    r = client.get("/api/exercises", headers={"Authorization": f"Bearer {facilitator_token}"})
+    assert r.status_code == 200
+    ids = {ex["id"] for ex in r.json()}
+    assert draft_exercise.id in ids
+    assert active_exercise.id in ids
 
 
 def test_get_exercise(client: TestClient, facilitator_token: str, draft_exercise):
@@ -72,6 +97,16 @@ def test_get_exercise(client: TestClient, facilitator_token: str, draft_exercise
     )
     assert r.status_code == 200
     assert r.json()["id"] == draft_exercise.id
+
+
+def test_get_exercise_participant_not_enrolled_forbidden(
+    client: TestClient, participant_token: str, draft_exercise
+):
+    r = client.get(
+        f"/api/exercises/{draft_exercise.id}",
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert r.status_code == 403
 
 
 def test_get_exercise_not_found(client: TestClient, facilitator_token: str):

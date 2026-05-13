@@ -1,5 +1,3 @@
-import json
-
 from fastapi.testclient import TestClient
 
 from app.models.scenario import Scenario
@@ -29,6 +27,11 @@ def test_list_scenarios(client: TestClient, facilitator_token: str, sample_scena
 def test_list_requires_auth(client: TestClient):
     resp = client.get("/api/scenarios")
     assert resp.status_code == 401
+
+
+def test_list_requires_facilitator(client: TestClient, participant_token: str):
+    resp = client.get("/api/scenarios", headers=_headers(participant_token))
+    assert resp.status_code == 403
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
@@ -70,6 +73,13 @@ def test_get_scenario_not_found(client: TestClient, facilitator_token: str):
     assert resp.status_code == 404
 
 
+def test_get_scenario_requires_facilitator(
+    client: TestClient, participant_token: str, sample_scenario: Scenario
+):
+    resp = client.get(f"/api/scenarios/{sample_scenario.id}", headers=_headers(participant_token))
+    assert resp.status_code == 403
+
+
 # ── Update ────────────────────────────────────────────────────────────────────
 
 def test_update_scenario(
@@ -91,7 +101,9 @@ def test_update_scenario(
 # ── Delete ────────────────────────────────────────────────────────────────────
 
 def test_delete_scenario(client: TestClient, facilitator_token: str, sample_scenario: Scenario):
-    resp = client.delete(f"/api/scenarios/{sample_scenario.id}", headers=_headers(facilitator_token))
+    resp = client.delete(
+        f"/api/scenarios/{sample_scenario.id}", headers=_headers(facilitator_token)
+    )
     assert resp.status_code == 204
     resp2 = client.get(f"/api/scenarios/{sample_scenario.id}", headers=_headers(facilitator_token))
     assert resp2.status_code == 404

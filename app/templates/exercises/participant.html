@@ -8,7 +8,7 @@
   </div>
 
   <template x-if="!loading && exercise">
-    <div class="max-w-[760px] mx-auto px-8 py-8">
+    <div class="max-w-[720px] mx-auto px-8 py-8">
 
       <!-- Header -->
       <div class="flex items-center gap-3 mb-1">
@@ -36,15 +36,13 @@
              class="text-[12.5px] text-stone-500 hover:text-stone-800">Communications</a>
           <span class="flex items-center gap-1.5 smallcaps"
                 :class="wsConnected ? 'text-stone-400' : 'text-red-400'">
-            <span :class="wsConnected ? 'live-dot' : 'dot bg-red-400'"
-                  :style="wsConnected ? 'width:6px;height:6px;' : ''"></span>
-            <span x-text="wsConnected ? 'Live' : 'Disconnected'"></span>
+            <span x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
           </span>
         </div>
       </div>
 
       <h1 class="text-[24px] font-semibold tracking-tight" x-text="exercise.title"></h1>
-      <p class="text-stone-500 text-[14px] mt-1">Updates appear here as the facilitator releases them. Take your time.</p>
+      <p class="text-stone-500 text-[14px] mt-1">Respond to the latest brief when your team is ready.</p>
 
       <!-- State banners -->
       <div x-show="exercise.state === 'draft'"
@@ -70,14 +68,14 @@
             <div class="p-5">
               <template x-if="idx === 0 && inj.state === 'released'">
                 <div class="flex items-center gap-2 mb-1.5">
-                  <span class="smallcaps" style="color: var(--accent-d);">New brief</span>
+                  <span class="smallcaps" style="color: var(--accent-d);">Current brief</span>
                   <span class="mono text-[11px] text-stone-400"
                         x-text="(inj.scenario_node_id || '') + ' · ' + fmtTime(inj.released_at)"></span>
                 </div>
               </template>
               <template x-if="idx > 0 || inj.state === 'resolved'">
                 <div class="flex items-center gap-2 mb-1">
-                  <span class="smallcaps text-stone-500">Earlier · resolved</span>
+                  <span class="smallcaps text-stone-500">Earlier brief</span>
                   <span class="mono text-[11px] text-stone-400"
                         x-text="(inj.scenario_node_id || '') + ' · ' + fmtTime(inj.released_at)"></span>
                 </div>
@@ -110,7 +108,7 @@
                   <!-- Branch options -->
                   <template x-if="inj._options && inj._options.length">
                     <div class="mb-4">
-                      <div class="smallcaps text-stone-500 mb-2">Choose a stance</div>
+                      <div class="smallcaps text-stone-500 mb-2">Decision</div>
                       <div class="space-y-1.5">
                         <template x-for="opt in inj._options" :key="opt.id">
                           <label class="flex items-center gap-2.5 text-[13.5px] cursor-pointer">
@@ -125,9 +123,9 @@
                     </div>
                   </template>
 
-                  <div class="smallcaps text-stone-500 mb-1.5">Your reasoning</div>
+                  <div class="smallcaps text-stone-500 mb-1.5">Reasoning</div>
                   <textarea :id="'resp_' + inj.id" x-model="freeText[inj.id]"
-                            placeholder="Brief the facilitator on how you intend to handle this…"
+                            placeholder="What will your team do next?"
                             rows="4"
                             :disabled="exercise.state === 'paused'"
                             class="w-full rounded-md ring-rule px-3 py-2 text-[13.5px] resize-none bg-white disabled:opacity-50"></textarea>
@@ -203,29 +201,20 @@ function participantView(exerciseId) {
     },
 
     async _enrichAndAdd(inj) {
-      inj._options = await this._fetchOptions(inj.scenario_node_id, inj.exercise_id);
+      inj._options = inj.options || [];
       if (!this.injects.find(i => i.id === inj.id)) this.injects.unshift(inj);
-    },
-
-    async _fetchOptions(nodeId, exId) {
-      if (!nodeId) return [];
-      const r = await apiFetch(`/exercises/${exId}`);
-      if (!r || !r.ok) return [];
-      const ex = await r.json();
-      const sr = await apiFetch(`/scenarios/${ex.scenario_id}`);
-      if (!sr || !sr.ok) return [];
-      const sc = await sr.json();
-      const def = sc.definition || null;
-      if (!def) return [];
-      const node = def.injects.find(n => n.id === nodeId);
-      return node ? node.options : [];
     },
 
     connectWs() {
       const token = localStorage.getItem('dt_token');
       if (!token) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?token=${token}`);
+      const params = new URLSearchParams({ token });
+      const viewRole = localStorage.getItem('dt_view_role');
+      const viewTeam = localStorage.getItem('dt_view_team');
+      if (viewRole) params.set('view_role', viewRole);
+      if (viewTeam) params.set('view_team', viewTeam);
+      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?${params}`);
 
       this.ws.onopen = () => {
         this.wsConnected = true;

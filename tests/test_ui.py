@@ -9,7 +9,18 @@ Seed users are created by conftest (see below). Run with:
 import json
 
 import pytest
-from playwright.sync_api import Browser, Page, expect
+
+httpx = pytest.importorskip("httpx")
+
+try:
+    httpx.get("http://localhost:8765/login", timeout=1.0)
+except Exception:
+    pytest.skip("Playwright UI tests require the dev server on port 8765", allow_module_level=True)
+
+sync_api = pytest.importorskip("playwright.sync_api")
+Browser = sync_api.Browser
+Page = sync_api.Page
+expect = sync_api.expect
 
 BASE = "http://localhost:8765"
 

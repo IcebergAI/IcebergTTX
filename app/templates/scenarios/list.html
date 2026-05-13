@@ -2,12 +2,12 @@
 {% block title %}Scenarios — Deep Thought{% endblock %}
 
 {% block content %}
-<div x-data="scenarioList()" x-init="init()" class="px-8 py-6 max-w-[1240px]">
+<div x-data="scenarioList()" x-init="init()" class="workspace">
 
-  <div class="flex items-end justify-between mb-6">
+  <div class="page-head">
     <div>
-      <div class="smallcaps text-stone-500">Workspace</div>
-      <h1 class="text-[26px] font-semibold tracking-tight leading-tight mt-1">Scenarios</h1>
+      <h1 class="page-title">Scenarios</h1>
+      <p class="text-[13.5px] text-stone-500 mt-1">Reusable exercise scripts and branching inject trees.</p>
     </div>
     <div class="flex items-center gap-2" x-show="isF">
       <template x-if="isF">
@@ -31,7 +31,7 @@
 
   <div x-show="loading" class="smallcaps text-stone-400 py-8 text-center">Loading…</div>
 
-  <div x-show="!loading" class="paper ring-rule rounded-lg overflow-hidden">
+  <div x-show="!loading" class="surface overflow-hidden">
     <!-- Table header -->
     <div class="grid gap-x-4 px-5 py-2.5 border-b rule"
          style="grid-template-columns: 1fr 140px 120px 130px 100px;">
@@ -70,7 +70,7 @@
 
         <!-- Injects / branches -->
         <div class="mono text-[12.5px] text-stone-600 text-right"
-             x-text="(s.definition?.injects?.length || 0) + ' / ' + branchCount(s)"></div>
+             x-text="(s.inject_count || 0) + ' / ' + (s.branch_count || 0)"></div>
 
         <!-- Updated -->
         <div class="mono text-[12px] text-stone-500 text-right" x-text="fmtAgo(s.updated_at)"></div>
@@ -102,21 +102,17 @@ function scenarioList() {
     async init() {
       const me = await apiFetch('/auth/me');
       if (!me) return;
-      const meData = await me.json();
-      this.isF = meData.role === 'facilitator';
+      const meData = await readJson(me);
+      if (!meData) return;
+      this.isF = meData.actual_role === 'facilitator' || meData.role === 'facilitator';
       await this.load();
     },
 
     async load() {
       this.loading = true;
       const r = await apiFetch('/scenarios');
-      if (r && r.ok) this.scenarios = await r.json();
+      if (r && r.ok) this.scenarios = await readJson(r, []);
       this.loading = false;
-    },
-
-    branchCount(s) {
-      const injects = s.definition?.injects || [];
-      return injects.filter(i => i.options && i.options.length > 1).length;
     },
 
     async importFile(event) {

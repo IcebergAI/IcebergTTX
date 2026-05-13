@@ -9,18 +9,40 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script>
+    (() => {
+      const theme = localStorage.getItem('dt_theme') || 'system';
+      const accent = localStorage.getItem('dt_accent');
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.dataset.theme = theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
+      if (accent) document.documentElement.style.setProperty('--accent', accent);
+    })();
+  </script>
   <style>
     :root {
-      --bg:        #f5f4f0;
-      --paper:     #fbfaf6;
+      --bg:        #f7f6f2;
+      --paper:     #fffefa;
       --ink:       #1c1b18;
       --ink-soft:  #4a4842;
-      --rule:      #e6e3dc;
-      --rule-2:    #d8d4cb;
+      --muted:     #777269;
+      --rule:      #ebe8e0;
+      --rule-2:    #ddd8ce;
       --sidebar:   #1a1814;
       --sidebar-2: #23211c;
       --accent:    oklch(0.74 0.14 70);
       --accent-d:  oklch(0.55 0.16 70);
+    }
+    html[data-theme="dark"] {
+      --bg:        #151512;
+      --paper:     #1f1e1a;
+      --ink:       #f3f0e8;
+      --ink-soft:  #d3cec2;
+      --muted:     #a6a095;
+      --rule:      #343128;
+      --rule-2:    #4a463a;
+      --sidebar:   #0f0e0c;
+      --sidebar-2: #1b1915;
+      --accent-d:  oklch(0.78 0.13 70);
     }
     html, body { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
     body { background: var(--bg); color: var(--ink); }
@@ -31,7 +53,7 @@
     .smallcaps {
       font-family: 'IBM Plex Mono', ui-monospace, monospace;
       font-size: 10.5px;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.07em;
       text-transform: uppercase;
       font-weight: 500;
     }
@@ -54,7 +76,7 @@
     /* Pill / tag chip */
     .pill {
       display: inline-flex; align-items: center; gap: 6px;
-      padding: 2px 8px; border-radius: 999px;
+      padding: 2px 7px; border-radius: 999px;
       font-size: 11px; font-weight: 500;
       box-shadow: inset 0 0 0 1px var(--rule-2);
       background: var(--paper); color: var(--ink-soft);
@@ -62,11 +84,11 @@
     .pill.mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; }
 
     /* Buttons */
-    .btn { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; border-radius: 6px; cursor: pointer; }
-    .btn-primary { background: var(--ink); color: var(--paper); }
-    .btn-primary:hover { background: #2b2924; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; border-radius: 6px; cursor: pointer; transition: background .12s, box-shadow .12s, color .12s; }
+    .btn-primary { background: #292720; color: var(--paper); box-shadow: inset 0 0 0 1px #292720; }
+    .btn-primary:hover { background: #37342c; }
     .btn-ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--rule-2); }
-    .btn-ghost:hover { background: #f0ede5; }
+    .btn-ghost:hover { background: #f3f0e9; }
     .btn-accent { background: var(--accent-d); color: #fff; }
     .btn-accent:hover { background: oklch(0.5 0.16 70); }
 
@@ -125,9 +147,56 @@
     }
 
     /* Sidebar active state */
-    .nav-link { transition: background .1s; }
-    .nav-link.active { background: #2e2b25; color: #fbfaf6; }
+    .nav-link { transition: background .1s, color .1s; }
+    .nav-link.active { background: #29261f; color: #fbfaf6; }
     .nav-link.active .nav-dot { background: var(--accent) !important; }
+
+    /* Calmer app shell */
+    .workspace {
+      width: min(1180px, calc(100% - 32px));
+      margin-inline: auto;
+      padding: 28px 0 40px;
+    }
+    .page-head {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      gap: 20px; margin-bottom: 22px;
+    }
+    .page-title {
+      font-size: 25px; line-height: 1.15; font-weight: 600;
+      letter-spacing: 0;
+    }
+    .surface {
+      background: var(--paper);
+      box-shadow: inset 0 0 0 1px var(--rule);
+      border-radius: 8px;
+    }
+    .quiet-row:hover { background: #faf8f1; }
+    html[data-theme="dark"] .quiet-row:hover { background: #27241f; }
+    html[data-theme="dark"] .btn-ghost:hover { background: #2a2721; }
+    html[data-theme="dark"] input,
+    html[data-theme="dark"] select,
+    html[data-theme="dark"] textarea {
+      background: #171613 !important;
+      color: var(--ink);
+    }
+    @media (max-width: 760px) {
+      body { display: block !important; }
+      aside[x-data] {
+        width: 100% !important;
+        min-height: auto !important;
+        height: auto !important;
+        position: static !important;
+      }
+      .workspace {
+        width: min(100% - 24px, 1180px);
+        padding: 20px 0 32px;
+      }
+      .page-head {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 12px;
+      }
+    }
 
     /* Scrollbars */
     ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -140,7 +209,7 @@
   <!-- Sidebar — hidden on auth pages (user is null) -->
   <aside x-data="sidebarNav()" x-init="init()"
     x-show="!!user" x-cloak
-    class="w-56 shrink-0 flex flex-col text-stone-300"
+    class="w-52 shrink-0 flex flex-col text-stone-300"
     style="background: var(--sidebar); min-height: 100vh; position: sticky; top: 0; height: 100vh; overflow-y: auto;">
 
     <!-- Logo -->
@@ -154,34 +223,34 @@
     </div>
 
     <!-- Navigation -->
-    <div class="px-3 py-1 smallcaps text-stone-500">Workspace</div>
+    <div class="px-3 py-1 smallcaps text-stone-500">Main</div>
     <nav class="px-2 flex flex-col gap-0.5 text-[13.5px]">
       <a href="/dashboard"
          class="nav-link rounded-md px-3 py-1.5 flex items-center gap-2 hover:bg-stone-800/50"
          :class="isActive('/dashboard') && 'active'">
-        <span class="nav-dot dot bg-stone-500"></span>Command center
+        <span class="nav-dot dot bg-stone-600"></span>Home
       </a>
       <a href="/scenarios"
+         x-show="user?.actual_role === 'facilitator' || user?.role === 'facilitator'"
          class="nav-link rounded-md px-3 py-1.5 flex items-center gap-2 hover:bg-stone-800/50"
          :class="isActive('/scenarios') && 'active'">
-        <span class="nav-dot dot bg-stone-500"></span>Scenarios
+        <span class="nav-dot dot bg-stone-600"></span>Scenarios
         <span x-show="scenarioCount" class="ml-auto mono text-stone-500 text-[11px]" x-text="scenarioCount"></span>
       </a>
       <a href="/exercises"
          class="nav-link rounded-md px-3 py-1.5 flex items-center gap-2 hover:bg-stone-800/50"
          :class="exercisesActive && 'active'">
-        <span class="nav-dot dot bg-stone-500"></span>Exercises
+        <span class="nav-dot dot bg-stone-600"></span>Exercises
         <template x-if="liveExercise">
-          <span class="ml-auto pill mono"
-                style="background: oklch(0.74 0.14 70 / .15); color: var(--accent-d); box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .35); padding: 1px 6px; font-size: 10px;">
-            <span class="live-dot" style="width:6px;height:6px;"></span>live
+          <span class="ml-auto mono text-[10.5px]" style="color: var(--accent);">
+            live
           </span>
         </template>
       </a>
       <a :href="liveExercise ? '/exercises/' + liveExercise.id + '/communications' : '/exercises'"
          class="nav-link rounded-md px-3 py-1.5 flex items-center gap-2 hover:bg-stone-800/50"
          :class="currentPath.includes('/communications') && 'active'">
-        <span class="nav-dot dot bg-stone-500"></span>Communications
+        <span class="nav-dot dot bg-stone-600"></span>Comms
       </a>
     </nav>
 
@@ -190,23 +259,26 @@
       <a href="/help"
          class="nav-link rounded-md px-3 py-1.5 flex items-center gap-2 hover:bg-stone-800/50"
          :class="isActive('/help') && 'active'">
-        <span class="nav-dot dot bg-stone-500"></span>Help
+        <span class="nav-dot dot bg-stone-600"></span>Help
+      </a>
+      <a href="/settings"
+         class="nav-link rounded-md px-3 py-1.5 flex items-center gap-2 hover:bg-stone-800/50"
+         :class="isActive('/settings') && 'active'">
+        <span class="nav-dot dot bg-stone-600"></span>Settings
       </a>
     </nav>
 
     <!-- Live now widget -->
     <template x-if="liveExercise">
-      <div class="px-3 mt-5">
-        <div class="py-1 smallcaps text-stone-500 mb-1">Live now</div>
-        <a :href="'/exercises/' + liveExercise.id + '/facilitate'"
-           class="block rounded-md p-3 hover:bg-stone-800/60"
+      <div class="px-3 mt-4">
+        <a :href="'/exercises/' + liveExercise.id + (user?.role === 'facilitator' ? '/facilitate' : '/participate')"
+           class="block rounded-md p-2.5 hover:bg-stone-800/60"
            style="background: var(--sidebar-2);">
           <div class="flex items-center gap-2">
-            <span class="live-dot" style="width:7px;height:7px;"></span>
             <span class="text-stone-100 text-[13px] font-medium truncate" x-text="liveExercise.title"></span>
           </div>
           <div class="mono text-[11px] text-stone-500 mt-1"
-               x-text="'EX-' + String(liveExercise.id).padStart(2,'0') + (liveExercise.current_node_id ? ' · node ' + liveExercise.current_node_id : '')">
+               x-text="'Live exercise · EX-' + String(liveExercise.id).padStart(2,'0')">
           </div>
         </a>
       </div>
@@ -222,6 +294,9 @@
           <div class="text-stone-100 text-[13px] leading-tight truncate"
                x-text="user?.display_name || user?.email"></div>
           <div class="smallcaps text-stone-500 leading-tight" x-text="user?.role"></div>
+          <div x-show="user?.actual_role && user.actual_role !== user.role"
+               class="smallcaps leading-tight" style="color: var(--accent);"
+               x-text="user ? 'Previewing as ' + user.role : ''"></div>
         </div>
         <button @click="logout()" class="ml-auto smallcaps text-stone-500 hover:text-stone-200 shrink-0">Sign out</button>
       </div>
@@ -245,9 +320,33 @@
       const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
       if (token) headers['Authorization'] = 'Bearer ' + token;
       const apiPath = path.startsWith('/api/') ? path : '/api' + path;
-      const resp = await fetch(apiPath, { ...options, headers });
+      let resp;
+      try {
+        resp = await fetch(apiPath, { ...options, headers });
+      } catch {
+        return null;
+      }
       if (resp.status === 401) { window.location.href = '/login'; return null; }
       return resp;
+    }
+
+    async function readJson(resp, fallback = null) {
+      if (!resp || !resp.ok) return fallback;
+      try {
+        return await resp.json();
+      } catch {
+        return fallback;
+      }
+    }
+
+    function applyTheme(theme, accent) {
+      localStorage.setItem('dt_theme', theme);
+      if (accent) {
+        localStorage.setItem('dt_accent', accent);
+        document.documentElement.style.setProperty('--accent', accent);
+      }
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.dataset.theme = theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
     }
 
     // ── Format helpers ───────────────────────────────────────────────────────
@@ -301,18 +400,18 @@
         async init() {
           const token = getToken();
           if (!token) return;
-          const [mr, er, sr] = await Promise.all([
+          const [mr, er] = await Promise.all([
             apiFetch('/auth/me'),
             apiFetch('/exercises'),
-            apiFetch('/scenarios'),
           ]);
-          if (mr && mr.ok) this.user = await mr.json();
+          this.user = await readJson(mr);
           if (er && er.ok) {
-            const exs = await er.json();
+            const exs = await readJson(er, []);
             this.liveExercise = exs.find(e => e.state === 'active') || null;
           }
-          if (sr && sr.ok) {
-            const scenarios = await sr.json();
+          if (this.user?.role === 'facilitator') {
+            const sr = await apiFetch('/scenarios');
+            const scenarios = await readJson(sr, []);
             this.scenarioCount = scenarios.length > 0 ? scenarios.length : null;
           }
         },

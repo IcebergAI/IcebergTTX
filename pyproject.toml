@@ -29,6 +29,7 @@ dev = [
     "ruff>=0.4",
     "pyright>=1.1",
     "pytailwindcss>=0.3",
+    "playwright>=1.52",
 ]
 
 [tool.pytest.ini_options]

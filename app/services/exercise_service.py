@@ -32,6 +32,7 @@ def create_exercise(
     session.add(exercise)
     session.commit()
     session.refresh(exercise)
+    assert exercise.id is not None
 
     seed_injects_from_scenario(session, exercise.id, scenario)
     return exercise
@@ -58,6 +59,7 @@ def transition_state(session: Session, exercise: Exercise, new_state: ExerciseSt
 
 
 def enrol_member(session: Session, *, exercise: Exercise, user_id: int) -> ExerciseMember:
+    assert exercise.id is not None
     existing = session.exec(
         select(ExerciseMember)
         .where(ExerciseMember.exercise_id == exercise.id)
