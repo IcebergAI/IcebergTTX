@@ -222,6 +222,8 @@ function commsInbox(exerciseId) {
     ws: null,
     wsConnected: false,
     pingInterval: null,
+    reconnectTimeout: null,
+    destroyed: false,
     compose: { external_entity: '', subject: '', body: '', visible_to_teams: '' },
     send: { external_entity: '', subject: '', body: '' },
 
@@ -317,7 +319,8 @@ function commsInbox(exerciseId) {
       this.ws.onclose = () => {
         this.wsConnected = false;
         clearInterval(this.pingInterval);
-        setTimeout(() => this.connectWs(), 3000);
+        this.pingInterval = null;
+        if (!this.destroyed) this.reconnectTimeout = setTimeout(() => this.connectWs(), 3000);
       };
 
       this.ws.onmessage = (ev) => {
@@ -326,6 +329,19 @@ function commsInbox(exerciseId) {
           this.comms.unshift(msg.payload);
         }
       };
+    },
+
+    destroy() {
+      this.destroyed = true;
+      if (this.pingInterval) clearInterval(this.pingInterval);
+      if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+      this.pingInterval = null;
+      this.reconnectTimeout = null;
+      if (this.ws) {
+        this.ws.onclose = null;
+        this.ws.close();
+        this.ws = null;
+      }
     },
 
     fmtAgo(s)  { return fmtAgo(s); },

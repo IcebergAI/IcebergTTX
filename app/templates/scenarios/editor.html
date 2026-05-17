@@ -155,7 +155,9 @@
                          class="ring-rule rounded-md px-2 py-1 text-[12px] bg-white w-24" />
                   <input type="text" x-model="opt.label" placeholder="Option label"
                          class="ring-rule rounded-md px-2 py-1 text-[12px] bg-white flex-1" />
-                  <select x-model="opt.next_inject_id"
+                  <select :value="opt.next_inject_id || ''"
+                          x-effect="$nextTick(() => { $el.value = opt.next_inject_id || '' })"
+                          @change="opt.next_inject_id = $event.target.value || null"
                           class="ring-rule rounded-md px-2 py-1 text-[12px] bg-white w-36">
                     <option value="">— end —</option>
                     <template x-for="other in form.injects" :key="other.id">

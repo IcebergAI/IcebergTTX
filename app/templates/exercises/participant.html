@@ -103,7 +103,7 @@
 
               <!-- Response form for active (index 0) inject, non-observer, not yet submitted -->
               <template x-if="!isObserver && idx === 0 && inj.state === 'released' && !submitted[inj.id]">
-                <div class="mt-5 rounded-md p-4 ring-rule" style="background: #fbf9f2;">
+                <div class="mt-5 rounded-md p-4 ring-rule paper-soft">
 
                   <!-- Branch options -->
                   <template x-if="inj._options && inj._options.length">
@@ -179,6 +179,8 @@ function participantView(exerciseId) {
     ws: null,
     wsConnected: false,
     pingInterval: null,
+    reconnectTimeout: null,
+    destroyed: false,
 
     get isObserver() { return this.role === 'observer'; },
 
@@ -227,7 +229,8 @@ function participantView(exerciseId) {
       this.ws.onclose = () => {
         this.wsConnected = false;
         clearInterval(this.pingInterval);
-        setTimeout(() => this.connectWs(), 3000);
+        this.pingInterval = null;
+        if (!this.destroyed) this.reconnectTimeout = setTimeout(() => this.connectWs(), 3000);
       };
 
       this.ws.onmessage = async (ev) => {
@@ -239,6 +242,19 @@ function participantView(exerciseId) {
           this.exercise = { ...this.exercise, state: msg.payload.state };
         }
       };
+    },
+
+    destroy() {
+      this.destroyed = true;
+      if (this.pingInterval) clearInterval(this.pingInterval);
+      if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+      this.pingInterval = null;
+      this.reconnectTimeout = null;
+      if (this.ws) {
+        this.ws.onclose = null;
+        this.ws.close();
+        this.ws = null;
+      }
     },
 
     async submitResponse(inj) {

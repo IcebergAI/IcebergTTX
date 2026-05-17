@@ -150,8 +150,7 @@
         <template x-for="resp in filteredResponses" :key="resp.id">
           <div class="surface overflow-hidden">
             <div class="px-4 py-3 flex items-center gap-3 border-b rule">
-              <div class="h-7 w-7 rounded-full grid place-items-center text-[11px] font-semibold shrink-0"
-                   style="background:#e8e4d9; color:#4a4842;"
+              <div class="avatar-chip h-7 w-7 rounded-full grid place-items-center text-[11px] font-semibold shrink-0"
                    x-text="('User #' + resp.user_id).slice(0,2)">U</div>
               <div class="min-w-0">
                 <div class="text-[13.5px] font-medium leading-tight"
@@ -166,7 +165,7 @@
             <div class="grid" :style="assessments[resp.id] ? 'grid-template-columns: 1fr 240px' : 'grid-template-columns: 1fr'">
               <div class="px-4 py-3 text-[13.5px] text-stone-800" x-text="resp.content"></div>
               <template x-if="assessments[resp.id]">
-                <div class="px-4 py-3 border-l rule" style="background: #fbf9f2;">
+                <div class="px-4 py-3 border-l rule paper-soft">
                   <div class="flex items-center gap-2 mb-1.5">
                     <span class="smallcaps text-stone-500">AI assessment</span>
                     <span x-show="assessments[resp.id].decision_quality"
@@ -206,7 +205,7 @@
                   x-text="suggestedInjects.filter(s => s.status === 'pending_review').length + ' pending'"></span>
           </div>
           <template x-for="s in suggestedInjects.filter(sg => sg.status === 'pending_review')" :key="s.id">
-            <div class="mb-3 last:mb-0 bg-white/60 rounded-md p-2.5">
+            <div class="mb-3 last:mb-0 paper-soft ring-rule rounded-md p-2.5">
               <div class="text-[13px] font-medium mb-1" x-text="s.title"></div>
               <p class="text-[12px] text-stone-600 mb-2" x-text="s.content"></p>
               <div class="flex flex-wrap gap-1 mb-2" x-show="s.target_teams && s.target_teams.length">
@@ -237,8 +236,7 @@
           <template x-for="m in members" :key="m.user_id">
             <li class="flex items-center gap-2 text-[13px]">
               <div class="relative shrink-0">
-                <div class="h-6 w-6 rounded-full grid place-items-center text-[10.5px] font-semibold"
-                     style="background:#e8e4d9; color:#4a4842;">
+                <div class="avatar-chip h-6 w-6 rounded-full grid place-items-center text-[10.5px] font-semibold">
                   <template x-if="userFor(m.user_id)">
                     <span x-text="userFor(m.user_id).display_name.split(' ').map(x=>x[0]).join('').slice(0,2)"></span>
                   </template>
@@ -276,9 +274,9 @@
           <input type="text" x-model="memberSearch" placeholder="Add by name or email…"
                  class="w-full rounded-md ring-rule px-2 py-1 text-[12px] bg-white" />
           <div x-show="memberSearch.length > 0"
-               class="mt-1 border rule rounded-md bg-white overflow-hidden max-h-40 overflow-y-auto">
+               class="mt-1 border rule rounded-md paper overflow-hidden max-h-40 overflow-y-auto">
             <template x-for="u in filteredUsers" :key="u.id">
-              <div class="flex items-center gap-2 px-2 py-1.5 text-[12.5px] hover:bg-stone-50">
+              <div class="quiet-row flex items-center gap-2 px-2 py-1.5 text-[12.5px]">
                 <div class="min-w-0 flex-1">
                   <span class="font-medium" x-text="u.display_name"></span>
                   <span class="ml-1 text-stone-400 text-[11px]" x-text="u.role"></span>
@@ -333,6 +331,8 @@ function facilitatorConsole(exerciseId) {
     ws: null,
     wsConnected: false,
     pingInterval: null,
+    reconnectTimeout: null,
+    destroyed: false,
     elapsedStr: '—',
     elapsedInterval: null,
 
@@ -415,7 +415,8 @@ function facilitatorConsole(exerciseId) {
       this.ws.onclose = () => {
         this.wsConnected = false;
         clearInterval(this.pingInterval);
-        setTimeout(() => this.connectWs(), 3000);
+        this.pingInterval = null;
+        if (!this.destroyed) this.reconnectTimeout = setTimeout(() => this.connectWs(), 3000);
       };
 
       this.ws.onmessage = (ev) => {
@@ -440,6 +441,21 @@ function facilitatorConsole(exerciseId) {
           this.suggestedInjects.unshift(msg.payload);
         }
       };
+    },
+
+    destroy() {
+      this.destroyed = true;
+      if (this.elapsedInterval) clearInterval(this.elapsedInterval);
+      if (this.pingInterval) clearInterval(this.pingInterval);
+      if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+      this.elapsedInterval = null;
+      this.pingInterval = null;
+      this.reconnectTimeout = null;
+      if (this.ws) {
+        this.ws.onclose = null;
+        this.ws.close();
+        this.ws = null;
+      }
     },
 
     async transition(action) {
