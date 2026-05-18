@@ -51,6 +51,12 @@ def login(
     return TokenResponse(access_token=token)
 
 
+@router.post("/logout")
+def logout(response: Response):
+    response.delete_cookie(key="access_token", path="/", samesite="lax")
+    return {"ok": True}
+
+
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: Annotated[User, Depends(get_current_user)]):
     return current_user

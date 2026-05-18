@@ -130,7 +130,7 @@ function dashboard() {
       if (mr && mr.ok) {
         const me = await readJson(mr);
         this.isF = me?.role === 'facilitator';
-        this.canManageScenarios = me?.actual_role === 'facilitator' || this.isF;
+        this.canManageScenarios = this.isF;
       }
       if (er && er.ok) this.exercises = await readJson(er, []);
       if (this.canManageScenarios) {
@@ -151,6 +151,10 @@ function dashboard() {
     fmtElapsed(s)     { return fmtElapsed(s); },
     fmtAgo(s)         { return fmtAgo(s); },
     fmtTime(s)        { return fmtTime(s); },
+
+    destroy() {
+      if (this.liveElapsedInterval) clearInterval(this.liveElapsedInterval);
+    },
   }
 }
 </script>

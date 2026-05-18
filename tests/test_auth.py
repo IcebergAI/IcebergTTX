@@ -48,6 +48,21 @@ def test_login_success(client: TestClient, facilitator: User):
     assert data["token_type"] == "bearer"
 
 
+def test_logout_clears_cookie_backed_session(client: TestClient, facilitator: User):
+    login_resp = client.post("/api/auth/login", json={
+        "email": facilitator.email,
+        "password": "password123",
+    })
+    assert login_resp.status_code == 200
+    assert client.get("/api/auth/me").status_code == 200
+
+    logout_resp = client.post("/api/auth/logout")
+
+    assert logout_resp.status_code == 200
+    assert logout_resp.json() == {"ok": True}
+    assert client.get("/api/auth/me").status_code == 401
+
+
 def test_login_wrong_password(client: TestClient, facilitator: User):
     resp = client.post("/api/auth/login", json={
         "email": facilitator.email,
@@ -83,6 +98,16 @@ def test_facilitator_can_preview_participant_role(client: TestClient, facilitato
     assert data["role"] == "participant"
     assert data["actual_role"] == "facilitator"
     assert data["team"] == "it_ops"
+    assert data["can_switch_roles"] is True
+
+
+def test_facilitator_can_preview_observer_role(client: TestClient, facilitator_token: str):
+    client.cookies.set("dt_view_role", "observer")
+    resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {facilitator_token}"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["role"] == "observer"
+    assert data["actual_role"] == "facilitator"
     assert data["can_switch_roles"] is True
 
 

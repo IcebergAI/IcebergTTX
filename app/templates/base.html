@@ -1,23 +1,74 @@
+{% set cookie_theme = (request.cookies.get('dt_resolved_theme') or request.cookies.get('dt_theme')) if request is defined else None %}
+{% set initial_theme = cookie_theme if cookie_theme in ['light', 'dark'] else 'light' %}
+{% set initial_bg = '#151512' if initial_theme == 'dark' else '#f7f6f2' %}
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="{{ initial_theme }}" style="background-color: {{ initial_bg }}; color-scheme: {{ initial_theme }};">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="{{ initial_theme }}" />
   <title>{% block title %}Deep Thought{% endblock %}</title>
+  <style id="dt-critical-theme">
+    html,
+    body {
+      background-color: {{ initial_bg }};
+    }
+    html[data-theme="dark"],
+    html[data-theme="dark"] body {
+      background-color: #151512;
+      color-scheme: dark;
+    }
+    html[data-theme="light"],
+    html[data-theme="light"] body {
+      background-color: #f7f6f2;
+      color-scheme: light;
+    }
+  </style>
+  <script>
+    (() => {
+      const maxAge = 60 * 60 * 24 * 365;
+      const readCookie = (name) => {
+        const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+        return match ? decodeURIComponent(match[1]) : null;
+      };
+      const writeCookie = (name, value) => {
+        document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; samesite=lax`;
+      };
+      const readLocal = (key) => {
+        try { return localStorage.getItem(key); } catch { return null; }
+      };
+      const writeLocal = (key, value) => {
+        try { localStorage.setItem(key, value); } catch {}
+      };
+      const storedTheme = readLocal('dt_theme');
+      const cookieTheme = readCookie('dt_theme');
+      const theme = storedTheme || (['system', 'light', 'dark'].includes(cookieTheme) ? cookieTheme : 'system');
+      const storedAccent = readLocal('dt_accent');
+      const cookieAccent = readCookie('dt_accent');
+      const accent = storedAccent || cookieAccent;
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const resolvedTheme = theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
+      const resolvedBg = resolvedTheme === 'dark' ? '#151512' : '#f7f6f2';
+      document.documentElement.dataset.theme = resolvedTheme;
+      document.documentElement.style.backgroundColor = resolvedBg;
+      document.documentElement.style.colorScheme = resolvedTheme;
+      document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', resolvedTheme);
+      document.addEventListener('DOMContentLoaded', () => {
+        document.body.style.backgroundColor = resolvedBg;
+      }, { once: true });
+      writeCookie('dt_theme', theme);
+      writeCookie('dt_resolved_theme', resolvedTheme);
+      if (!storedTheme) writeLocal('dt_theme', theme);
+      if (accent) document.documentElement.style.setProperty('--accent', accent);
+      if (accent && !storedAccent) writeLocal('dt_accent', accent);
+      if (accent) writeCookie('dt_accent', accent);
+    })();
+  </script>
   <link rel="stylesheet" href="/static/css/output.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <script>
-    (() => {
-      const theme = localStorage.getItem('dt_theme') || 'system';
-      const accent = localStorage.getItem('dt_accent');
-      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.dataset.theme = theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
-      if (accent) document.documentElement.style.setProperty('--accent', accent);
-    })();
-  </script>
   <style>
     :root {
       --bg:        #f7f6f2;
@@ -27,8 +78,20 @@
       --muted:     #777269;
       --rule:      #ebe8e0;
       --rule-2:    #ddd8ce;
-      --sidebar:   #1a1814;
-      --sidebar-2: #23211c;
+      --sidebar:   #fffefa;
+      --sidebar-2: #f3f0e9;
+      --sidebar-ink: #4a4842;
+      --sidebar-ink-strong: #1c1b18;
+      --sidebar-muted: #777269;
+      --sidebar-rule: #ebe8e0;
+      --sidebar-hover: #f3f0e9;
+      --sidebar-active: #ece7dc;
+      --paper-soft: #fbf9f2;
+      --node-current: #fff8ec;
+      --stripe-a:  #efece6;
+      --stripe-b:  #f5f3ee;
+      --avatar-bg: #e8e4d9;
+      --avatar-fg: #4a4842;
       --accent:    oklch(0.74 0.14 70);
       --accent-d:  oklch(0.55 0.16 70);
     }
@@ -42,8 +105,22 @@
       --rule-2:    #4a463a;
       --sidebar:   #0f0e0c;
       --sidebar-2: #1b1915;
+      --sidebar-ink: #d3cec2;
+      --sidebar-ink-strong: #fbfaf6;
+      --sidebar-muted: #817b70;
+      --sidebar-rule: #28251f;
+      --sidebar-hover: #1f1d18;
+      --sidebar-active: #29261f;
+      --paper-soft: #26241f;
+      --node-current: #2b2419;
+      --stripe-a:  #24221d;
+      --stripe-b:  #1c1a16;
+      --avatar-bg: #343128;
+      --avatar-fg: #f3f0e8;
       --accent-d:  oklch(0.78 0.13 70);
     }
+    html { background: var(--bg); color-scheme: light; }
+    html[data-theme="dark"] { color-scheme: dark; }
     html, body { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
     body { background: var(--bg); color: var(--ink); }
 
@@ -68,7 +145,9 @@
 
     /* Backgrounds */
     .paper    { background: var(--paper); }
+    .paper-soft { background: var(--paper-soft); }
     .ink-soft { color: var(--ink-soft); }
+    .avatar-chip { background: var(--avatar-bg); color: var(--avatar-fg); }
 
     /* Inset ring */
     .ring-rule { box-shadow: inset 0 0 0 1px var(--rule); }
@@ -85,7 +164,7 @@
 
     /* Buttons */
     .btn { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; border-radius: 6px; cursor: pointer; transition: background .12s, box-shadow .12s, color .12s; }
-    .btn-primary { background: #292720; color: var(--paper); box-shadow: inset 0 0 0 1px #292720; }
+    .btn-primary { background: #292720; color: #fffefa; box-shadow: inset 0 0 0 1px #292720; }
     .btn-primary:hover { background: #37342c; }
     .btn-ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--rule-2); }
     .btn-ghost:hover { background: #f3f0e9; }
@@ -126,7 +205,7 @@
     }
     .node.current {
       box-shadow: inset 0 0 0 1px var(--accent-d), 0 0 0 2px oklch(0.74 0.14 70 / .18);
-      background: #fff8ec;
+      background: var(--node-current);
     }
     .node.done { opacity: 0.65; }
 
@@ -143,12 +222,30 @@
 
     /* Hatched placeholder for ad-hoc inject slot */
     .stripe {
-      background-image: repeating-linear-gradient(135deg, #efece6 0 6px, #f5f3ee 6px 12px);
+      background-image: repeating-linear-gradient(135deg, var(--stripe-a) 0 6px, var(--stripe-b) 6px 12px);
     }
 
     /* Sidebar active state */
+    .app-sidebar {
+      background: var(--sidebar);
+      color: var(--sidebar-ink);
+      border-right: 1px solid var(--sidebar-rule);
+    }
+    .app-sidebar .text-stone-50,
+    .app-sidebar .text-stone-100 { color: var(--sidebar-ink-strong) !important; }
+    .app-sidebar .text-stone-300 { color: var(--sidebar-ink) !important; }
+    .app-sidebar .text-stone-500 { color: var(--sidebar-muted) !important; }
+    .app-sidebar .bg-stone-600 { background: var(--sidebar-muted) !important; }
+    .app-sidebar .sidebar-profile { border-color: var(--sidebar-rule) !important; }
+    .app-sidebar .sidebar-live-card {
+      background: var(--sidebar-2);
+      box-shadow: inset 0 0 0 1px var(--sidebar-rule);
+    }
+    .app-sidebar .sidebar-live-card:hover { background: var(--sidebar-hover); }
+    .app-sidebar button:hover { color: var(--sidebar-ink-strong) !important; }
     .nav-link { transition: background .1s, color .1s; }
-    .nav-link.active { background: #29261f; color: #fbfaf6; }
+    .nav-link:hover { background: var(--sidebar-hover); }
+    .nav-link.active { background: var(--sidebar-active); color: var(--sidebar-ink-strong); }
     .nav-link.active .nav-dot { background: var(--accent) !important; }
 
     /* Calmer app shell */
@@ -170,9 +267,53 @@
       box-shadow: inset 0 0 0 1px var(--rule);
       border-radius: 8px;
     }
+    #app-main {
+      background: var(--bg);
+      min-height: 100vh;
+      opacity: 1;
+      transform: translateY(0);
+      view-transition-name: app-main;
+      transition: opacity 150ms ease, transform 150ms ease;
+      will-change: opacity, transform;
+    }
+    #app-main.is-leaving {
+      opacity: 0;
+      transform: translateY(4px);
+      transition-duration: 90ms;
+    }
+    #app-main.is-entering {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    @keyframes dt-main-out {
+      from { opacity: 1; transform: translateY(0); }
+      to { opacity: 0; transform: translateY(-4px); }
+    }
+    @keyframes dt-main-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation: none;
+    }
+    ::view-transition-old(app-main) {
+      animation: dt-main-out 110ms ease both;
+    }
+    ::view-transition-new(app-main) {
+      animation: dt-main-in 180ms ease both;
+    }
     .quiet-row:hover { background: #faf8f1; }
     html[data-theme="dark"] .quiet-row:hover { background: #27241f; }
     html[data-theme="dark"] .btn-ghost:hover { background: #2a2721; }
+    html[data-theme="dark"] .text-stone-600,
+    html[data-theme="dark"] .text-stone-700,
+    html[data-theme="dark"] .text-stone-800,
+    html[data-theme="dark"] .hover\:text-stone-700:hover,
+    html[data-theme="dark"] .hover\:text-stone-800:hover,
+    html[data-theme="dark"] .hover\:text-stone-900:hover {
+      color: var(--ink-soft) !important;
+    }
     html[data-theme="dark"] input,
     html[data-theme="dark"] select,
     html[data-theme="dark"] textarea {
@@ -197,6 +338,16 @@
         gap: 12px;
       }
     }
+    @media (prefers-reduced-motion: reduce) {
+      #app-main {
+        transition: none !important;
+        transform: none !important;
+      }
+      ::view-transition-old(app-main),
+      ::view-transition-new(app-main) {
+        animation: none !important;
+      }
+    }
 
     /* Scrollbars */
     ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -204,13 +355,13 @@
     ::-webkit-scrollbar-track { background: transparent; }
   </style>
 </head>
-<body class="min-h-screen flex">
+<body class="min-h-screen flex" style="background-color: {{ initial_bg }};">
 
   <!-- Sidebar — hidden on auth pages (user is null) -->
   <aside x-data="sidebarNav()" x-init="init()"
     x-show="!!user" x-cloak
-    class="w-52 shrink-0 flex flex-col text-stone-300"
-    style="background: var(--sidebar); min-height: 100vh; position: sticky; top: 0; height: 100vh; overflow-y: auto;">
+    class="app-sidebar w-52 shrink-0 flex flex-col text-stone-300"
+    style="min-height: 100vh; position: sticky; top: 0; height: 100vh; overflow-y: auto;">
 
     <!-- Logo -->
     <div class="px-5 pt-5 pb-4 flex items-center gap-2.5">
@@ -231,7 +382,7 @@
         <span class="nav-dot dot bg-stone-600"></span>Home
       </a>
       <a href="/scenarios"
-         x-show="user?.actual_role === 'facilitator' || user?.role === 'facilitator'"
+         x-show="user?.role === 'facilitator'"
          class="nav-link rounded-md px-3 py-1.5 flex items-center gap-2 hover:bg-stone-800/50"
          :class="isActive('/scenarios') && 'active'">
         <span class="nav-dot dot bg-stone-600"></span>Scenarios
@@ -247,7 +398,7 @@
           </span>
         </template>
       </a>
-      <a :href="liveExercise ? '/exercises/' + liveExercise.id + '/communications' : '/exercises'"
+      <a :href="liveExercise ? '/exercises/' + liveExercise.id + '/communications' : '/communications'"
          class="nav-link rounded-md px-3 py-1.5 flex items-center gap-2 hover:bg-stone-800/50"
          :class="currentPath.includes('/communications') && 'active'">
         <span class="nav-dot dot bg-stone-600"></span>Comms
@@ -272,8 +423,7 @@
     <template x-if="liveExercise">
       <div class="px-3 mt-4">
         <a :href="'/exercises/' + liveExercise.id + (user?.role === 'facilitator' ? '/facilitate' : '/participate')"
-           class="block rounded-md p-2.5 hover:bg-stone-800/60"
-           style="background: var(--sidebar-2);">
+           class="sidebar-live-card block rounded-md p-2.5 hover:bg-stone-800/60">
           <div class="flex items-center gap-2">
             <span class="text-stone-100 text-[13px] font-medium truncate" x-text="liveExercise.title"></span>
           </div>
@@ -285,7 +435,7 @@
     </template>
 
     <!-- User profile -->
-    <div class="mt-auto p-3 border-t border-stone-800/70">
+    <div class="sidebar-profile mt-auto p-3 border-t border-stone-800/70">
       <div class="flex items-center gap-2.5">
         <div class="h-8 w-8 rounded-full grid place-items-center text-[12px] font-semibold shrink-0"
              style="background: oklch(0.74 0.14 70 / .25); color: var(--accent);"
@@ -304,7 +454,7 @@
   </aside>
 
   <!-- Main workspace -->
-  <main class="flex-1 min-w-0">
+  <main id="app-main" class="flex-1 min-w-0">
     {% block content %}{% endblock %}
   </main>
 
@@ -339,15 +489,139 @@
       }
     }
 
+    function setPreferenceCookie(name, value) {
+      document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
+    }
+
+    function resolveTheme(theme) {
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      return theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
+    }
+
     function applyTheme(theme, accent) {
       localStorage.setItem('dt_theme', theme);
       if (accent) {
         localStorage.setItem('dt_accent', accent);
         document.documentElement.style.setProperty('--accent', accent);
+        setPreferenceCookie('dt_accent', accent);
       }
-      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.dataset.theme = theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
+      const resolvedTheme = resolveTheme(theme);
+      const resolvedBg = resolvedTheme === 'dark' ? '#151512' : '#f7f6f2';
+      document.documentElement.dataset.theme = resolvedTheme;
+      document.documentElement.style.backgroundColor = resolvedBg;
+      document.body.style.backgroundColor = resolvedBg;
+      document.documentElement.style.colorScheme = resolvedTheme;
+      document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', resolvedTheme);
+      setPreferenceCookie('dt_theme', theme);
+      setPreferenceCookie('dt_resolved_theme', resolvedTheme);
     }
+
+    function shouldSoftNavigate(event, anchor) {
+      if (!anchor || event.defaultPrevented || anchor.hasAttribute('download')) return false;
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
+      if (anchor.target && anchor.target !== '_self') return false;
+      const url = new URL(anchor.href, window.location.href);
+      if (!['http:', 'https:'].includes(url.protocol)) return false;
+      if (url.origin !== window.location.origin) return false;
+      if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/static/')) return false;
+      if (url.pathname === window.location.pathname && url.search === window.location.search) return false;
+      return true;
+    }
+
+    function installSoftNavigationScripts(nextDoc) {
+      const scripts = [...nextDoc.body.querySelectorAll('script')]
+        .filter(script => !script.src && !script.textContent.includes('Shared auth helpers'));
+      for (const source of scripts) {
+        let code = source.textContent || '';
+        if (!code.trim()) continue;
+        code = code.replace(/\blet\s+_keyCounter\s*=\s*0\s*;/, 'window._keyCounter = window._keyCounter || 0;');
+        const script = document.createElement('script');
+        script.dataset.softNavigationScript = 'true';
+        script.textContent = code;
+        document.body.appendChild(script);
+        script.remove();
+      }
+    }
+
+    async function swapMainContent(nextDoc, nextUrl, replaceState = false) {
+      const main = document.getElementById('app-main');
+      const nextMain = nextDoc.getElementById('app-main') || nextDoc.querySelector('main');
+      if (!main || !nextMain) return false;
+
+      window.Alpine?.destroyTree?.(main);
+      installSoftNavigationScripts(nextDoc);
+      main.innerHTML = nextMain.innerHTML;
+      document.title = nextDoc.title || document.title;
+      window.Alpine?.initTree?.(main);
+
+      if (replaceState) {
+        window.history.replaceState({ deepThoughtSoftNavigation: true }, '', nextUrl.href);
+      } else {
+        window.history.pushState({ deepThoughtSoftNavigation: true }, '', nextUrl.href);
+      }
+      document.dispatchEvent(new CustomEvent('dt:soft-navigated', {
+        detail: { path: nextUrl.pathname, url: nextUrl.href },
+      }));
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      return true;
+    }
+
+    async function softNavigate(href, options = {}) {
+      const url = new URL(href, window.location.href);
+      const main = document.getElementById('app-main');
+      if (!main) {
+        window.location.href = url.href;
+        return;
+      }
+
+      let html;
+      let finalUrl = url;
+      try {
+        const resp = await fetch(url.href, {
+          credentials: 'same-origin',
+          headers: { Accept: 'text/html, application/xhtml+xml' },
+        });
+        if (!resp.ok || !resp.headers.get('content-type')?.includes('text/html')) {
+          throw new Error('Soft navigation received a non-HTML response.');
+        }
+        html = await resp.text();
+        finalUrl = new URL(resp.url || url.href);
+      } catch {
+        window.location.href = url.href;
+        return;
+      }
+
+      const nextDoc = new DOMParser().parseFromString(html, 'text/html');
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const update = async () => {
+        main.classList.remove('is-leaving');
+        const swapped = await swapMainContent(nextDoc, finalUrl, options.replaceState);
+        if (!swapped) throw new Error('Soft navigation response did not include a main region.');
+      };
+
+      try {
+        if (document.startViewTransition && !reducedMotion) {
+          await document.startViewTransition(update).finished;
+        } else {
+          main.classList.add('is-leaving');
+          main.classList.add('is-entering');
+          await update();
+          requestAnimationFrame(() => main.classList.remove('is-entering'));
+        }
+      } catch {
+        window.location.href = finalUrl.href;
+      }
+    }
+
+    document.addEventListener('click', (event) => {
+      const anchor = event.target.closest?.('a[href]');
+      if (!shouldSoftNavigate(event, anchor)) return;
+      event.preventDefault();
+      softNavigate(anchor.href);
+    });
+    window.addEventListener('popstate', () => {
+      softNavigate(window.location.href, { replaceState: true });
+    });
 
     // ── Format helpers ───────────────────────────────────────────────────────
 
@@ -398,6 +672,9 @@
         currentPath: window.location.pathname,
 
         async init() {
+          document.addEventListener('dt:soft-navigated', (event) => {
+            this.currentPath = event.detail.path;
+          });
           const token = getToken();
           if (!token) return;
           const [mr, er] = await Promise.all([
@@ -413,6 +690,8 @@
             const sr = await apiFetch('/scenarios');
             const scenarios = await readJson(sr, []);
             this.scenarioCount = scenarios.length > 0 ? scenarios.length : null;
+          } else {
+            this.scenarioCount = null;
           }
         },
 
@@ -430,9 +709,16 @@
           return this.currentPath === path || this.currentPath.startsWith(path + '/');
         },
 
-        logout() {
+        async logout() {
+          try {
+            await fetch('/api/auth/logout', { method: 'POST' });
+          } catch {}
           localStorage.removeItem('dt_token');
+          localStorage.removeItem('dt_view_role');
+          localStorage.removeItem('dt_view_team');
           document.cookie = 'access_token=; Max-Age=0; path=/';
+          document.cookie = 'dt_view_role=; Max-Age=0; path=/';
+          document.cookie = 'dt_view_team=; Max-Age=0; path=/';
           window.location.href = '/login';
         }
       }

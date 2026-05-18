@@ -104,7 +104,7 @@ function scenarioList() {
       if (!me) return;
       const meData = await readJson(me);
       if (!meData) return;
-      this.isF = meData.actual_role === 'facilitator' || meData.role === 'facilitator';
+      this.isF = meData.role === 'facilitator';
       await this.load();
     },
 

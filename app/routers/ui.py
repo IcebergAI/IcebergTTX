@@ -167,6 +167,13 @@ def exercise_comms(exercise_id: int, request: Request, user: UserContext):
     )
 
 
+@router.get("/communications", response_class=HTMLResponse)
+def communications_hub(request: Request, user: UserContext):
+    if not user:
+        return RedirectResponse("/login")
+    return templates.TemplateResponse(request, "communications/index.html", {"user": user})
+
+
 @router.get("/help", response_class=HTMLResponse)
 def help_page(request: Request, user: UserContext):
     if not user:

@@ -28,6 +28,15 @@ BASE = "http://localhost:8765"
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def login(page: Page, email: str, password: str = "password123") -> None:
+    try:
+        page.evaluate(
+            "() => { localStorage.removeItem('dt_token');"
+            " localStorage.removeItem('dt_view_role');"
+            " localStorage.removeItem('dt_view_team'); }"
+        )
+    except Exception:
+        pass
+    page.context.clear_cookies()
     page.goto(f"{BASE}/login")
     page.fill("input[type=email]", email)
     page.fill("input[type=password]", password)
@@ -100,6 +109,14 @@ def _make_exercise(page: Page, scenario_id: int, title: str = "UI Test Exercise"
     return r.json()["id"]
 
 
+def _enrol_participant(page: Page, exercise_id: int, email: str = "participant@deep.test") -> None:
+    users_r = api_get(page, "/users")
+    assert users_r.status == 200, users_r.text()
+    participant = next(u for u in users_r.json() if u["email"] == email)
+    enrol_r = api_post(page, f"/exercises/{exercise_id}/members", {"user_id": participant["id"]})
+    assert enrol_r.status == 201, enrol_r.text()
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 def test_login_page_renders(page: Page):
@@ -107,7 +124,7 @@ def test_login_page_renders(page: Page):
     expect(page.locator("input[type=email]")).to_be_visible()
     expect(page.locator("input[type=password]")).to_be_visible()
     expect(page.locator("button[type=submit]")).to_be_visible()
-    expect(page.locator("h1")).to_contain_text("Log in")
+    expect(page.locator("h1")).to_contain_text("Sign in")
 
 
 def test_login_wrong_password_shows_error(page: Page):
@@ -123,7 +140,18 @@ def test_login_wrong_password_shows_error(page: Page):
 def test_login_facilitator_redirects_to_dashboard(page: Page):
     login_facilitator(page)
     expect(page).to_have_url(f"{BASE}/dashboard")
-    expect(page.locator("h1")).to_contain_text("Dashboard")
+    expect(page.locator("h1")).to_contain_text("Home")
+
+
+def test_sign_out_returns_to_login(page: Page):
+    login_facilitator(page)
+    sign_out = page.get_by_role("button", name="Sign out")
+    expect(sign_out).to_be_visible(timeout=5000)
+    sign_out.click()
+    page.wait_for_url(f"{BASE}/login", timeout=8000)
+    expect(page.locator("h1")).to_contain_text("Sign in")
+    page.goto(f"{BASE}/dashboard")
+    expect(page).to_have_url(f"{BASE}/login")
 
 
 def test_unauthenticated_redirect_to_login(page: Page):
@@ -135,19 +163,19 @@ def test_register_page_renders(page: Page):
     page.goto(f"{BASE}/register")
     expect(page.locator("input[type=email]")).to_be_visible()
     expect(page.locator("input[type=password]")).to_be_visible()
-    expect(page.locator("h1")).to_contain_text("Register")
+    expect(page.locator("h1")).to_contain_text("Create account")
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
 def test_dashboard_shows_for_facilitator(page: Page):
     login_facilitator(page)
-    expect(page.locator("h1")).to_contain_text("Dashboard")
+    expect(page.locator("h1")).to_contain_text("Home")
 
 
 def test_dashboard_shows_for_participant(page: Page):
     login_participant(page)
-    expect(page.locator("h1")).to_contain_text("Dashboard")
+    expect(page.locator("h1")).to_contain_text("Home")
 
 
 # ── Scenarios ─────────────────────────────────────────────────────────────────
@@ -172,6 +200,22 @@ def test_scenario_detail_page_renders(page: Page):
     expect(page.locator("body")).not_to_contain_text("Internal Server Error")
 
 
+def test_scenario_editor_preserves_branch_targets(page: Page):
+    login_facilitator(page)
+    scenario_id = _make_scenario(page)
+    page.goto(f"{BASE}/scenarios/{scenario_id}/edit")
+
+    first_branch_select = page.locator("select").nth(1)
+    expect(first_branch_select).to_have_value("inject_02")
+    page.get_by_role("button", name="Save changes").click()
+    expect(page.get_by_text("Saved successfully.")).to_be_visible(timeout=5000)
+
+    scenario_r = api_get(page, f"/scenarios/{scenario_id}")
+    assert scenario_r.status == 200, scenario_r.text()
+    options = scenario_r.json()["definition"]["injects"][0]["options"]
+    assert options[0]["next_inject_id"] == "inject_02"
+
+
 # ── Exercises ─────────────────────────────────────────────────────────────────
 
 def test_exercises_list_page_renders(page: Page):
@@ -188,14 +232,14 @@ def test_facilitator_console_renders(page: Page):
 
     page.goto(f"{BASE}/exercises/{exercise_id}/facilitate")
     expect(page.locator("body")).not_to_contain_text("Internal Server Error")
-    # Inject queue heading is static
-    expect(page.locator("body")).to_contain_text("Inject Queue")
+    expect(page.locator("body")).to_contain_text("Injects")
 
 
 def test_participant_view_renders(page: Page):
     login_facilitator(page)
     scenario_id = _make_scenario(page)
     exercise_id = _make_exercise(page, scenario_id)
+    _enrol_participant(page, exercise_id)
     api_post(page, f"/exercises/{exercise_id}/start")
 
     login_participant(page)
@@ -210,6 +254,7 @@ def test_facilitator_releases_inject_visible_to_participant(page: Page, browser:
     login_facilitator(page)
     scenario_id = _make_scenario(page)
     exercise_id = _make_exercise(page, scenario_id)
+    _enrol_participant(page, exercise_id)
     api_post(page, f"/exercises/{exercise_id}/start")
 
     # Release the first pending inject via API
