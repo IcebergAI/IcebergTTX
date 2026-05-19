@@ -1,8 +1,10 @@
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.models.exercise import Exercise, ExerciseState
+from app.models.inject import Inject
 from app.models.user import User
+from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.exercise_service import transition_state
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -29,6 +31,51 @@ def test_create_exercise_with_llm(client: TestClient, facilitator_token: str, sa
     )
     assert r.status_code == 201
     assert r.json()["llm_enabled"] is True
+
+
+def test_create_exercise_seeds_shared_and_group_injects(
+    session: Session, facilitator: User
+):
+    from app.services.exercise_service import create_exercise
+    from app.services.scenario_service import create_scenario
+
+    scenario = create_scenario(
+        session,
+        definition=ScenarioDefinition(
+            title="Grouped Scenario",
+            participant_teams=[
+                {"id": "it_ops", "label": "IT Ops"},
+                {"id": "legal", "label": "Legal"},
+            ],
+            injects=[
+                InjectNode(id="shared", title="Shared", content="All groups"),
+                InjectNode(
+                    id="targeted",
+                    title="Targeted",
+                    content="Split by group",
+                    target_teams=["it_ops", "legal"],
+                ),
+            ],
+            start_inject_id="shared",
+        ),
+        created_by=facilitator.id,
+    )
+
+    exercise = create_exercise(
+        session,
+        scenario_id=scenario.id,
+        title="Grouped Exercise",
+        created_by=facilitator.id,
+    )
+    injects = session.exec(
+        select(Inject).where(Inject.exercise_id == exercise.id)
+    ).all()
+
+    shared = [i for i in injects if i.scenario_node_id == "shared"]
+    targeted = [i for i in injects if i.scenario_node_id == "targeted"]
+    assert len(shared) == 1
+    assert shared[0].group_id is None
+    assert {i.group_id for i in targeted} == {"it_ops", "legal"}
 
 
 def test_create_exercise_missing_scenario(client: TestClient, facilitator_token: str):
@@ -276,6 +323,30 @@ def test_enrol_member(
     )
     assert r.status_code == 201
     assert r.json()["user_id"] == participant.id
+    assert r.json()["group_id"] == "it_ops"
+
+
+def test_enrol_member_with_group_id(
+    client: TestClient, facilitator_token: str, draft_exercise, participant: User
+):
+    r = client.post(
+        f"/api/exercises/{draft_exercise.id}/members",
+        json={"user_id": participant.id, "group_id": "legal"},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert r.status_code == 201
+    assert r.json()["group_id"] == "legal"
+
+
+def test_enrol_member_rejects_unknown_group(
+    client: TestClient, facilitator_token: str, draft_exercise, participant: User
+):
+    r = client.post(
+        f"/api/exercises/{draft_exercise.id}/members",
+        json={"user_id": participant.id, "group_id": "unknown"},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert r.status_code == 422
 
 
 def test_enrol_member_idempotent(
@@ -314,6 +385,23 @@ def test_list_members(
     )
     assert r.status_code == 200
     assert any(m["user_id"] == participant.id for m in r.json())
+
+
+def test_update_member_group(
+    client: TestClient, facilitator_token: str, draft_exercise, participant: User
+):
+    client.post(
+        f"/api/exercises/{draft_exercise.id}/members",
+        json={"user_id": participant.id},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    r = client.patch(
+        f"/api/exercises/{draft_exercise.id}/members/{participant.id}",
+        json={"group_id": "legal"},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert r.status_code == 200
+    assert r.json()["group_id"] == "legal"
 
 
 def test_remove_member(

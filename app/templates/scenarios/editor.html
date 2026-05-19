@@ -129,10 +129,22 @@
           <div class="mb-3">
             <label class="block smallcaps text-stone-500 mb-1">
               Target teams
-              <span class="text-stone-400 normal-case font-normal">(comma-separated IDs, blank = all)</span>
+              <span class="text-stone-400 normal-case font-normal">(blank = shared)</span>
             </label>
-            <input type="text" x-model="inj._teamsInput" placeholder="it_ops, legal"
-                   class="w-full ring-rule rounded-md px-2.5 py-1.5 text-[13px] bg-white" />
+            <div x-show="form.participant_teams.length"
+                 class="flex flex-wrap gap-2">
+              <template x-for="team in form.participant_teams" :key="team.id">
+                <label class="inline-flex items-center gap-2 rounded-md ring-rule px-2.5 py-1.5 text-[12.5px] cursor-pointer paper-soft">
+                  <input type="checkbox"
+                         :checked="injectTargetsTeam(inj, team.id)"
+                         @change="toggleInjectTeam(inj, team.id, $event.target.checked)"
+                         class="accent-stone-700" />
+                  <span x-text="team.label || team.id"></span>
+                </label>
+              </template>
+            </div>
+            <div x-show="!form.participant_teams.length"
+                 class="text-[12px] text-stone-400">Define participant teams above to target this inject.</div>
           </div>
 
           <div class="flex items-center gap-2 mb-4">
@@ -217,7 +229,7 @@ function makeInject() {
   return {
     _key: _keyCounter++,
     id: '', title: '', content: '',
-    _teamsInput: '',
+    target_teams: [],
     sequence_order: 0,
     options: [],
     expected_actions: [],
@@ -255,7 +267,7 @@ function scenarioEditor(scenarioId) {
             injects: def.injects.map(inj => ({
               ...inj,
               _key: _keyCounter++,
-              _teamsInput: (inj.target_teams || []).join(', '),
+              target_teams: inj.target_teams || [],
               expected_actions: inj.expected_actions || [],
             })),
           };
@@ -282,7 +294,7 @@ function scenarioEditor(scenarioId) {
         injects: (def.injects || []).map(inj => ({
           ...inj,
           _key: _keyCounter++,
-          _teamsInput: (inj.target_teams || []).join(', '),
+          target_teams: inj.target_teams || [],
           expected_actions: inj.expected_actions || [],
         })),
         start_inject_id: def.start_inject_id || '',
@@ -301,14 +313,29 @@ function scenarioEditor(scenarioId) {
     removeInject(i) { this.form.injects.splice(i, 1); },
     addOption(inj) { inj.options.push({ id: '', label: '', next_inject_id: null }); },
     addTeam() { this.form.participant_teams.push({ id: '', label: '' }); },
-    removeTeam(i) { this.form.participant_teams.splice(i, 1); },
+    removeTeam(i) {
+      const [removed] = this.form.participant_teams.splice(i, 1);
+      if (removed?.id) {
+        this.form.injects.forEach(inj => {
+          inj.target_teams = (inj.target_teams || []).filter(t => t !== removed.id);
+        });
+      }
+    },
+    injectTargetsTeam(inj, teamId) {
+      return (inj.target_teams || []).includes(teamId);
+    },
+    toggleInjectTeam(inj, teamId, checked) {
+      inj.target_teams = inj.target_teams || [];
+      if (checked && !inj.target_teams.includes(teamId)) inj.target_teams.push(teamId);
+      if (!checked) inj.target_teams = inj.target_teams.filter(t => t !== teamId);
+    },
 
     buildPayload() {
       const injects = this.form.injects.map(inj => ({
         id: inj.id,
         title: inj.title,
         content: inj.content,
-        target_teams: inj._teamsInput.split(',').map(t => t.trim()).filter(Boolean),
+        target_teams: (inj.target_teams || []).filter(Boolean),
         sequence_order: inj.sequence_order || 0,
         options: inj.options.map(opt => ({
           id: opt.id,

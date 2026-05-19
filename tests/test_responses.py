@@ -3,6 +3,7 @@ from sqlmodel import Session
 
 from app.models.exercise import Exercise
 from app.models.user import User
+from app.schemas.scenario_json import InjectNode, InjectOption, ScenarioDefinition
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -251,6 +252,96 @@ def test_response_with_valid_option_returns_next_inject(
         client, participant_token, active_exercise.id, inject_id, selected_option="opt_a"
     )
     assert r.status_code == 201
+
+
+def test_response_records_group_and_facilitator_gets_pending_next_inject(
+    client: TestClient,
+    facilitator_token: str,
+    participant_token: str,
+    session: Session,
+    facilitator: User,
+    participant: User,
+):
+    from app.models.exercise import ExerciseState
+    from app.services.exercise_service import create_exercise, enrol_member, transition_state
+    from app.services.scenario_service import create_scenario
+
+    scenario = create_scenario(
+        session,
+        definition=ScenarioDefinition(
+            title="IT Branch",
+            participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+            injects=[
+                InjectNode(
+                    id="a",
+                    title="Start",
+                    content="Choose.",
+                    target_teams=["it_ops"],
+                    options=[InjectOption(id="go", label="Go", next_inject_id="b")],
+                ),
+                InjectNode(
+                    id="b",
+                    title="Next",
+                    content="Follow-up.",
+                    target_teams=["it_ops"],
+                ),
+            ],
+            start_inject_id="a",
+        ),
+        created_by=facilitator.id,
+    )
+    exercise = create_exercise(
+        session,
+        scenario_id=scenario.id,
+        title="Branch Group Exercise",
+        created_by=facilitator.id,
+    )
+    enrol_member(session, exercise=exercise, user_id=participant.id)
+    transition_state(session, exercise, ExerciseState.active)
+
+    injects = client.get(
+        f"/api/exercises/{exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    ).json()
+    first = next(i for i in injects if i["scenario_node_id"] == "a")
+    second = next(i for i in injects if i["scenario_node_id"] == "b")
+    client.post(
+        f"/api/exercises/{exercise.id}/injects/{first['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+
+    r = _submit(client, participant_token, exercise.id, first["id"], selected_option="go")
+    assert r.status_code == 201
+    assert r.json()["group_id"] == "it_ops"
+
+    rows = client.get(
+        f"/api/exercises/{exercise.id}/responses",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    ).json()
+    assert rows[0]["group_id"] == "it_ops"
+    assert rows[0]["next_injects"] == [
+        {
+            "id": second["id"],
+            "scenario_node_id": "b",
+            "title": "Next",
+            "group_id": "it_ops",
+        }
+    ]
+
+
+def test_facilitator_preview_participant_response_records_preview_team(
+    client: TestClient,
+    facilitator_token: str,
+    active_exercise: Exercise,
+):
+    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
+    client.cookies.set("dt_view_role", "participant")
+    client.cookies.set("dt_view_team", "it_ops")
+
+    r = _submit(client, facilitator_token, active_exercise.id, inject_id)
+
+    assert r.status_code == 201
+    assert r.json()["group_id"] == "it_ops"
 
 
 def test_ws_broadcasts_response_to_facilitator(

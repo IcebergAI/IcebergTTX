@@ -22,6 +22,11 @@
       <span class="smallcaps" :class="wsConnected ? 'text-stone-400' : 'text-red-400'"
             x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
       <div class="w-px h-5 border-l rule-2 mx-1"></div>
+      <button @click="showOpsPanel = !showOpsPanel"
+              class="btn h-7 px-3 text-[12.5px]"
+              :class="showOpsPanel ? 'btn-primary' : 'btn-ghost'">
+        <span x-text="'Participants (' + members.length + ')'"></span>
+      </button>
       <a :href="exercise ? '/exercises/' + exercise.id + '/communications' : '#'"
          class="btn btn-ghost h-7 px-3 text-[12.5px]">Communications</a>
       <button x-show="exercise?.state === 'draft'" @click="transition('start')"
@@ -36,8 +41,9 @@
     </div>
   </div>
 
-  <!-- 3-pane body -->
-  <div class="grid flex-1 min-h-0" style="grid-template-columns: minmax(280px, 300px) 1fr minmax(280px, 300px);">
+  <!-- Console body -->
+  <div class="grid flex-1 min-h-0"
+       :style="showOpsPanel ? 'grid-template-columns: minmax(300px, 320px) minmax(340px, 1fr) minmax(240px, 260px);' : 'grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);'">
 
     <!-- LEFT: inject tree + ad-hoc form -->
     <div class="border-r rule overflow-y-auto" style="background: var(--paper);">
@@ -50,54 +56,60 @@
               x-text="injects.filter(i => i.state !== 'pending').length + '/' + injects.length + ' live'"></span>
       </div>
 
-      <div class="px-3 pb-3 space-y-2">
-        <template x-for="inj in injects" :key="inj.id">
-          <div class="node"
-               :class="{'current': inj.state === 'released', 'done': inj.state === 'resolved'}">
-            <div class="flex items-start gap-2">
-              <span class="mono text-[10.5px] text-stone-400 w-[52px] shrink-0 pt-0.5 truncate"
-                    :title="inj.scenario_node_id || '—'"
-                    x-text="inj.scenario_node_id || '—'"></span>
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="text-[13px] font-medium" x-text="inj.title"></span>
-                  <span x-show="inj.state === 'released'" class="live-dot"></span>
-                </div>
-                <div class="flex flex-wrap gap-1 mt-1" x-show="inj.target_teams && inj.target_teams.length">
-                  <template x-for="t in (inj.target_teams || [])" :key="t">
-                    <span class="pill mono ring-1 ring-inset text-[10px]"
-                          :class="teamColor(t)" x-text="t"></span>
+      <div class="px-3 pb-3 space-y-3">
+        <template x-for="section in injectSections" :key="section.id || 'shared'">
+          <div>
+            <div class="flex items-center gap-2 px-1 mb-1.5">
+              <div class="smallcaps text-stone-500" x-text="section.label"></div>
+              <span class="ml-auto mono text-[10.5px] text-stone-400"
+                    x-text="section.injects.length + ' queued'"></span>
+            </div>
+            <div class="space-y-1.5">
+              <template x-for="inj in section.injects" :key="inj.id">
+                <div class="node py-2.5"
+                     :class="{'current': inj.state === 'released', 'done': inj.state === 'resolved'}">
+                  <div class="flex items-center gap-2">
+                    <span class="dot shrink-0"
+                          :style="inj.state === 'released' ? 'background: var(--accent);' : (inj.state === 'resolved' ? 'background:#8a877f;' : 'background: transparent; box-shadow: inset 0 0 0 1px var(--rule-2);')"></span>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="text-[13px] font-medium truncate" x-text="inj.title"></span>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span class="pill mono ring-1 ring-inset text-[10px]"
+                              :class="inj.group_id ? teamColor(inj.group_id) : 'bg-stone-100 text-stone-600 ring-stone-200'"
+                              x-text="groupLabel(inj.group_id)"></span>
+                        <span x-show="inj.state === 'released'"
+                              class="mono text-[10.5px] text-stone-500"
+                              x-text="'live ' + fmtTime(inj.released_at)"></span>
+                        <span x-show="inj.state === 'resolved'"
+                              class="mono text-[10.5px] text-stone-400">resolved</span>
+                      </div>
+                    </div>
+                    <button x-show="inj.state === 'pending'"
+                            @click="releaseInject(inj)"
+                            class="btn btn-primary h-6 px-2.5 text-[11.5px] shrink-0">
+                      Release
+                    </button>
+                  </div>
+
+                  <!-- Expected actions (from scenario definition) -->
+                  <template x-if="inj.state === 'released' && nodeMap[inj.scenario_node_id] && nodeMap[inj.scenario_node_id].expected_actions && nodeMap[inj.scenario_node_id].expected_actions.length">
+                    <details class="mt-2 pt-2 border-t" style="border-color: var(--rule);">
+                      <summary class="smallcaps text-stone-400 cursor-pointer">Expected actions</summary>
+                      <ul class="space-y-0.5">
+                        <template x-for="act in nodeMap[inj.scenario_node_id].expected_actions" :key="act">
+                          <li class="flex items-start gap-1.5 text-[11.5px] text-stone-600">
+                            <span class="dot mt-1 shrink-0" style="background: var(--accent-d); width:5px; height:5px;"></span>
+                            <span x-text="act"></span>
+                          </li>
+                        </template>
+                      </ul>
+                    </details>
                   </template>
                 </div>
-              </div>
+              </template>
             </div>
-
-            <!-- Expected actions (from scenario definition) -->
-            <template x-if="inj.state === 'released' && nodeMap[inj.scenario_node_id] && nodeMap[inj.scenario_node_id].expected_actions && nodeMap[inj.scenario_node_id].expected_actions.length">
-              <div class="mt-2 pt-2 border-t" style="border-color: var(--rule);">
-                <div class="smallcaps text-stone-400 mb-1">Expected</div>
-                <ul class="space-y-0.5">
-                  <template x-for="act in nodeMap[inj.scenario_node_id].expected_actions" :key="act">
-                    <li class="flex items-start gap-1.5 text-[11.5px] text-stone-600">
-                      <span class="dot mt-1 shrink-0" style="background: var(--accent-d); width:5px; height:5px;"></span>
-                      <span x-text="act"></span>
-                    </li>
-                  </template>
-                </ul>
-              </div>
-            </template>
-
-            <button x-show="inj.state === 'pending'"
-                    @click="releaseInject(inj)"
-                    class="mt-2 btn btn-primary h-6 px-2.5 text-[11.5px] w-full justify-center">
-              Release
-            </button>
-            <div x-show="inj.state === 'released'"
-                 class="mt-2 flex items-center justify-between mono text-[10.5px] text-stone-500">
-              <span x-text="'released ' + fmtTime(inj.released_at)"></span>
-            </div>
-            <div x-show="inj.state === 'resolved'"
-                 class="mt-2 mono text-[10.5px] text-stone-400">resolved</div>
           </div>
         </template>
 
@@ -106,17 +118,28 @@
 
         <!-- Ad-hoc inject -->
         <div x-show="exercise?.state === 'active' || exercise?.state === 'paused'"
-             class="mt-1 p-3 rounded-lg stripe border border-dashed rule-2">
-          <div class="smallcaps text-stone-500 mb-2">+ Add ad-hoc inject</div>
-          <input type="text" x-model="newTitle" placeholder="Title…"
-                 class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] mb-1.5 bg-white" />
-          <textarea rows="2" x-model="newContent" placeholder="Content…"
-                    class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] resize-none bg-white mb-1.5"></textarea>
-          <div class="flex items-center gap-2">
-            <input type="text" x-model="newTeams" placeholder="teams (comma-separated)"
-                   class="flex-1 rounded-md ring-rule px-2 py-1 text-[12px] bg-white" />
-            <button @click="addInject()"
-                    class="btn btn-primary h-6 px-3 text-[11.5px]">Add</button>
+             class="mt-2 border-t rule pt-3">
+          <button @click="showAddInject = !showAddInject"
+                  class="btn btn-ghost h-7 px-3 text-[12px] w-full justify-center">
+            <span x-text="showAddInject ? 'Hide ad-hoc inject' : '+ Ad-hoc inject'"></span>
+          </button>
+          <div x-show="showAddInject"
+               class="mt-2 p-3 rounded-lg stripe border border-dashed rule-2">
+            <input type="text" x-model="newTitle" placeholder="Title…"
+                   class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] mb-1.5 bg-white" />
+            <textarea rows="2" x-model="newContent" placeholder="Content…"
+                      class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] resize-none bg-white mb-1.5"></textarea>
+            <div class="flex items-center gap-2">
+              <select x-model="newGroup"
+                      class="flex-1 rounded-md ring-rule px-2 py-1 text-[12px] bg-white">
+                <option value="">Shared</option>
+                <template x-for="group in groupDefs" :key="group.id">
+                  <option :value="group.id" x-text="group.label || group.id"></option>
+                </template>
+              </select>
+              <button @click="addInject()"
+                      class="btn btn-primary h-6 px-3 text-[11.5px]">Add</button>
+            </div>
           </div>
         </div>
       </div>
@@ -151,16 +174,19 @@
           <div class="surface overflow-hidden">
             <div class="px-4 py-3 flex items-center gap-3 border-b rule">
               <div class="avatar-chip h-7 w-7 rounded-full grid place-items-center text-[11px] font-semibold shrink-0"
-                   x-text="('User #' + resp.user_id).slice(0,2)">U</div>
+                   x-text="userInitials(resp.user_id)">U</div>
               <div class="min-w-0">
                 <div class="text-[13.5px] font-medium leading-tight"
-                     x-text="'User #' + resp.user_id"></div>
+                     x-text="userDisplayName(resp.user_id)"></div>
                 <div class="mono text-[11px] text-stone-500 leading-tight"
-                     x-text="'#' + resp.id + ' · inject #' + resp.inject_id + ' · ' + fmtAgo(resp.submitted_at)"></div>
+                     x-text="'#' + resp.id + ' · ' + responseInjectLabel(resp) + ' · ' + fmtAgo(resp.submitted_at)"></div>
               </div>
               <template x-if="resp.selected_option">
                 <span class="pill mono ml-1" x-text="resp.selected_option"></span>
               </template>
+              <span class="pill mono ml-auto"
+                    :class="resp.group_id ? teamColor(resp.group_id) : 'bg-stone-100 text-stone-600 ring-stone-200'"
+                    x-text="groupLabel(resp.group_id)"></span>
             </div>
             <div class="grid" :style="assessments[resp.id] ? 'grid-template-columns: 1fr 240px' : 'grid-template-columns: 1fr'">
               <div class="px-4 py-3 text-[13.5px] text-stone-800" x-text="resp.content"></div>
@@ -181,10 +207,16 @@
                 </div>
               </template>
             </div>
-            <template x-if="resp._next_inject_ids && resp._next_inject_ids.length">
-              <div class="px-4 py-2 border-t rule">
-                <span class="mono text-[11px] text-stone-500"
-                      x-text="'Next: ' + resp._next_inject_ids.join(', ')"></span>
+            <template x-if="resp._next_injects && resp._next_injects.length">
+              <div class="px-4 py-2 border-t rule flex items-center gap-2 flex-wrap">
+                <span class="smallcaps text-stone-500">Suggested next</span>
+                <template x-for="next in resp._next_injects" :key="next.id">
+                  <button @click="releaseInjectById(next.id)"
+                          :disabled="!injectById(next.id) || injectById(next.id).state !== 'pending'"
+                          class="btn btn-ghost h-6 px-2.5 text-[11.5px] disabled:opacity-40">
+                    <span x-text="(next.group_id ? groupLabel(next.group_id) + ' · ' : '') + next.title"></span>
+                  </button>
+                </template>
               </div>
             </template>
           </div>
@@ -193,7 +225,7 @@
     </div>
 
     <!-- RIGHT: AI suggestions + participants + export -->
-    <div class="border-l rule overflow-y-auto" style="background: var(--paper);">
+    <div x-show="showOpsPanel" class="border-l rule overflow-y-auto" style="background: var(--paper);">
 
       <!-- AI suggestion card -->
       <template x-if="suggestedInjects.some(s => s.status === 'pending_review')">
@@ -232,38 +264,45 @@
           <span class="mono text-[11px] text-stone-400" x-text="members.length + ' enrolled'"></span>
         </div>
 
-        <ul class="space-y-1.5 mb-3">
-          <template x-for="m in members" :key="m.user_id">
-            <li class="flex items-center gap-2 text-[13px]">
-              <div class="relative shrink-0">
-                <div class="avatar-chip h-6 w-6 rounded-full grid place-items-center text-[10.5px] font-semibold">
-                  <template x-if="userFor(m.user_id)">
-                    <span x-text="userFor(m.user_id).display_name.split(' ').map(x=>x[0]).join('').slice(0,2)"></span>
-                  </template>
-                  <template x-if="!userFor(m.user_id)">
-                    <span x-text="'#' + m.user_id"></span>
-                  </template>
-                </div>
-              </div>
-              <div class="min-w-0 flex-1">
-                <template x-if="userFor(m.user_id)">
-                  <span class="truncate" x-text="userFor(m.user_id).display_name"></span>
+        <ul class="space-y-3 mb-3">
+          <template x-for="section in memberSections" :key="section.id || 'unassigned'">
+            <li>
+              <div class="smallcaps text-stone-400 mb-1" x-text="section.label"></div>
+              <ul class="space-y-1.5">
+                <template x-for="m in section.members" :key="m.user_id">
+                  <li class="flex items-center gap-2 text-[13px]">
+                    <div class="relative shrink-0">
+                      <div class="avatar-chip h-6 w-6 rounded-full grid place-items-center text-[10.5px] font-semibold">
+                        <template x-if="userFor(m.user_id)">
+                          <span x-text="userFor(m.user_id).display_name.split(' ').map(x=>x[0]).join('').slice(0,2)"></span>
+                        </template>
+                        <template x-if="!userFor(m.user_id)">
+                          <span x-text="'#' + m.user_id"></span>
+                        </template>
+                      </div>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <template x-if="userFor(m.user_id)">
+                        <span class="truncate" x-text="userFor(m.user_id).display_name"></span>
+                      </template>
+                      <template x-if="!userFor(m.user_id)">
+                        <span class="text-stone-500" x-text="'User #' + m.user_id"></span>
+                      </template>
+                    </div>
+                    <select :value="m.group_id || ''"
+                            x-effect="$nextTick(() => { $el.value = m.group_id || '' })"
+                            @change="m.group_id = $event.target.value || null; setMemberGroup(m, m.group_id)"
+                            class="w-24 rounded-md ring-rule px-1.5 py-1 text-[11px] bg-white shrink-0">
+                      <option value="">None</option>
+                      <template x-for="group in groupDefs" :key="group.id">
+                        <option :value="group.id" x-text="group.label || group.id"></option>
+                      </template>
+                    </select>
+                    <button @click="removeMember(m.user_id)"
+                            class="text-[11px] text-stone-400 hover:text-red-500 shrink-0">✕</button>
+                  </li>
                 </template>
-                <template x-if="!userFor(m.user_id)">
-                  <span class="text-stone-500" x-text="'User #' + m.user_id"></span>
-                </template>
-              </div>
-              <template x-if="userFor(m.user_id)">
-                <span class="pill mono ring-1 ring-inset text-[10px] shrink-0"
-                      :class="{
-                        'bg-indigo-100/70 text-indigo-700 ring-indigo-200': userFor(m.user_id).role === 'facilitator',
-                        'bg-stone-100 text-stone-600 ring-stone-200': userFor(m.user_id).role === 'participant',
-                        'bg-blue-100/70 text-blue-700 ring-blue-200': userFor(m.user_id).role === 'observer'
-                      }"
-                      x-text="userFor(m.user_id).role"></span>
-              </template>
-              <button @click="removeMember(m.user_id)"
-                      class="text-[11px] text-stone-400 hover:text-red-500 shrink-0">✕</button>
+              </ul>
             </li>
           </template>
           <li x-show="members.length === 0" class="text-[13px] text-stone-400">No members yet.</li>
@@ -271,30 +310,40 @@
 
         <!-- Member search -->
         <div class="border-t rule pt-3">
-          <input type="text" x-model="memberSearch" placeholder="Add by name or email…"
-                 class="w-full rounded-md ring-rule px-2 py-1 text-[12px] bg-white" />
-          <div x-show="memberSearch.length > 0"
-               class="mt-1 border rule rounded-md paper overflow-hidden max-h-40 overflow-y-auto">
-            <template x-for="u in filteredUsers" :key="u.id">
-              <div class="quiet-row flex items-center gap-2 px-2 py-1.5 text-[12.5px]">
-                <div class="min-w-0 flex-1">
-                  <span class="font-medium" x-text="u.display_name"></span>
-                  <span class="ml-1 text-stone-400 text-[11px]" x-text="u.role"></span>
+          <button @click="showAddMember = !showAddMember"
+                  class="btn btn-ghost h-7 px-3 text-[12px] w-full justify-center">
+            <span x-text="showAddMember ? 'Hide add participant' : '+ Add participant'"></span>
+          </button>
+          <div x-show="showAddMember" class="mt-2">
+            <input type="text" x-model="memberSearch" placeholder="Name or email…"
+                   class="w-full rounded-md ring-rule px-2 py-1 text-[12px] bg-white" />
+            <div x-show="memberSearch.length > 0"
+                 class="mt-1 border rule rounded-md paper overflow-hidden max-h-40 overflow-y-auto">
+              <template x-for="u in filteredUsers" :key="u.id">
+                <div class="quiet-row flex items-center gap-2 px-2 py-1.5 text-[12.5px]">
+                  <div class="min-w-0 flex-1">
+                    <span class="font-medium" x-text="u.display_name"></span>
+                    <span class="ml-1 text-stone-400 text-[11px]" x-text="u.role"></span>
+                  </div>
+                  <button @click="addMember(u.id)"
+                          class="btn btn-primary text-[11px] h-5 px-2 shrink-0">Add</button>
                 </div>
-                <button @click="addMember(u.id)"
-                        class="btn btn-primary text-[11px] h-5 px-2 shrink-0">Add</button>
-              </div>
-            </template>
-            <p x-show="filteredUsers.length === 0"
-               class="text-[12px] text-stone-400 text-center py-2">No matching users.</p>
+              </template>
+              <p x-show="filteredUsers.length === 0"
+                 class="text-[12px] text-stone-400 text-center py-2">No matching users.</p>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Export -->
       <div class="px-4 pb-5 border-t rule pt-4">
-        <div class="smallcaps text-stone-500 mb-2">Export</div>
-        <div class="flex flex-col gap-1.5 text-[13px]">
+        <button @click="showExport = !showExport"
+                class="smallcaps text-stone-500 hover:text-stone-800 flex items-center justify-between w-full">
+          <span>Export</span>
+          <span x-text="showExport ? '−' : '+'"></span>
+        </button>
+        <div x-show="showExport" class="flex flex-col gap-1.5 text-[13px] mt-2">
           <a :href="'/api/exercises/' + (exercise?.id || 0) + '/export'" target="_blank"
              class="text-stone-700 hover:text-stone-900 inline-flex items-center gap-2">
             <span class="mono text-stone-400">↓</span>Transcript (JSON)
@@ -324,9 +373,14 @@ function facilitatorConsole(exerciseId) {
     assessments: {},
     suggestedInjects: [],
     nodeMap: {},
+    groupDefs: [],
     newTitle: '',
     newContent: '',
-    newTeams: '',
+    newGroup: '',
+    showAddInject: false,
+    showAddMember: false,
+    showExport: false,
+    showOpsPanel: false,
     responseFilter: 'all',
     ws: null,
     wsConnected: false,
@@ -344,6 +398,31 @@ function facilitatorConsole(exerciseId) {
       return this.responses;
     },
 
+    get injectSections() {
+      const groups = [{ id: null, label: 'Shared', injects: [] }];
+      for (const group of this.groupDefs) groups.push({ id: group.id, label: group.label || group.id, injects: [] });
+      for (const inj of this.injects) {
+        const groupId = inj.group_id || null;
+        let section = groups.find(g => g.id === groupId);
+        if (!section) {
+          section = { id: groupId, label: groupId || 'Shared', injects: [] };
+          groups.push(section);
+        }
+        section.injects.push(inj);
+      }
+      return groups.filter(g => g.injects.length || g.id === null || this.groupDefs.length);
+    },
+
+    get memberSections() {
+      const sections = this.groupDefs.map(g => ({ id: g.id, label: g.label || g.id, members: [] }));
+      const unassigned = { id: null, label: 'Unassigned', members: [] };
+      for (const member of this.members) {
+        const section = sections.find(g => g.id === member.group_id) || unassigned;
+        section.members.push(member);
+      }
+      return [...sections, unassigned].filter(s => s.members.length || s.id !== null);
+    },
+
     get filteredUsers() {
       const q = this.memberSearch.toLowerCase();
       const enrolled = new Set(this.members.map(m => m.user_id));
@@ -355,6 +434,32 @@ function facilitatorConsole(exerciseId) {
 
     userFor(userId) {
       return this.allUsers.find(u => u.id === userId) || null;
+    },
+
+    userDisplayName(userId) {
+      return this.userFor(userId)?.display_name || `User #${userId}`;
+    },
+
+    userInitials(userId) {
+      const name = this.userDisplayName(userId);
+      if (name.startsWith('User #')) return 'Us';
+      return name.split(' ').map(part => part[0]).join('').slice(0, 2);
+    },
+
+    injectById(injectId) {
+      return this.injects.find(i => i.id === injectId) || null;
+    },
+
+    responseInjectLabel(resp) {
+      const inject = this.injectById(resp.inject_id);
+      if (!inject) return `inject #${resp.inject_id}`;
+      return inject.title;
+    },
+
+    groupLabel(groupId) {
+      if (!groupId) return 'Shared';
+      const group = this.groupDefs.find(g => g.id === groupId);
+      return group?.label || groupId;
     },
 
     async init() {
@@ -374,7 +479,14 @@ function facilitatorConsole(exerciseId) {
       if (er && er.ok) this.exercise = await er.json();
       if (mr && mr.ok) this.members = await mr.json();
       if (ir && ir.ok) this.injects = await ir.json();
-      if (rr && rr.ok) this.responses = await rr.json();
+      if (rr && rr.ok) {
+        const rows = await rr.json();
+        this.responses = rows.map(r => ({
+          ...r,
+          _next_inject_ids: r.next_inject_ids || [],
+          _next_injects: r.next_injects || [],
+        }));
+      }
       if (sir && sir.ok) this.suggestedInjects = await sir.json();
       if (ur && ur.ok) this.allUsers = await ur.json();
       if (this.exercise?.scenario_id) {
@@ -382,6 +494,7 @@ function facilitatorConsole(exerciseId) {
         if (sr && sr.ok) {
           const sc = await sr.json();
           this.nodeMap = Object.fromEntries((sc.definition?.injects || []).map(n => [n.id, n]));
+          this.groupDefs = sc.definition?.participant_teams || [];
         }
       }
       this.loading = false;
@@ -427,7 +540,11 @@ function facilitatorConsole(exerciseId) {
           else this.injects.push(msg.payload);
         }
         if (msg.type === 'response_submitted') {
-          const r = { ...msg.payload.response, _next_inject_ids: msg.payload.next_inject_ids };
+          const r = {
+            ...msg.payload.response,
+            _next_inject_ids: msg.payload.next_inject_ids || [],
+            _next_injects: msg.payload.next_injects || [],
+          };
           this.responses.unshift(r);
         }
         if (msg.type === 'exercise_state_change') {
@@ -475,23 +592,25 @@ function facilitatorConsole(exerciseId) {
       }
     },
 
+    async releaseInjectById(injectId) {
+      const inj = this.injectById(injectId);
+      if (inj) await this.releaseInject(inj);
+    },
+
     async addInject() {
       if (!this.newTitle || !this.newContent) return;
-      const teams = this.newTeams
-        ? this.newTeams.split(',').map(t => t.trim()).filter(Boolean)
-        : null;
       const r = await apiFetch(`/exercises/${exerciseId}/injects`, {
         method: 'POST',
         body: JSON.stringify({
           title: this.newTitle,
           content: this.newContent,
-          target_teams: teams,
+          group_id: this.newGroup || null,
           sequence_order: this.injects.length,
         }),
       });
       if (r && r.ok) {
         this.injects.push(await r.json());
-        this.newTitle = ''; this.newContent = ''; this.newTeams = '';
+        this.newTitle = ''; this.newContent = ''; this.newGroup = '';
       }
     },
 
@@ -512,6 +631,18 @@ function facilitatorConsole(exerciseId) {
       await apiFetch(`/exercises/${exerciseId}/members/${userId}`, { method: 'DELETE' });
       const mr = await apiFetch(`/exercises/${exerciseId}/members`);
       if (mr && mr.ok) this.members = await mr.json();
+    },
+
+    async setMemberGroup(member, groupId) {
+      const r = await apiFetch(`/exercises/${exerciseId}/members/${member.user_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ group_id: groupId || null }),
+      });
+      if (r && r.ok) {
+        const updated = await r.json();
+        const idx = this.members.findIndex(m => m.user_id === member.user_id);
+        if (idx !== -1) this.members[idx] = updated;
+      }
     },
 
     async approveSuggestion(s) {

@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -6,9 +7,10 @@ from sqlmodel import Session, select
 
 from app.database import get_session
 from app.dependencies import require_role
-from app.models.inject import Inject, InjectState
+from app.models.inject import Inject
 from app.models.suggested_inject import SuggestedInject, SuggestedInjectStatus
 from app.models.user import User, UserRole
+from app.services.inject_service import create_inject
 from app.services.llm_service import _suggested_payload
 
 router = APIRouter(prefix="/exercises/{exercise_id}/suggested-injects", tags=["suggested-injects"])
@@ -54,15 +56,17 @@ def approve(
     ).all()
     next_order = max((i.sequence_order for i in existing), default=0) + 1
 
-    inject = Inject(
+    target_teams = json.loads(s.target_teams) if s.target_teams else None
+    group_id = target_teams[0] if target_teams and len(target_teams) == 1 else None
+    inject = create_inject(
+        session,
         exercise_id=exercise_id,
         title=s.title,
         content=s.content,
-        target_teams=s.target_teams,
+        target_teams=target_teams,
+        group_id=group_id,
         sequence_order=next_order,
-        state=InjectState.pending,
     )
-    session.add(inject)
 
     s.status = SuggestedInjectStatus.approved
     s.reviewed_by = current_user.id
@@ -76,6 +80,8 @@ def approve(
         "exercise_id": inject.exercise_id,
         "title": inject.title,
         "content": inject.content,
+        "target_teams": target_teams,
+        "group_id": inject.group_id,
         "state": inject.state,
         "sequence_order": inject.sequence_order,
     }

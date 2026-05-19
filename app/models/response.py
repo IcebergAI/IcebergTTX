@@ -8,6 +8,7 @@ class Response(SQLModel, table=True):
     inject_id: int = Field(foreign_key="inject.id")
     exercise_id: int = Field(foreign_key="exercise.id")
     user_id: int = Field(foreign_key="user.id")
+    group_id: str | None = None
     content: str
     selected_option: str | None = None  # option id from scenario definition
     submitted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
