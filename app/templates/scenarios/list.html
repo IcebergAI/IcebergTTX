@@ -31,10 +31,10 @@
 
   <div x-show="loading" class="smallcaps text-stone-400 py-8 text-center">Loading…</div>
 
-  <div x-show="!loading" class="surface overflow-hidden">
+  <div x-show="!loading" class="surface overflow-x-auto">
     <!-- Table header -->
     <div class="grid gap-x-4 px-5 py-2.5 border-b rule"
-         style="grid-template-columns: 1fr 140px 120px 130px 100px;">
+         style="grid-template-columns: minmax(260px, 1fr) minmax(120px, 160px) 112px 88px 184px; min-width: 824px;">
       <div class="smallcaps text-stone-500">Scenario</div>
       <div class="smallcaps text-stone-500">Tags</div>
       <div class="smallcaps text-stone-500 text-right">Injects / branches</div>
@@ -50,7 +50,7 @@
 
     <template x-for="s in scenarios" :key="s.id">
       <div class="grid gap-x-4 px-5 py-3.5 items-center border-b rule hover:bg-stone-50/70"
-           style="grid-template-columns: 1fr 140px 120px 130px 100px;">
+           style="grid-template-columns: minmax(260px, 1fr) minmax(120px, 160px) 112px 88px 184px; min-width: 824px;">
 
         <!-- Scenario name + ID -->
         <div>
@@ -76,7 +76,7 @@
         <div class="mono text-[12px] text-stone-500 text-right" x-text="fmtAgo(s.updated_at)"></div>
 
         <!-- Actions -->
-        <div class="flex items-center justify-end gap-3" x-show="isF">
+        <div class="flex items-center justify-end gap-x-4 whitespace-nowrap" x-show="isF">
           <a :href="'/scenarios/' + s.id + '/edit'"
              class="smallcaps text-stone-400 hover:text-stone-700">Edit</a>
           <a :href="'/api/scenarios/' + s.id + '/export'" target="_blank"

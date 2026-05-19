@@ -23,6 +23,7 @@ from app.services.exercise_service import (
     enrol_member,
     remove_member,
     transition_state,
+    update_member_group,
 )
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
@@ -47,6 +48,11 @@ class UpdateExerciseRequest(BaseModel):
 
 class EnrolMemberRequest(BaseModel):
     user_id: int
+    group_id: str | None = None
+
+
+class UpdateMemberRequest(BaseModel):
+    group_id: str | None = None
 
 
 # ── Serialisation helpers ─────────────────────────────────────────────────────
@@ -71,6 +77,7 @@ def _member_out(m: ExerciseMember) -> dict:
         "id": m.id,
         "exercise_id": m.exercise_id,
         "user_id": m.user_id,
+        "group_id": m.group_id,
         "joined_at": m.joined_at.isoformat(),
     }
 
@@ -176,7 +183,20 @@ def add_member(
     exercise_id: int, body: EnrolMemberRequest, _: FacilitatorDep, session: SessionDep
 ):
     ex = _get_or_404(session, exercise_id)
-    member = enrol_member(session, exercise=ex, user_id=body.user_id)
+    member = enrol_member(session, exercise=ex, user_id=body.user_id, group_id=body.group_id)
+    return _member_out(member)
+
+
+@router.patch("/{exercise_id}/members/{user_id}")
+def patch_member(
+    exercise_id: int,
+    user_id: int,
+    body: UpdateMemberRequest,
+    _: FacilitatorDep,
+    session: SessionDep,
+):
+    ex = _get_or_404(session, exercise_id)
+    member = update_member_group(session, exercise=ex, user_id=user_id, group_id=body.group_id)
     return _member_out(member)
 
 
@@ -208,6 +228,7 @@ def _build_export(session: Session, exercise_id: int) -> dict:
                 "scenario_node_id": i.scenario_node_id,
                 "title": i.title,
                 "state": i.state,
+                "group_id": i.group_id,
                 "released_at": i.released_at.isoformat() if i.released_at else None,
             }
             for i in injects
@@ -217,6 +238,7 @@ def _build_export(session: Session, exercise_id: int) -> dict:
                 "id": r.id,
                 "inject_id": r.inject_id,
                 "user_id": r.user_id,
+                "group_id": r.group_id,
                 "content": r.content,
                 "selected_option": r.selected_option,
                 "submitted_at": r.submitted_at.isoformat(),

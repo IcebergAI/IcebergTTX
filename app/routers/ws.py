@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 
 from app.database import get_session
 from app.models.user import User, UserRole
-from app.services.access_control import require_exercise_access
+from app.services.access_control import exercise_member_for_user, require_exercise_access
 from app.services.auth_service import decode_access_token
 from app.services.ws_manager import manager
 
@@ -56,9 +56,14 @@ async def exercise_ws(
         await ws.close(code=4003)
         return
     assert user.id is not None
+    member = exercise_member_for_user(session, exercise_id, user.id)
+    group_id = member.group_id if member else None
+    if user.role == UserRole.participant:
+        group_id = view_team.strip() if view_team and view_team.strip() else group_id
+        group_id = group_id or user.team
 
     await manager.connect(
-        ws, exercise_id, user_id=user.id, role=user.role.value, team=user.team
+        ws, exercise_id, user_id=user.id, role=user.role.value, group_id=group_id
     )
     try:
         while True:

@@ -110,6 +110,90 @@ def test_participant_sees_only_released_visible_injects(
     payload = r.json()
     assert [i["scenario_node_id"] for i in payload] == ["inject_01"]
     assert payload[0]["options"][0]["id"] == "opt_a"
+    assert payload[0]["group_id"] == "it_ops"
+
+
+def test_facilitator_preview_participant_uses_preview_team_for_visibility(
+    client: TestClient, facilitator_token: str, active_exercise: Exercise
+):
+    injects = client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    ).json()
+    it_ops_inject = next(i for i in injects if i["scenario_node_id"] == "inject_01")
+    legal_inject = next(i for i in injects if i["scenario_node_id"] == "inject_02")
+
+    for inject in (it_ops_inject, legal_inject):
+        client.post(
+            f"/api/exercises/{active_exercise.id}/injects/{inject['id']}/release",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+
+    client.cookies.set("dt_view_role", "participant")
+    client.cookies.set("dt_view_team", "it_ops")
+    r = client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+
+    assert r.status_code == 200
+    payload = r.json()
+    assert [i["scenario_node_id"] for i in payload] == ["inject_01"]
+    assert payload[0]["group_id"] == "it_ops"
+
+
+def test_different_groups_see_different_released_injects(
+    client: TestClient,
+    participant_token: str,
+    facilitator_token: str,
+    active_exercise: Exercise,
+    session: Session,
+):
+    from app.models.user import UserRole
+    from app.services.auth_service import create_access_token, hash_password
+    from app.services.exercise_service import enrol_member
+
+    legal = User(
+        email="legal-group@example.com",
+        display_name="Legal Group",
+        hashed_password=hash_password("pw"),
+        role=UserRole.participant,
+        team="legal",
+    )
+    session.add(legal)
+    session.commit()
+    session.refresh(legal)
+    enrol_member(session, exercise=active_exercise, user_id=legal.id)
+    legal_token = create_access_token(subject=legal.email, role=legal.role.value)
+
+    injects = client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    ).json()
+    it_ops_inject = next(
+        i for i in injects if i["scenario_node_id"] == "inject_01" and i["group_id"] == "it_ops"
+    )
+    legal_inject = next(
+        i for i in injects if i["scenario_node_id"] == "inject_02" and i["group_id"] == "legal"
+    )
+
+    for inject in (it_ops_inject, legal_inject):
+        client.post(
+            f"/api/exercises/{active_exercise.id}/injects/{inject['id']}/release",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+
+    it_ops_payload = client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {participant_token}"},
+    ).json()
+    legal_payload = client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {legal_token}"},
+    ).json()
+
+    assert [i["group_id"] for i in it_ops_payload] == ["it_ops"]
+    assert [i["group_id"] for i in legal_payload] == ["legal"]
 
 
 def test_get_inject(

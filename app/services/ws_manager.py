@@ -6,7 +6,7 @@ from fastapi import WebSocket
 
 class ConnectionManager:
     def __init__(self) -> None:
-        # exercise_id -> list of (websocket, user_id, role, teams, last_ping)
+        # exercise_id -> connection metadata
         self._rooms: dict[int, list[dict]] = {}
 
     async def connect(
@@ -15,7 +15,7 @@ class ConnectionManager:
         exercise_id: int,
         user_id: int,
         role: str,
-        team: str | None,
+        group_id: str | None,
     ) -> None:
         await ws.accept()
         self._rooms.setdefault(exercise_id, []).append(
@@ -23,7 +23,7 @@ class ConnectionManager:
                 "ws": ws,
                 "user_id": user_id,
                 "role": role,
-                "team": team,
+                "group_id": group_id,
                 "last_ping": datetime.now(UTC),
             }
         )
@@ -41,15 +41,20 @@ class ConnectionManager:
     async def broadcast_to_exercise(self, exercise_id: int, message: dict) -> None:
         await self._send_to_many(self._rooms.get(exercise_id, []), message)
 
-    async def broadcast_to_teams(
-        self, exercise_id: int, teams: list[str], message: dict
+    async def broadcast_to_groups(
+        self, exercise_id: int, group_ids: list[str], message: dict
     ) -> None:
         conns = [
             c
             for c in self._rooms.get(exercise_id, [])
-            if c["team"] in teams or c["role"] == "facilitator"
+            if c["group_id"] in group_ids or c["role"] == "facilitator"
         ]
         await self._send_to_many(conns, message)
+
+    async def broadcast_to_teams(
+        self, exercise_id: int, teams: list[str], message: dict
+    ) -> None:
+        await self.broadcast_to_groups(exercise_id, teams, message)
 
     async def send_to_facilitators(self, exercise_id: int, message: dict) -> None:
         conns = [

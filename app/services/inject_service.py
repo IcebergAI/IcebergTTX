@@ -17,14 +17,20 @@ def create_inject(
     content: str,
     scenario_node_id: str | None = None,
     target_teams: list[str] | None = None,
+    group_id: str | None = None,
     sequence_order: int = 0,
 ) -> Inject:
+    normalized_group_id = group_id.strip() if group_id and group_id.strip() else None
+    normalized_targets = target_teams
+    if normalized_group_id and not normalized_targets:
+        normalized_targets = [normalized_group_id]
     inject = Inject(
         exercise_id=exercise_id,
         scenario_node_id=scenario_node_id,
         title=title,
         content=content,
-        target_teams=json.dumps(target_teams) if target_teams else None,
+        target_teams=json.dumps(normalized_targets) if normalized_targets else None,
+        group_id=normalized_group_id,
         sequence_order=sequence_order,
     )
     session.add(inject)
@@ -89,9 +95,7 @@ async def _trigger_communications(session: Session, inject: Inject) -> None:
 async def _broadcast_inject_released(session: Session, inject: Inject) -> None:
     from app.services.ws_manager import manager
 
-    target_teams: list[str] | None = (
-        json.loads(inject.target_teams) if inject.target_teams else None
-    )
+    target_groups = _inject_target_groups(inject)
     message = {
         "type": "inject_released",
         "exercise_id": inject.exercise_id,
@@ -99,10 +103,16 @@ async def _broadcast_inject_released(session: Session, inject: Inject) -> None:
         "payload": _inject_payload(session, inject),
     }
 
-    if target_teams:
-        await manager.broadcast_to_teams(inject.exercise_id, target_teams, message)
+    if target_groups:
+        await manager.broadcast_to_groups(inject.exercise_id, target_groups, message)
     else:
         await manager.broadcast_to_exercise(inject.exercise_id, message)
+
+
+def _inject_target_groups(inject: Inject) -> list[str] | None:
+    if inject.group_id:
+        return [inject.group_id]
+    return json.loads(inject.target_teams) if inject.target_teams else None
 
 
 def _inject_options(session: Session, inject: Inject) -> list[dict]:
@@ -135,6 +145,7 @@ def _inject_payload(session: Session, inject: Inject) -> dict:
         "title": inject.title,
         "content": inject.content,
         "target_teams": json.loads(inject.target_teams) if inject.target_teams else None,
+        "group_id": inject.group_id,
         "sequence_order": inject.sequence_order,
         "state": inject.state,
         "released_at": inject.released_at.isoformat() if inject.released_at else None,
@@ -147,12 +158,27 @@ def seed_injects_from_scenario(session: Session, exercise_id: int, scenario: Sce
     """Pre-populate Inject rows from the scenario definition (all pending)."""
     definition = export_definition(scenario)
     for i, node in enumerate(definition.injects):
-        create_inject(
-            session,
-            exercise_id=exercise_id,
-            title=node.title,
-            content=node.content,
-            scenario_node_id=node.id,
-            target_teams=node.target_teams or None,
-            sequence_order=i,
-        )
+        sequence_order = node.sequence_order or i
+        if node.target_teams:
+            for group_id in node.target_teams:
+                create_inject(
+                    session,
+                    exercise_id=exercise_id,
+                    title=node.title,
+                    content=node.content,
+                    scenario_node_id=node.id,
+                    target_teams=[group_id],
+                    group_id=group_id,
+                    sequence_order=sequence_order,
+                )
+        else:
+            create_inject(
+                session,
+                exercise_id=exercise_id,
+                title=node.title,
+                content=node.content,
+                scenario_node_id=node.id,
+                target_teams=None,
+                group_id=None,
+                sequence_order=sequence_order,
+            )

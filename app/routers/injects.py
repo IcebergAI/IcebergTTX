@@ -14,6 +14,7 @@ from app.services.access_control import (
     require_exercise_access,
     require_inject_visible,
 )
+from app.services.exercise_service import validate_group_id
 from app.services.inject_service import (
     create_inject,
     get_inject_or_404,
@@ -32,6 +33,7 @@ class CreateInjectRequest(BaseModel):
     content: str
     scenario_node_id: str | None = None
     target_teams: list[str] | None = None
+    group_id: str | None = None
     sequence_order: int = 0
 
 
@@ -65,6 +67,7 @@ def _inject_out(inject: Inject, session: Session | None = None) -> dict:
         "title": inject.title,
         "content": inject.content,
         "target_teams": json.loads(inject.target_teams) if inject.target_teams else None,
+        "group_id": inject.group_id,
         "sequence_order": inject.sequence_order,
         "state": inject.state,
         "released_at": inject.released_at.isoformat() if inject.released_at else None,
@@ -86,7 +89,8 @@ def list_injects(exercise_id: int, current_user: CurrentUserDep, session: Sessio
     visible = [
         i
         for i in injects
-        if current_user.role == UserRole.facilitator or require_visible_bool(i, current_user)
+        if current_user.role == UserRole.facilitator
+        or require_visible_bool(session, i, current_user)
     ]
     return [_inject_out(i, session) for i in visible]
 
@@ -98,7 +102,10 @@ def create(
     _: FacilitatorDep,
     session: SessionDep,
 ):
-    require_exercise_access(session, exercise_id, _)
+    exercise = require_exercise_access(session, exercise_id, _)
+    group_id = validate_group_id(session, exercise, body.group_id)
+    if group_id is None and body.target_teams and len(body.target_teams) == 1:
+        group_id = validate_group_id(session, exercise, body.target_teams[0])
     inject = create_inject(
         session,
         exercise_id=exercise_id,
@@ -106,6 +113,7 @@ def create(
         content=body.content,
         scenario_node_id=body.scenario_node_id,
         target_teams=body.target_teams,
+        group_id=group_id,
         sequence_order=body.sequence_order,
     )
     return _inject_out(inject, session)
@@ -115,7 +123,7 @@ def create(
 def get_inject(exercise_id: int, inject_id: int, current_user: CurrentUserDep, session: SessionDep):
     require_exercise_access(session, exercise_id, current_user)
     inject = get_inject_or_404(session, exercise_id, inject_id)
-    require_inject_visible(inject, current_user)
+    require_inject_visible(session, inject, current_user)
     return _inject_out(inject, session)
 
 
@@ -144,9 +152,9 @@ async def release(
     return _inject_out(await release_inject(session, inject, released_by=current_user.id), session)
 
 
-def require_visible_bool(inject: Inject, user: User) -> bool:
+def require_visible_bool(session: Session, inject: Inject, user: User) -> bool:
     try:
-        require_inject_visible(inject, user)
+        require_inject_visible(session, inject, user)
         return True
     except HTTPException:
         return False
