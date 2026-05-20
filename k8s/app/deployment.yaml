@@ -1,0 +1,99 @@
+# IMPORTANT: replicas must remain 1.
+# ws_manager.py holds all WebSocket state in-memory. Scaling beyond 1 replica
+# silently breaks broadcasts — clients on different replicas cannot receive
+# each other's events. Add Redis pub/sub to ws_manager.py before scaling.
+#
+# strategy: Recreate ensures the old pod is terminated before the new one
+# starts, so there is never a brief window with 2 replicas running.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deep-thought-app
+  namespace: deep-thought
+  labels:
+    app.kubernetes.io/name: deep-thought-app
+    app.kubernetes.io/part-of: deep-thought
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: deep-thought-app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: deep-thought-app
+        app.kubernetes.io/part-of: deep-thought
+    spec:
+      initContainers:
+        # Populate the shared emptyDir with compiled static assets from the
+        # image so nginx (which has its own copy) can serve them directly.
+        - name: copy-static
+          image: your-registry/deep-thought:latest  # REPLACE with actual image
+          command: ["/bin/sh", "-c", "cp -a /app/static_src/. /app/static/"]
+          volumeMounts:
+            - name: static-files
+              mountPath: /app/static
+      containers:
+        - name: app
+          image: your-registry/deep-thought:latest  # REPLACE with actual image
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: deep-thought-secrets
+                  key: DATABASE_URL
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: deep-thought-secrets
+                  key: SECRET_KEY
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: deep-thought-secrets
+                  key: ANTHROPIC_API_KEY
+            - name: ACCESS_TOKEN_EXPIRE_MINUTES
+              valueFrom:
+                configMapKeyRef:
+                  name: deep-thought-config
+                  key: ACCESS_TOKEN_EXPIRE_MINUTES
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/uploads
+            - name: static-files
+              mountPath: /app/static
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: app-uploads
+        - name: static-files
+          emptyDir: {}

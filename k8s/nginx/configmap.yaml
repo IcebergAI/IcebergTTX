@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: deep-thought
+  labels:
+    app.kubernetes.io/name: nginx
+    app.kubernetes.io/part-of: deep-thought
+data:
+  default.conf: |
+    upstream app_backend {
+        server deep-thought-app:8000;
+    }
+
+    server {
+        listen 80;
+        server_name _;
+
+        client_max_body_size 30m;
+
+        location /static/ {
+            alias /app/static/;
+            expires 7d;
+            add_header Cache-Control "public, immutable";
+            access_log off;
+        }
+
+        location /ws/ {
+            proxy_pass http://app_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 86400s;
+            proxy_send_timeout 86400s;
+            proxy_connect_timeout 10s;
+        }
+
+        location / {
+            proxy_pass http://app_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Upgrade "";
+            proxy_set_header Connection "";
+            proxy_read_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_connect_timeout 10s;
+            proxy_buffering on;
+            proxy_buffer_size 4k;
+            proxy_buffers 8 4k;
+        }
+    }

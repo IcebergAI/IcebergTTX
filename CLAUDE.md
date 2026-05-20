@@ -19,7 +19,7 @@ API-first architecture.
 
 ## Key Architectural Decisions
 
-**Database**: SQLite for now. No migrations tool — `SQLModel.metadata.create_all()` on startup. Migrate to Postgres if multi-process deployment is needed.
+**Database**: SQLite for local development; PostgreSQL for containerized deployments. Engine creation in `database.py` is conditionalized — `connect_args={"check_same_thread": False}` is only passed for SQLite; Postgres gets `pool_pre_ping=True` instead. `create_all()` on startup handles both fresh SQLite and fresh Postgres schemas. No Alembic yet — schema changes to an existing production DB must be applied manually until Alembic is added.
 
 **Password hashing**: Uses `bcrypt` directly (not `passlib`). `passlib[bcrypt]` is incompatible with Python 3.14 due to a `bcrypt.__about__` removal in bcrypt 4.x.
 
@@ -38,6 +38,18 @@ API-first architecture.
 **Frontend design system**: Warm stone palette with CSS custom properties (`--bg`, `--paper`, `--ink`, `--accent`, etc.) defined in `base.html`. IBM Plex Sans + IBM Plex Mono via Google Fonts. Custom utility classes (`.smallcaps`, `.mono`, `.pill`, `.btn-*`, `.node`, `.briefing`, `.live-dot`) live in the `<style>` block of `base.html` — not Tailwind utilities. Persistent dark sidebar (`w-56`, `position: sticky`) replaces the old top nav bar. Sidebar hides itself on auth pages via `x-show="!!user"` (no token → `user: null`).
 
 **Communications delay**: `triggers_communications` in the scenario JSON fire via `asyncio.create_task(asyncio.sleep(...))` — sufficient for single-process. Would need a task queue (e.g. Celery, ARQ) for multi-process deployment.
+
+**Group-scoped injects**: `Inject.group_id` and `ExerciseMember.group_id` allow injects to be targeted at specific exercise groups (teams). When `group_id` is `None` the inject is visible to all groups. The inject router resolves group membership via `exercise_group_for_user()` at query time.
+
+**File attachments on injects**: Injects support a single file attachment (`attachment_filename`, `attachment_path`, `attachment_content_type`, `attachment_size` on the `Inject` model). Files are stored under `uploads/inject_attachments/{exercise_id}/`. The inject router accepts `multipart/form-data`; `inject_attachment_payload()` builds the download URL returned in the inject payload.
+
+**Role preview**: Facilitators can view the app as a participant or observer via `dt_view_role` and `dt_view_team` cookies (set from `/settings`). `_optional_user()` in `ui.py` reads these cookies and overrides the Jinja2 template role/team — but only when the JWT already contains the `facilitator` role, so API calls are never downgraded.
+
+**Dark mode**: Full CSS custom-property theming system in `base.html`. `data-theme="dark"` on `<html>` switches the entire palette. A short inline `<script>` at the top of `<head>` applies the saved theme before first paint (prevents FOUC). User preference stored in `dt_theme`/`dt_resolved_theme`/`dt_accent` cookies and `localStorage`. Toggled from `/settings`.
+
+**Sample scenarios**: `app/samples/` contains bundled JSON scenario definitions (`ransomware_response.json`, `vendor_outage.json`). `app/services/sample_service.py` lists, validates, and loads them. The settings page exposes a sample loader UI for facilitators.
+
+**Containerized deployment**: `Dockerfile` is a two-stage build — stage 1 compiles Tailwind CSS (`pytailwindcss`), stage 2 is the Python runtime. The compiled `static/` directory is also copied to `static_src/` in the image; this path is never overridden by a volume mount and is used by entrypoint scripts (Docker Compose) and init containers (k8s) to populate shared static volumes so nginx always serves the version matching the running image. `docker-compose.yml` runs `app` + `postgres:17` + `nginx:alpine` on a private bridge network with named volumes for DB data, uploads, and static files. `k8s/` contains namespace, secrets, configmap, postgres StatefulSet, app Deployment, and nginx Deployment manifests. **Replica constraint**: `ws_manager.py` is in-memory only — app must run as a single replica until Redis pub/sub is added. k8s manifests enforce `replicas: 1` and `strategy: Recreate`. Install the `postgres` optional dep group (`pip install -e ".[postgres]"`) to get `psycopg2-binary`; the Dockerfile uses this extra. A minimal `GET /api/health` endpoint (`app/routers/health.py`) is used by k8s liveness/readiness probes.
 
 ---
 
@@ -66,8 +78,15 @@ app/
     │   exercises/facilitator.html  # Full-height 3-pane console
     │   exercises/participant.html  # Briefing cards (760px centered)
     │   communications/inbox.html   # 340px list + reader pane
+    │   communications/index.html  # /communications hub (redirects to active exercise)
+    │   settings.html              # Dark mode toggle, role preview, sample scenario loader
 tests/               # Pytest suite (conftest.py + one file per resource)
 static/css/          # output.css (Tailwind compiled, Phase 7+)
+app/samples/         # Bundled scenario JSON definitions (ransomware_response, vendor_outage)
+Dockerfile           # Multi-stage: Tailwind build → Python runtime (non-root, static_src/ trick)
+docker-compose.yml   # app + postgres:17 + nginx:alpine; named volumes for DB, uploads, static
+docker/nginx.conf    # Reverse proxy config with WebSocket upgrade support
+k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, nginx)
 revised/             # Claude Design prototype (static reference, not served)
 ```
 
@@ -86,8 +105,13 @@ revised/             # Claude Design prototype (static reference, not served)
 | 7 — Polish (Tailwind CLI, CI, exports) | ✅ Complete |
 | 8 — LLM Integration (Claude API) | ✅ Complete |
 | 9 — UI Redesign (warm stone palette, sidebar, IBM Plex) | ✅ Complete |
+| 10 — Expected actions on injects (schema + editor + LLM rubric) | ✅ Complete |
+| 11 — Participant communications (outbound send from inbox) | ✅ Complete |
+| 12 — Group-scoped injects + file attachments | ✅ Complete |
+| 13 — Dark mode + role preview + settings page + sample scenarios | ✅ Complete |
+| 14 — Containerized deployment (Docker Compose + Kubernetes + Postgres + nginx) | ✅ Complete |
 
-Current test count: **123 passing**.
+Current test count: **167 passing**.
 
 ---
 

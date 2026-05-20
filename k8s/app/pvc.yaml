@@ -1,0 +1,18 @@
+# WARNING: Deleting this PVC permanently destroys all inject file attachments.
+# Use a StorageClass with reclaimPolicy: Retain in production to prevent
+# accidental data loss when the PVC is deleted.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-uploads
+  namespace: deep-thought
+  labels:
+    app.kubernetes.io/name: deep-thought-app
+    app.kubernetes.io/part-of: deep-thought
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  # storageClassName: ""  # Uncomment and set to a Retain-policy class in production

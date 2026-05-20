@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deep-thought-config
+  namespace: deep-thought
+data:
+  ACCESS_TOKEN_EXPIRE_MINUTES: "480"

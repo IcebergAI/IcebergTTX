@@ -22,7 +22,7 @@ A tabletop exercise (TTX) platform for running cyber incident and business resil
 
 ## Tech Stack
 
-- **Backend**: Python 3.14+, FastAPI, SQLModel, SQLite
+- **Backend**: Python 3.14+, FastAPI, SQLModel, SQLite (dev) / PostgreSQL (containers)
 - **Frontend**: Jinja2 templates, Tailwind CSS v4 (CLI-compiled), Alpine.js
 - **Real-time**: WebSockets (FastAPI native)
 - **Auth**: JWT tokens (httpOnly cookie + localStorage)
@@ -48,6 +48,54 @@ uvicorn app.main:app --reload
 
 Open [http://localhost:8000](http://localhost:8000). Register a facilitator account, then create a scenario and exercise. To try the app quickly, open Settings and load a sample scenario or demo exercise. In-app help is available at [/help](http://localhost:8000/help).
 
+## Docker Deployment
+
+A `docker-compose.yml` is provided for single-host deployments. It runs the app, PostgreSQL 17, and nginx as a reverse proxy.
+
+```bash
+# Copy and fill in secrets (POSTGRES_PASSWORD and SECRET_KEY are required)
+cp .env.example .env
+
+# Build and start
+docker compose up -d
+
+# Check all three services are healthy
+docker compose ps
+```
+
+The app will be available on port 80. nginx serves static files directly and proxies everything else (including WebSocket upgrades at `/ws/`) to uvicorn.
+
+To stop without losing data:
+```bash
+docker compose down        # keeps named volumes (postgres_data, uploads)
+docker compose down -v     # also deletes volumes — permanent data loss
+```
+
+## Kubernetes Deployment
+
+Manifests are in `k8s/`. Apply in order:
+
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/secrets.yaml k8s/configmap.yaml
+
+# Before applying, replace placeholder values in k8s/secrets.yaml
+# and replace 'your-registry/deep-thought:latest' in:
+#   k8s/app/deployment.yaml
+#   k8s/nginx/deployment.yaml
+
+kubectl apply -f k8s/postgres/
+kubectl rollout status statefulset/postgres -n deep-thought
+
+kubectl apply -f k8s/app/
+kubectl rollout status deployment/deep-thought-app -n deep-thought
+
+kubectl apply -f k8s/nginx/
+kubectl rollout status deployment/nginx -n deep-thought
+```
+
+> **Note**: The app must run as a single replica (`replicas: 1`) until the in-memory WebSocket manager is replaced with a distributed backend (e.g. Redis pub/sub). The manifests enforce this with `strategy: Recreate`.
+
 ## Running Tests
 
 ```bash
@@ -69,7 +117,7 @@ tailwindcss -i static/css/input.css -o static/css/output.css
 app/
 ├── main.py          # App factory + lifespan
 ├── config.py        # Settings (pydantic-settings, reads .env)
-├── database.py      # SQLite engine + get_session dependency
+├── database.py      # SQLite / Postgres engine + get_session dependency
 ├── dependencies.py  # FastAPI dependencies (auth, role guards)
 ├── models/          # SQLModel table definitions
 ├── schemas/         # Pydantic request/response schemas
@@ -87,7 +135,10 @@ app/
     └── communications/      # inbox
 tests/               # Pytest test suite (conftest.py + one file per resource)
 static/css/          # output.css (Tailwind CLI compiled)
-revised/             # Claude Design prototype (reference only)
+Dockerfile           # Multi-stage build (Tailwind compile + Python runtime)
+docker-compose.yml   # app + postgres:17 + nginx:alpine
+docker/nginx.conf    # Reverse proxy config with WebSocket upgrade support
+k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, nginx)
 ```
 
 ## Quick Workflow

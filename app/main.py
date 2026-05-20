@@ -20,6 +20,7 @@ from app.routers import (
     auth,
     communications,
     exercises,
+    health,
     injects,
     responses,
     scenarios,
@@ -67,3 +68,4 @@ app.include_router(responses.router, prefix="/api")
 app.include_router(suggested_injects.router, prefix="/api")
 app.include_router(communications.router, prefix="/api")
 app.include_router(ws.router)
+app.include_router(health.router)

@@ -32,6 +32,9 @@ dev = [
     "playwright>=1.52",
     "pytest-playwright>=0.7",
 ]
+postgres = [
+    "psycopg2-binary>=2.9",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
