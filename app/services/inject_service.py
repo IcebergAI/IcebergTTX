@@ -19,6 +19,10 @@ def create_inject(
     target_teams: list[str] | None = None,
     group_id: str | None = None,
     sequence_order: int = 0,
+    attachment_filename: str | None = None,
+    attachment_content_type: str | None = None,
+    attachment_path: str | None = None,
+    attachment_size: int | None = None,
 ) -> Inject:
     normalized_group_id = group_id.strip() if group_id and group_id.strip() else None
     normalized_targets = target_teams
@@ -32,6 +36,10 @@ def create_inject(
         target_teams=json.dumps(normalized_targets) if normalized_targets else None,
         group_id=normalized_group_id,
         sequence_order=sequence_order,
+        attachment_filename=attachment_filename,
+        attachment_content_type=attachment_content_type,
+        attachment_path=attachment_path,
+        attachment_size=attachment_size,
     )
     session.add(inject)
     session.commit()
@@ -115,6 +123,17 @@ def _inject_target_groups(inject: Inject) -> list[str] | None:
     return json.loads(inject.target_teams) if inject.target_teams else None
 
 
+def inject_attachment_payload(inject: Inject) -> dict | None:
+    if not inject.attachment_path or not inject.attachment_filename:
+        return None
+    return {
+        "filename": inject.attachment_filename,
+        "content_type": inject.attachment_content_type or "application/octet-stream",
+        "size": inject.attachment_size,
+        "url": f"/api/exercises/{inject.exercise_id}/injects/{inject.id}/attachment",
+    }
+
+
 def _inject_options(session: Session, inject: Inject) -> list[dict]:
     if not inject.scenario_node_id:
         return []
@@ -151,6 +170,7 @@ def _inject_payload(session: Session, inject: Inject) -> dict:
         "released_at": inject.released_at.isoformat() if inject.released_at else None,
         "released_by": inject.released_by,
         "options": _inject_options(session, inject),
+        "attachment": inject_attachment_payload(inject),
     }
 
 

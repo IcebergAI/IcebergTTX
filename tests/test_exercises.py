@@ -121,6 +121,20 @@ def test_participant_sees_enrolled_exercise(
     assert [ex["id"] for ex in r.json()] == [active_exercise.id]
 
 
+def test_participant_can_list_exercise_team_labels(
+    client: TestClient, participant_token: str, active_exercise: Exercise
+):
+    r = client.get(
+        f"/api/exercises/{active_exercise.id}/teams",
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert r.status_code == 200
+    assert r.json() == [
+        {"id": "it_ops", "label": "IT Ops"},
+        {"id": "legal", "label": "Legal"},
+    ]
+
+
 def test_facilitator_preview_participant_still_lists_exercises_for_testing(
     client: TestClient,
     facilitator_token: str,

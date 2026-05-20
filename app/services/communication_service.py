@@ -4,10 +4,15 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from sqlalchemy import desc
 from sqlmodel import Session, select
 
 from app.models.communication import CommDirection, Communication
+from app.models.exercise import Exercise, ExerciseMember
 from app.models.inject import Inject
+from app.models.scenario import Scenario
+from app.models.user import User
+from app.services.scenario_service import export_definition
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +25,7 @@ def create_communication(
     subject: str,
     body: str,
     sender_id: int | None = None,
+    sender_team: str | None = None,
     external_entity: str | None = None,
     triggered_by_inject_id: int | None = None,
     visible_to_teams: list[str] | None = None,
@@ -27,6 +33,7 @@ def create_communication(
     comm = Communication(
         exercise_id=exercise_id,
         sender_id=sender_id,
+        sender_team=sender_team,
         direction=direction,
         external_entity=external_entity,
         subject=subject,
@@ -54,37 +61,86 @@ def mark_read(session: Session, comm: Communication, user_id: int) -> Communicat
 def list_communications(
     session: Session,
     exercise_id: int,
+    user_id: int | None = None,
     user_team: str | None = None,
+    participant_view: bool = False,
 ) -> list[Communication]:
-    """Return comms visible to the given team (or all if team is None / facilitator)."""
+    """Return comms visible to the given participant team (or all for facilitators)."""
     comms = session.exec(
         select(Communication)
         .where(Communication.exercise_id == exercise_id)
-        .order_by(cast(Any, Communication.sent_at))
+        .order_by(desc(cast(Any, Communication.sent_at)))
     ).all()
 
-    if user_team is None:
+    if not participant_view and user_team is None:
         return list(comms)
 
     visible = []
     for c in comms:
         teams = json.loads(c.visible_to_teams) if c.visible_to_teams else None
-        if teams is None or user_team in teams:
+        if c.direction == CommDirection.outbound:
+            sender_team = sender_team_for_comm(session, c)
+            sent_by_user = c.sender_id == user_id and (
+                sender_team is None or sender_team == user_team
+            )
+            received_by_team = teams is not None and user_team is not None and user_team in teams
+            if sent_by_user or received_by_team:
+                visible.append(c)
+            continue
+        if teams is None or (user_team is not None and user_team in teams):
             visible.append(c)
     return visible
 
 
-def comm_payload(c: Communication) -> dict:
+def sender_team_for_comm(session: Session | None, comm: Communication) -> str | None:
+    if comm.sender_team:
+        return comm.sender_team
+    if session is None or comm.sender_id is None:
+        return None
+    member = session.exec(
+        select(ExerciseMember)
+        .where(ExerciseMember.exercise_id == comm.exercise_id)
+        .where(ExerciseMember.user_id == comm.sender_id)
+    ).first()
+    if member and member.group_id:
+        return member.group_id
+    user = session.get(User, comm.sender_id)
+    return user.team if user else None
+
+
+def all_team_ids_for_exercise(session: Session, exercise_id: int) -> list[str]:
+    exercise = session.get(Exercise, exercise_id)
+    if not exercise:
+        return []
+    scenario = session.get(Scenario, exercise.scenario_id)
+    if not scenario:
+        return []
+    definition = export_definition(scenario)
+    return [team.id for team in definition.participant_teams]
+
+
+def visible_to_teams_for_payload(
+    c: Communication, session: Session | None = None
+) -> list[str] | None:
+    if c.visible_to_teams:
+        return json.loads(c.visible_to_teams)
+    if c.direction == CommDirection.inbound and session is not None:
+        return all_team_ids_for_exercise(session, c.exercise_id) or None
+    return None
+
+
+def comm_payload(c: Communication, session: Session | None = None) -> dict:
     return {
         "id": c.id,
         "exercise_id": c.exercise_id,
         "sender_id": c.sender_id,
+        "sender_team": sender_team_for_comm(session, c),
         "direction": c.direction,
         "external_entity": c.external_entity,
         "subject": c.subject,
         "body": c.body,
         "triggered_by_inject_id": c.triggered_by_inject_id,
-        "visible_to_teams": json.loads(c.visible_to_teams) if c.visible_to_teams else None,
+        "visible_to_teams": visible_to_teams_for_payload(c, session),
         "sent_at": c.sent_at.isoformat(),
         "read_by": json.loads(c.read_by) if c.read_by else [],
     }
@@ -100,7 +156,14 @@ async def broadcast_communication(comm: Communication) -> None:
         "timestamp": datetime.now(UTC).isoformat(),
         "payload": comm_payload(comm),
     }
-    if teams:
+    if comm.direction == CommDirection.outbound:
+        if teams:
+            await manager.send_to_facilitators_user_and_groups(
+                comm.exercise_id, comm.sender_id, teams, message
+            )
+        else:
+            await manager.send_to_facilitators_and_user(comm.exercise_id, comm.sender_id, message)
+    elif teams:
         await manager.broadcast_to_teams(comm.exercise_id, teams, message)
     else:
         await manager.broadcast_to_exercise(comm.exercise_id, message)

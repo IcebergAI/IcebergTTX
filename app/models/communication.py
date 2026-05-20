@@ -13,6 +13,7 @@ class Communication(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     exercise_id: int = Field(foreign_key="exercise.id")
     sender_id: int | None = Field(default=None, foreign_key="user.id")
+    sender_team: str | None = None
     direction: CommDirection
     external_entity: str | None = None      # e.g. "ICO", "NCSC", "CEO"
     subject: str

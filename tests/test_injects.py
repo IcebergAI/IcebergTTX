@@ -48,6 +48,45 @@ def test_create_inject_with_teams(
     assert r.json()["target_teams"] == ["it_ops", "legal"]
 
 
+def test_create_inject_with_attachment(
+    client: TestClient,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+):
+    content = b"attached brief"
+    r = client.post(
+        f"/api/exercises/{active_exercise.id}/injects",
+        data={"title": "Attached", "content": "Read the file", "sequence_order": "5"},
+        files={"attachment": ("brief.txt", content, "text/plain")},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+
+    assert r.status_code == 201
+    data = r.json()
+    assert data["attachment"]["filename"] == "brief.txt"
+    assert data["attachment"]["content_type"] == "text/plain"
+    assert data["attachment"]["size"] == len(content)
+
+    pending_download = client.get(
+        data["attachment"]["url"],
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert pending_download.status_code == 404
+
+    client.post(
+        f"/api/exercises/{active_exercise.id}/injects/{data['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    download = client.get(
+        data["attachment"]["url"],
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert download.status_code == 200
+    assert download.content == content
+    assert "brief.txt" in download.headers["content-disposition"]
+
+
 def test_create_inject_participant_forbidden(
     client: TestClient, participant_token: str, active_exercise: Exercise
 ):

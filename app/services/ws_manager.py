@@ -62,6 +62,44 @@ class ConnectionManager:
         ]
         await self._send_to_many(conns, message)
 
+    async def send_to_facilitators_and_user(
+        self, exercise_id: int, user_id: int | None, message: dict
+    ) -> None:
+        conns = []
+        seen: set[int] = set()
+        for c in self._rooms.get(exercise_id, []):
+            if c["role"] != "facilitator" and c["user_id"] != user_id:
+                continue
+            ws_id = id(c["ws"])
+            if ws_id in seen:
+                continue
+            seen.add(ws_id)
+            conns.append(c)
+        await self._send_to_many(conns, message)
+
+    async def send_to_facilitators_user_and_groups(
+        self,
+        exercise_id: int,
+        user_id: int | None,
+        group_ids: list[str],
+        message: dict,
+    ) -> None:
+        conns = []
+        seen: set[int] = set()
+        for c in self._rooms.get(exercise_id, []):
+            if (
+                c["role"] != "facilitator"
+                and c["user_id"] != user_id
+                and c["group_id"] not in group_ids
+            ):
+                continue
+            ws_id = id(c["ws"])
+            if ws_id in seen:
+                continue
+            seen.add(ws_id)
+            conns.append(c)
+        await self._send_to_many(conns, message)
+
     async def _send_to_many(self, conns: list[dict], message: dict) -> None:
         dead: list[dict] = []
         for c in conns:
