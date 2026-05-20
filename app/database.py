@@ -28,8 +28,15 @@ def _ensure_sqlite_columns() -> None:
 
     columns = {
         "exercisemember": {"group_id": "VARCHAR"},
-        "inject": {"group_id": "VARCHAR"},
+        "inject": {
+            "group_id": "VARCHAR",
+            "attachment_filename": "VARCHAR",
+            "attachment_content_type": "VARCHAR",
+            "attachment_path": "VARCHAR",
+            "attachment_size": "INTEGER",
+        },
         "response": {"group_id": "VARCHAR"},
+        "communication": {"sender_team": "VARCHAR"},
     }
     with engine.begin() as conn:
         for table_name, wanted in columns.items():

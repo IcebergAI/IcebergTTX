@@ -39,6 +39,16 @@ def test_ws_connect_participant(
     assert msg["type"] == "pong"
 
 
+def test_ws_connect_facilitator_preview_participant(
+    client: TestClient, facilitator_token: str, active_exercise: Exercise
+):
+    url = f"{_ws_url(active_exercise.id, facilitator_token)}&view_role=participant&view_team=it_ops"
+    with client.websocket_connect(url) as ws:
+        ws.send_json({"type": "ping"})
+        msg = ws.receive_json()
+    assert msg["type"] == "pong"
+
+
 def test_ws_connect_nonmember_rejected(
     client: TestClient, session: Session, active_exercise: Exercise
 ):

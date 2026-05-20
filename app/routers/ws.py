@@ -40,6 +40,8 @@ async def exercise_ws(
         await ws.close(code=4001)
         return
     if user.role == UserRole.facilitator and view_role is not None:
+        actual_role = user.role
+        actual_team = user.team
         try:
             effective_role = UserRole(view_role)
         except ValueError:
@@ -50,6 +52,9 @@ async def exercise_ws(
                 "team": view_team.strip() if view_team and view_team.strip() else user.team,
             }
         )
+        object.__setattr__(user, "actual_role", actual_role)
+        object.__setattr__(user, "actual_team", actual_team)
+        object.__setattr__(user, "can_switch_roles", True)
     try:
         require_exercise_access(session, exercise_id, user)
     except Exception:

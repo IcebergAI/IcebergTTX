@@ -1,9 +1,14 @@
 import json
+import re
+from pathlib import Path
 from typing import Annotated, Any, cast
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, ValidationError
 from sqlmodel import Session, select
+from starlette.datastructures import UploadFile
 
 from app.database import get_session
 from app.dependencies import get_current_user, require_role
@@ -18,10 +23,14 @@ from app.services.exercise_service import validate_group_id
 from app.services.inject_service import (
     create_inject,
     get_inject_or_404,
+    inject_attachment_payload,
     release_inject,
 )
 
 router = APIRouter(prefix="/exercises/{exercise_id}/injects", tags=["injects"])
+
+ATTACHMENT_ROOT = Path("uploads/inject_attachments")
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 FacilitatorDep = Annotated[User, Depends(require_role(UserRole.facilitator))]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
@@ -72,10 +81,96 @@ def _inject_out(inject: Inject, session: Session | None = None) -> dict:
         "state": inject.state,
         "released_at": inject.released_at.isoformat() if inject.released_at else None,
         "released_by": inject.released_by,
+        "attachment": inject_attachment_payload(inject),
     }
     if session is not None:
         data["options"] = _inject_options(session, inject)
     return data
+
+
+def _safe_filename(filename: str | None) -> str:
+    original = Path(filename or "attachment").name
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", original).strip("._")
+    return cleaned or "attachment"
+
+
+def _parse_target_teams(raw: object) -> list[str] | None:
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, list):
+        return [str(team).strip() for team in raw if str(team).strip()]
+    text = str(raw).strip()
+    if not text:
+        return None
+    if text.startswith("["):
+        parsed = json.loads(text)
+        if not isinstance(parsed, list):
+            raise ValueError("target_teams must be a list")
+        return [str(team).strip() for team in parsed if str(team).strip()]
+    return [team.strip() for team in text.split(",") if team.strip()]
+
+
+async def _request_body_and_attachment(
+    request: Request,
+) -> tuple[CreateInjectRequest, UploadFile | None]:
+    content_type = request.headers.get("content-type", "")
+    if not content_type.startswith("multipart/form-data"):
+        return CreateInjectRequest.model_validate(await request.json()), None
+
+    form = await request.form()
+    target_teams = [
+        str(team).strip() for team in form.getlist("target_teams") if str(team).strip()
+    ]
+    if not target_teams:
+        target_teams = _parse_target_teams(form.get("target_teams"))
+    body = CreateInjectRequest(
+        title=str(form.get("title") or ""),
+        content=str(form.get("content") or ""),
+        scenario_node_id=str(form.get("scenario_node_id") or "") or None,
+        target_teams=target_teams or None,
+        group_id=str(form.get("group_id") or "") or None,
+        sequence_order=int(str(form.get("sequence_order") or "0")),
+    )
+    attachment = form.get("attachment")
+    if not isinstance(attachment, UploadFile) or not attachment.filename:
+        return body, None
+    return body, attachment
+
+
+async def _save_attachment(
+    file: UploadFile | None,
+    exercise_id: int,
+) -> dict[str, str | int | None]:
+    if file is None:
+        return {}
+    original_filename = Path(file.filename or "attachment").name
+    safe_filename = _safe_filename(original_filename)
+    storage_dir = ATTACHMENT_ROOT / str(exercise_id)
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    storage_path = storage_dir / f"{uuid4().hex}_{safe_filename}"
+    data = await file.read()
+    if len(data) > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Attachment is too large",
+        )
+    storage_path.write_bytes(data)
+    await file.close()
+    return {
+        "attachment_filename": original_filename,
+        "attachment_content_type": file.content_type or "application/octet-stream",
+        "attachment_path": str(storage_path),
+        "attachment_size": len(data),
+    }
+
+
+def _delete_attachment_file(inject: Inject) -> None:
+    if not inject.attachment_path:
+        return
+    try:
+        Path(inject.attachment_path).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 @router.get("")
@@ -96,16 +191,24 @@ def list_injects(exercise_id: int, current_user: CurrentUserDep, session: Sessio
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create(
+async def create(
     exercise_id: int,
-    body: CreateInjectRequest,
+    request: Request,
     _: FacilitatorDep,
     session: SessionDep,
 ):
+    try:
+        body, attachment = await _request_body_and_attachment(request)
+    except (json.JSONDecodeError, ValueError, ValidationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     exercise = require_exercise_access(session, exercise_id, _)
     group_id = validate_group_id(session, exercise, body.group_id)
     if group_id is None and body.target_teams and len(body.target_teams) == 1:
         group_id = validate_group_id(session, exercise, body.target_teams[0])
+    attachment_fields = await _save_attachment(attachment, exercise_id)
     inject = create_inject(
         session,
         exercise_id=exercise_id,
@@ -115,6 +218,7 @@ def create(
         target_teams=body.target_teams,
         group_id=group_id,
         sequence_order=body.sequence_order,
+        **attachment_fields,
     )
     return _inject_out(inject, session)
 
@@ -130,8 +234,31 @@ def get_inject(exercise_id: int, inject_id: int, current_user: CurrentUserDep, s
 @router.delete("/{inject_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_inject(exercise_id: int, inject_id: int, _: FacilitatorDep, session: SessionDep):
     inject = get_inject_or_404(session, exercise_id, inject_id)
+    _delete_attachment_file(inject)
     session.delete(inject)
     session.commit()
+
+
+@router.get("/{inject_id}/attachment")
+def download_attachment(
+    exercise_id: int,
+    inject_id: int,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+):
+    require_exercise_access(session, exercise_id, current_user)
+    inject = get_inject_or_404(session, exercise_id, inject_id)
+    require_inject_visible(session, inject, current_user)
+    if not inject.attachment_path or not inject.attachment_filename:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    path = Path(inject.attachment_path)
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    return FileResponse(
+        path,
+        media_type=inject.attachment_content_type or "application/octet-stream",
+        filename=inject.attachment_filename,
+    )
 
 
 @router.post("/{inject_id}/release")

@@ -79,6 +79,14 @@
                         <span class="pill mono ring-1 ring-inset text-[10px]"
                               :class="inj.group_id ? teamColor(inj.group_id) : 'bg-stone-100 text-stone-600 ring-stone-200'"
                               x-text="groupLabel(inj.group_id)"></span>
+                        <template x-if="inj.attachment">
+                          <a :href="inj.attachment.url"
+                             download
+                             class="pill mono ring-1 ring-inset text-[10px] bg-stone-100 text-stone-600 ring-stone-200"
+                             style="max-width: 100%;">
+                            <span class="truncate" x-text="inj.attachment.filename"></span>
+                          </a>
+                        </template>
                         <span x-show="inj.state === 'released'"
                               class="mono text-[10.5px] text-stone-500"
                               x-text="'live ' + fmtTime(inj.released_at)"></span>
@@ -129,6 +137,22 @@
                    class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] mb-1.5 bg-white" />
             <textarea rows="2" x-model="newContent" placeholder="Content…"
                       class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] resize-none bg-white mb-1.5"></textarea>
+            <div class="mb-1.5">
+              <label class="btn btn-ghost h-7 px-2.5 text-[11.5px] cursor-pointer">
+                <span x-text="newAttachment ? 'Change file' : 'Attach file'"></span>
+                <input x-ref="injectAttachment"
+                       type="file"
+                       class="hidden"
+                       @change="newAttachment = $event.target.files[0] || null" />
+              </label>
+              <div x-show="newAttachment"
+                   class="mt-1.5 flex items-center gap-2 min-w-0 text-[11.5px] text-stone-500">
+                <span class="truncate" x-text="newAttachment?.name"></span>
+                <button type="button"
+                        @click="newAttachment = null; $refs.injectAttachment.value = ''"
+                        class="ml-auto text-stone-400 hover:text-stone-800">Remove</button>
+              </div>
+            </div>
             <div class="flex items-center gap-2">
               <select x-model="newGroup"
                       class="flex-1 rounded-md ring-rule px-2 py-1 text-[12px] bg-white">
@@ -377,6 +401,7 @@ function facilitatorConsole(exerciseId) {
     newTitle: '',
     newContent: '',
     newGroup: '',
+    newAttachment: null,
     showAddInject: false,
     showAddMember: false,
     showExport: false,
@@ -599,18 +624,20 @@ function facilitatorConsole(exerciseId) {
 
     async addInject() {
       if (!this.newTitle || !this.newContent) return;
+      const payload = new FormData();
+      payload.append('title', this.newTitle);
+      payload.append('content', this.newContent);
+      payload.append('group_id', this.newGroup || '');
+      payload.append('sequence_order', String(this.injects.length));
+      if (this.newAttachment) payload.append('attachment', this.newAttachment);
       const r = await apiFetch(`/exercises/${exerciseId}/injects`, {
         method: 'POST',
-        body: JSON.stringify({
-          title: this.newTitle,
-          content: this.newContent,
-          group_id: this.newGroup || null,
-          sequence_order: this.injects.length,
-        }),
+        body: payload,
       });
       if (r && r.ok) {
         this.injects.push(await r.json());
-        this.newTitle = ''; this.newContent = ''; this.newGroup = '';
+        this.newTitle = ''; this.newContent = ''; this.newGroup = ''; this.newAttachment = null;
+        if (this.$refs.injectAttachment) this.$refs.injectAttachment.value = '';
       }
     },
 

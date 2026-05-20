@@ -46,3 +46,4 @@ Thumbs.db
 # Static builds
 static/css/output.css
 node_modules/
+uploads/

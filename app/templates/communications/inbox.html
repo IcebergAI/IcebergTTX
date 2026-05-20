@@ -19,7 +19,7 @@
                 class="btn btn-ghost h-8 px-3 text-[13px]">+ Send message</button>
       </template>
       <template x-if="isF">
-        <button @click="showCompose = true"
+        <button @click="openInjectInbound()"
                 class="btn btn-ghost h-8 px-3 text-[13px]">Inject inbound</button>
       </template>
     </div>
@@ -33,8 +33,15 @@
     <div class="border-r rule overflow-y-auto">
       <div class="px-4 pt-3 pb-2 flex items-center gap-2 border-b rule">
         <input x-model="commSearch"
-               class="flex-1 bg-transparent text-[13px] outline-none placeholder:text-stone-400"
+               class="comm-filter-control flex-1 min-w-0"
                placeholder="Filter messages…" />
+        <select x-model="directionFilter"
+                aria-label="Filter by direction"
+                class="comm-filter-control comm-direction-filter">
+          <option value="all">All</option>
+          <option value="inbound">Inbound</option>
+          <option value="outbound">Outbound</option>
+        </select>
         <span class="smallcaps text-stone-400" x-text="filteredComms.length"></span>
       </div>
 
@@ -43,21 +50,25 @@
 
       <template x-for="c in filteredComms" :key="c.id">
         <div @click="open(c)"
-             class="px-4 py-3 border-b rule cursor-pointer hover:bg-stone-50/70"
-             :class="selected && selected.id === c.id ? 'bg-amber-50/40' : ''">
+             class="comm-list-row px-4 py-3 border-b rule cursor-pointer"
+             :class="selected && selected.id === c.id ? 'comm-list-row-selected' : ''">
           <div class="flex items-center gap-2 mb-1">
             <span class="dot shrink-0"
                   :style="c.direction === 'inbound' ? 'background: var(--accent-d)' : 'background:#5b86b8'"></span>
             <span class="smallcaps truncate"
-                  :class="c.direction === 'inbound' ? 'text-stone-700' : 'text-stone-500'"
-                  x-text="(c.direction === 'inbound' ? 'In · ' : 'Out · ') + (c.external_entity || 'Internal')"></span>
+                  :style="c.direction === 'inbound' ? 'color: var(--ink-soft)' : 'color: var(--muted)'"
+                  x-text="commListMeta(c)"></span>
             <span class="mono text-[10.5px] text-stone-400 ml-auto shrink-0"
+                  style="color: var(--muted);"
                   x-text="fmtAgo(c.sent_at)"></span>
           </div>
           <div class="text-[13.5px] truncate"
-               :class="c.read_by && c.read_by.length ? 'text-stone-600 font-normal' : 'font-medium'"
+               :class="c.read_by && c.read_by.length ? 'font-normal' : 'font-medium'"
+               :style="c.read_by && c.read_by.length ? 'color: var(--ink-soft)' : 'color: var(--ink)'"
                x-text="c.subject"></div>
-          <div class="text-[12px] text-stone-500 truncate mt-0.5" x-text="c.body"></div>
+          <div class="text-[12px] truncate mt-0.5"
+               style="color: var(--muted);"
+               x-text="c.body"></div>
           <template x-if="c.triggered_by_inject_id">
             <div class="mono text-[10.5px] text-stone-400 mt-1"
                  x-text="'triggered by inject #' + c.triggered_by_inject_id"></div>
@@ -83,26 +94,56 @@
                     : 'background: #e6eef8; color: #2f5b8a; box-shadow: inset 0 0 0 1px #c5d7ec;'">
               <span class="dot"
                     :style="selected.direction === 'inbound' ? 'background: var(--accent-d)' : 'background:#5b86b8'"></span>
-              <span x-text="(selected.direction === 'inbound' ? 'Inbound · ' : 'Outbound · ') + (selected.external_entity || 'Internal')"></span>
+              <span x-text="commBadgeLabel(selected)"></span>
             </span>
             <span class="mono text-[11.5px] text-stone-500"
                   x-text="'MSG-' + String(selected.id).padStart(3,'0') + (selected.triggered_by_inject_id ? ' · triggered by inject #' + selected.triggered_by_inject_id : '')"></span>
             <span class="mono text-[11.5px] text-stone-400 ml-auto" x-text="fmtTime(selected.sent_at)"></span>
           </div>
 
-          <!-- Metadata grid -->
-          <div class="grid gap-x-4 gap-y-2 text-[13px] mb-6"
-               style="grid-template-columns: 80px 1fr;">
-            <div class="smallcaps text-stone-500 pt-0.5"
-                 x-text="selected.direction === 'inbound' ? 'From' : 'To'"></div>
-            <div x-text="selected.external_entity || 'Internal'"></div>
-            <template x-if="selected.visible_to_teams && selected.visible_to_teams.length">
-              <div class="smallcaps text-stone-500 pt-0.5">Visible to</div>
-              <div class="flex flex-wrap gap-1">
-                <template x-for="t in selected.visible_to_teams" :key="t">
+          <!-- Metadata -->
+          <div class="space-y-2 text-[13px] mb-6">
+            <div class="flex items-center gap-2 min-w-0">
+              <div class="smallcaps text-stone-500 shrink-0"
+                   style="width: 42px;"
+                   x-text="selected.direction === 'inbound' ? 'From' : 'To'"></div>
+              <template x-if="selected.direction !== 'outbound' || !hasTeamRecipients(selected)">
+                <div class="min-w-0" x-text="selected.external_entity || 'Internal'"></div>
+              </template>
+              <template x-if="selected.direction === 'outbound' && hasTeamRecipients(selected)">
+                <div class="flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5"
+                     style="flex-wrap: nowrap;">
+                  <template x-for="t in selected.visible_to_teams" :key="t">
+                    <span class="pill mono ring-1 ring-inset text-[10px]"
+                          style="white-space: nowrap;"
+                          :class="teamColor(t)" x-text="teamDisplay(t)"></span>
+                  </template>
+                </div>
+              </template>
+            </div>
+            <template x-if="selected.direction === 'outbound' && selected.sender_team">
+              <div class="flex items-center gap-2 min-w-0">
+                <div class="smallcaps text-stone-500 shrink-0"
+                     style="width: 42px;">From</div>
+                <div class="min-w-0">
                   <span class="pill mono ring-1 ring-inset text-[10px]"
-                        :class="teamColor(t)" x-text="t"></span>
-                </template>
+                        :class="teamColor(selected.sender_team)"
+                        x-text="teamDisplay(selected.sender_team)"></span>
+                </div>
+              </div>
+            </template>
+            <template x-if="selected.direction === 'inbound' && hasTeamRecipients(selected)">
+              <div class="flex items-center gap-2 min-w-0">
+                <div class="smallcaps text-stone-500 shrink-0"
+                     style="width: 42px;">To</div>
+                <div class="flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5"
+                     style="flex-wrap: nowrap;">
+                  <template x-for="t in selected.visible_to_teams" :key="t">
+                    <span class="pill mono ring-1 ring-inset text-[10px]"
+                          style="white-space: nowrap;"
+                          :class="teamColor(t)" x-text="teamDisplay(t)"></span>
+                  </template>
+                </div>
               </div>
             </template>
           </div>
@@ -128,7 +169,7 @@
             <div class="mt-7 border-t rule pt-5">
               <div class="smallcaps text-stone-500 mb-2">Inject follow-up</div>
               <p class="text-[12.5px] text-stone-500 mb-3">Inject a new inbound message to participants.</p>
-              <button @click="showCompose = true"
+              <button @click="openInjectInbound(selected)"
                       class="btn btn-ghost h-8 px-3 text-[13px]">Inject inbound message</button>
             </div>
           </template>
@@ -145,9 +186,35 @@
       <h2 class="text-[18px] font-semibold mb-4">Send message</h2>
       <div class="space-y-3">
         <div>
-          <label class="block smallcaps text-stone-500 mb-1">To (recipient)</label>
-          <input type="text" x-model="send.external_entity" placeholder="e.g. ICO, NCSC, CEO, Press office"
-                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+          <label class="block smallcaps text-stone-500 mb-1">To</label>
+          <div class="flex gap-2 mb-2">
+            <button type="button"
+                    @click="send.recipient_type = 'external'"
+                    class="btn h-7 px-3 text-[12px]"
+                    :class="send.recipient_type === 'external' ? 'btn-primary' : 'btn-ghost'">
+              External
+            </button>
+            <button type="button"
+                    @click="send.recipient_type = 'team'"
+                    class="btn h-7 px-3 text-[12px]"
+                    :class="send.recipient_type === 'team' ? 'btn-primary' : 'btn-ghost'">
+              Team
+            </button>
+          </div>
+          <template x-if="send.recipient_type === 'external'">
+            <input type="text" x-model="send.external_entity"
+                   placeholder="e.g. ICO, NCSC, CEO, Press office"
+                   class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+          </template>
+          <template x-if="send.recipient_type === 'team'">
+            <select x-model="send.recipient_team"
+                    class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white">
+              <option value="">Select team…</option>
+              <template x-for="team in teamOptions" :key="team.id">
+                <option :value="team.id" x-text="team.label || team.id"></option>
+              </template>
+            </select>
+          </template>
         </div>
         <div>
           <label class="block smallcaps text-stone-500 mb-1">Subject</label>
@@ -192,10 +259,28 @@
                     class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] resize-none bg-white"></textarea>
         </div>
         <div>
-          <label class="block smallcaps text-stone-500 mb-1">Visible to teams (blank = all)</label>
-          <input type="text" x-model="compose.visible_to_teams"
-                 placeholder="it_ops, legal  (comma-separated)"
-                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+          <div class="flex items-center justify-between mb-1">
+            <label class="block smallcaps text-stone-500">To teams</label>
+            <span class="smallcaps text-stone-400"
+                  x-text="compose.visible_to_teams.length ? compose.visible_to_teams.length + ' selected' : 'All teams'"></span>
+          </div>
+          <div x-show="teamOptions.length"
+               class="flex flex-wrap gap-2">
+            <template x-for="team in teamOptions" :key="team.id">
+              <label class="inline-flex items-center gap-2 rounded-md ring-rule px-2.5 py-1.5 text-[12.5px] cursor-pointer paper-soft"
+                     :class="compose.visible_to_teams.includes(team.id) ? 'ring-stone-400 bg-stone-100/70' : ''">
+                <input type="checkbox"
+                       :value="team.id"
+                       x-model="compose.visible_to_teams"
+                       class="accent-stone-700" />
+                <span x-text="teamLabel(team)"></span>
+              </label>
+            </template>
+          </div>
+          <div x-show="!teamOptions.length"
+               class="rounded-md ring-rule px-3 py-2 text-[12.5px] text-stone-500 bg-white">
+            All teams
+          </div>
         </div>
       </div>
       <div class="flex gap-3 mt-5">
@@ -210,11 +295,54 @@
 {% endblock %}
 
 {% block scripts %}
+<style>
+  .comm-filter-control {
+    height: 34px;
+    background: var(--paper-soft);
+    color: var(--ink-soft);
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 1px var(--rule-2);
+    font-size: 13px;
+    outline: none;
+    padding: 0 10px;
+  }
+
+  .comm-filter-control::placeholder {
+    color: var(--muted);
+  }
+
+  .comm-filter-control:focus {
+    box-shadow: inset 0 0 0 1px var(--accent-d), 0 0 0 2px oklch(0.74 0.14 70 / .16);
+  }
+
+  .comm-direction-filter {
+    flex: 0 0 104px;
+    font-size: 12px;
+  }
+
+  .comm-list-row {
+    transition: background .12s ease, box-shadow .12s ease;
+  }
+
+  .comm-list-row:hover {
+    background: color-mix(in oklab, var(--paper-soft) 86%, var(--accent) 8%);
+  }
+
+  .comm-list-row-selected {
+    background: color-mix(in oklab, var(--paper-soft) 78%, var(--accent) 16%);
+    box-shadow: inset 3px 0 0 var(--accent-d);
+  }
+
+  .comm-list-row-selected:hover {
+    background: color-mix(in oklab, var(--paper-soft) 72%, var(--accent) 20%);
+  }
+</style>
 <script>
 function commsInbox(exerciseId) {
   return {
     comms: [],
     commSearch: '',
+    directionFilter: 'all',
     selected: null,
     isF: false,
     showCompose: false,
@@ -224,15 +352,25 @@ function commsInbox(exerciseId) {
     pingInterval: null,
     reconnectTimeout: null,
     destroyed: false,
-    compose: { external_entity: '', subject: '', body: '', visible_to_teams: '' },
-    send: { external_entity: '', subject: '', body: '' },
+    teamOptions: [],
+    compose: { external_entity: '', subject: '', body: '', visible_to_teams: [] },
+    send: {
+      recipient_type: 'external',
+      recipient_team: '',
+      external_entity: '',
+      subject: '',
+      body: '',
+    },
 
     get filteredComms() {
       const q = this.commSearch.toLowerCase();
-      if (!q) return this.comms;
-      return this.comms.filter(c =>
-        c.subject.toLowerCase().includes(q) || c.body.toLowerCase().includes(q)
-      );
+      return this.comms.filter(c => {
+        const matchesDirection =
+          this.directionFilter === 'all' || c.direction === this.directionFilter;
+        const matchesSearch =
+          !q || c.subject.toLowerCase().includes(q) || c.body.toLowerCase().includes(q);
+        return matchesDirection && matchesSearch;
+      });
     },
 
     async init() {
@@ -241,8 +379,15 @@ function commsInbox(exerciseId) {
         const d = await me.json();
         this.isF = d.role === 'facilitator';
       }
+      await this.loadTeamOptions();
       await this.load();
       this.connectWs();
+    },
+
+    async loadTeamOptions() {
+      const teams = await apiFetch(`/exercises/${exerciseId}/teams`);
+      if (!teams || !teams.ok) return;
+      this.teamOptions = await teams.json();
     },
 
     async load() {
@@ -254,39 +399,84 @@ function commsInbox(exerciseId) {
       const r = await apiFetch(`/exercises/${exerciseId}/communications/${c.id}`);
       if (r && r.ok) {
         const updated = await r.json();
-        const idx = this.comms.findIndex(x => x.id === c.id);
-        if (idx !== -1) this.comms[idx] = updated;
+        this.upsertComm(updated, { preserveOrder: true });
         this.selected = updated;
       }
     },
 
+    upsertComm(comm, { preserveOrder = false } = {}) {
+      const idx = this.comms.findIndex(x => x.id === comm.id);
+      if (idx !== -1) {
+        this.comms[idx] = comm;
+        return;
+      }
+      if (preserveOrder) this.comms.push(comm);
+      else this.comms.unshift(comm);
+    },
+
     openSendReply(comm) {
+      this.send.recipient_type = 'external';
+      this.send.recipient_team = '';
       this.send.external_entity = comm.external_entity || '';
-      this.send.subject = comm.subject.startsWith('Re: ') ? comm.subject : 'Re: ' + comm.subject;
+      this.send.subject = this.replySubject(comm.subject);
       this.send.body = '';
       this.showSend = true;
     },
 
+    openInjectInbound(comm = null) {
+      const source = comm || null;
+      if (!source) {
+        this.compose = { external_entity: '', subject: '', body: '', visible_to_teams: [] };
+        this.showCompose = true;
+        return;
+      }
+      this.compose.external_entity = source.external_entity || '';
+      this.compose.subject = this.replySubject(source.subject);
+      this.compose.body = '';
+      this.compose.visible_to_teams = this.replyTargetTeams(source);
+      this.showCompose = true;
+    },
+
+    replySubject(subject) {
+      const trimmed = (subject || '').trim();
+      if (!trimmed) return '';
+      return /^re:\s*/i.test(trimmed) ? trimmed : `Re: ${trimmed}`;
+    },
+
+    replyTargetTeams(comm) {
+      if (comm.direction === 'outbound' && comm.sender_team) return [comm.sender_team];
+      return comm.visible_to_teams ? [...comm.visible_to_teams] : [];
+    },
+
     async sendComm() {
+      if (this.send.recipient_type === 'team' && !this.send.recipient_team) return;
+      const teams = this.send.recipient_type === 'team' ? [this.send.recipient_team] : null;
       const r = await apiFetch(`/exercises/${exerciseId}/communications`, {
         method: 'POST',
         body: JSON.stringify({
           direction: 'outbound',
-          external_entity: this.send.external_entity,
+          external_entity: teams ? null : this.send.external_entity,
           subject: this.send.subject,
           body: this.send.body,
+          visible_to_teams: teams,
         }),
       });
       if (r && r.ok) {
+        const created = await r.json();
+        this.upsertComm(created);
         this.showSend = false;
-        this.send = { external_entity: '', subject: '', body: '' };
+        this.send = {
+          recipient_type: 'external',
+          recipient_team: '',
+          external_entity: '',
+          subject: '',
+          body: '',
+        };
       }
     },
 
     async injectComm() {
-      const teams = this.compose.visible_to_teams
-        ? this.compose.visible_to_teams.split(',').map(t => t.trim()).filter(Boolean)
-        : null;
+      const teams = this.compose.visible_to_teams.length ? this.compose.visible_to_teams : null;
       const r = await apiFetch(`/exercises/${exerciseId}/communications/inject`, {
         method: 'POST',
         body: JSON.stringify({
@@ -297,8 +487,10 @@ function commsInbox(exerciseId) {
         }),
       });
       if (r && r.ok) {
+        const created = await r.json();
+        this.upsertComm(created);
         this.showCompose = false;
-        this.compose = { external_entity: '', subject: '', body: '', visible_to_teams: '' };
+        this.compose = { external_entity: '', subject: '', body: '', visible_to_teams: [] };
       }
     },
 
@@ -306,7 +498,12 @@ function commsInbox(exerciseId) {
       const token = localStorage.getItem('dt_token');
       if (!token) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?token=${token}`);
+      const params = new URLSearchParams({ token });
+      const viewRole = localStorage.getItem('dt_view_role');
+      const viewTeam = localStorage.getItem('dt_view_team');
+      if (viewRole) params.set('view_role', viewRole);
+      if (viewTeam) params.set('view_team', viewTeam);
+      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?${params}`);
 
       this.ws.onopen = () => {
         this.wsConnected = true;
@@ -326,7 +523,7 @@ function commsInbox(exerciseId) {
       this.ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'communication_received') {
-          this.comms.unshift(msg.payload);
+          this.upsertComm(msg.payload);
         }
       };
     },
@@ -346,6 +543,38 @@ function commsInbox(exerciseId) {
 
     fmtAgo(s)  { return fmtAgo(s); },
     fmtTime(s) { return fmtTime(s); },
+    commListMeta(comm) {
+      if (comm.direction === 'inbound') {
+        return `In · ${comm.external_entity || 'Internal'}`;
+      }
+      const entity = this.commRecipientLabel(comm);
+      return comm.sender_team
+        ? `Out · ${this.teamDisplay(comm.sender_team)} · ${entity}`
+        : `Out · ${entity}`;
+    },
+    commBadgeLabel(comm) {
+      if (comm.direction === 'inbound') {
+        return `Inbound · ${comm.external_entity || 'Internal'}`;
+      }
+      const entity = this.commRecipientLabel(comm);
+      return comm.sender_team
+        ? `Outbound · ${this.teamDisplay(comm.sender_team)} · ${entity}`
+        : `Outbound · ${entity}`;
+    },
+    hasTeamRecipients(comm) {
+      return !!(comm.visible_to_teams && comm.visible_to_teams.length);
+    },
+    commRecipientLabel(comm) {
+      if (this.hasTeamRecipients(comm)) {
+        return comm.visible_to_teams.map(t => this.teamDisplay(t)).join(', ');
+      }
+      return comm.external_entity || 'Internal';
+    },
+    teamDisplay(id) {
+      const team = this.teamOptions.find(t => t.id === id);
+      return team?.label || id;
+    },
+    teamLabel(team) { return team?.label || team?.id || ''; },
     teamColor(t){ return teamColor(t); },
   }
 }

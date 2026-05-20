@@ -12,6 +12,7 @@ from app.dependencies import get_current_user, require_role
 from app.models.exercise import Exercise, ExerciseMember, ExerciseState
 from app.models.inject import Inject
 from app.models.response import Response
+from app.models.scenario import Scenario
 from app.models.user import User, UserRole
 from app.services.access_control import (
     get_exercise_or_404,
@@ -25,6 +26,7 @@ from app.services.exercise_service import (
     transition_state,
     update_member_group,
 )
+from app.services.scenario_service import export_definition
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
 
@@ -112,6 +114,16 @@ def create(body: CreateExerciseRequest, current_user: FacilitatorDep, session: S
 @router.get("/{exercise_id}")
 def get_exercise(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
     return _exercise_out(require_exercise_access(session, exercise_id, current_user))
+
+
+@router.get("/{exercise_id}/teams")
+def list_exercise_teams(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
+    exercise = require_exercise_access(session, exercise_id, current_user)
+    scenario = session.get(Scenario, exercise.scenario_id)
+    if not scenario:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found")
+    definition = export_definition(scenario)
+    return [team.model_dump() for team in definition.participant_teams]
 
 
 @router.put("/{exercise_id}")

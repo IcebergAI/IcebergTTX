@@ -81,6 +81,15 @@
               <p class="text-stone-800 mt-2 leading-relaxed"
                  :class="isCurrentBrief(inj) ? 'text-[14.5px]' : 'text-[13.5px] text-stone-700'"
                  x-text="inj.content"></p>
+              <template x-if="inj.attachment">
+                <a :href="inj.attachment.url"
+                   download
+                   class="mt-3 inline-flex items-center gap-2 rounded-md ring-rule px-2.5 py-1.5 text-[12.5px] text-stone-700 hover:text-stone-900 paper-soft"
+                   style="max-width: 100%;">
+                  <span class="mono text-stone-400">↓</span>
+                  <span class="truncate" x-text="inj.attachment.filename"></span>
+                </a>
+              </template>
 
               <!-- Submitted confirmation for resolved injects -->
               <template x-if="!isCurrentBrief(inj) && submitted[inj.id]">

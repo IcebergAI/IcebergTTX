@@ -22,3 +22,7 @@ class Inject(SQLModel, table=True):
     state: InjectState = Field(default=InjectState.pending)
     released_at: datetime | None = None
     released_by: int | None = Field(default=None, foreign_key="user.id")
+    attachment_filename: str | None = None
+    attachment_content_type: str | None = None
+    attachment_path: str | None = None
+    attachment_size: int | None = None
