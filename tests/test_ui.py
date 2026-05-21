@@ -226,7 +226,9 @@ def test_scenario_builder_creates_structured_scenario(page: Page):
     page.goto(f"{BASE}/scenarios/new")
 
     page.get_by_test_id("scenario-title").fill("Ops Builder Scenario")
-    page.get_by_test_id("scenario-description").fill("A full authoring flow created in the builder.")
+    page.get_by_test_id("scenario-description").fill(
+        "A full authoring flow created in the builder."
+    )
     page.get_by_test_id("scenario-author").fill("Exercise Design Team")
     page.get_by_test_id("scenario-duration").fill("60")
     page.get_by_test_id("scenario-tags").fill("cyber, resilience")
