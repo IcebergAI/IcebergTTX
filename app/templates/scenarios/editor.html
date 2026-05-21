@@ -2,21 +2,178 @@
 {% block title %}{% if scenario_id %}Edit Scenario{% else %}New Scenario{% endif %} — Deep Thought{% endblock %}
 
 {% block content %}
-<div x-data="scenarioEditor({% if scenario_id %}{{ scenario_id }}{% else %}null{% endif %})" x-init="init()"
-     class="workspace max-w-[860px]">
+<style>
+  .scenario-workspace {
+    width: min(1500px, calc(100% - 32px));
+    margin-inline: auto;
+    padding: 28px 0 40px;
+  }
+  .scenario-builder {
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr) 310px;
+    gap: 16px;
+    align-items: start;
+  }
+  .scenario-rail {
+    position: sticky;
+    top: 24px;
+  }
+  .scenario-editor-main {
+    min-width: 0;
+  }
+  .scenario-panel {
+    background: var(--paper);
+    box-shadow: inset 0 0 0 1px var(--rule);
+    border-radius: 8px;
+  }
+  .builder-nav-item,
+  .inject-outline-row {
+    width: 100%;
+    border-radius: 7px;
+    transition: background .12s, box-shadow .12s, color .12s;
+  }
+  .builder-nav-item:hover,
+  .inject-outline-row:hover {
+    background: var(--paper-soft);
+  }
+  .builder-nav-item.is-active,
+  .inject-outline-row.is-active {
+    background: var(--node-current);
+    box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .45);
+  }
+  .scenario-field {
+    width: 100%;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13.5px;
+    line-height: 1.35;
+    background: var(--paper);
+    color: var(--ink);
+    box-shadow: inset 0 0 0 1px var(--rule);
+  }
+  .scenario-field:focus {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--accent-d), 0 0 0 2px oklch(0.74 0.14 70 / .16);
+  }
+  .scenario-field.compact {
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  .scenario-field.mono {
+    font-size: 12.5px;
+  }
+  .scenario-tabular {
+    display: grid;
+    grid-template-columns: minmax(110px, .8fr) minmax(0, 1.4fr) auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .branch-row {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr) 150px auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .validation-card {
+    border-radius: 7px;
+    padding: 10px 11px;
+    box-shadow: inset 0 0 0 1px var(--rule);
+    background: var(--paper-soft);
+  }
+  .flow-row {
+    border-radius: 7px;
+    padding: 8px 10px;
+    box-shadow: inset 0 0 0 1px var(--rule);
+    background: var(--paper);
+  }
+  .target-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 12.5px;
+    cursor: pointer;
+    box-shadow: inset 0 0 0 1px var(--rule);
+    background: var(--paper-soft);
+  }
+  .target-chip.is-on {
+    background: var(--node-current);
+    box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .55);
+  }
+  html[data-theme="dark"] .scenario-field {
+    background: #171613 !important;
+  }
+  html[data-theme="dark"] .builder-nav-item:hover,
+  html[data-theme="dark"] .inject-outline-row:hover,
+  html[data-theme="dark"] .validation-card,
+  html[data-theme="dark"] .target-chip {
+    background: #26241f;
+  }
+  @media (max-width: 1180px) {
+    .scenario-builder {
+      grid-template-columns: 230px minmax(0, 1fr);
+    }
+    .scenario-rail.right {
+      position: static;
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+  }
+  @media (max-width: 820px) {
+    .scenario-workspace {
+      width: min(100% - 24px, 1180px);
+      padding: 20px 0 32px;
+    }
+    .scenario-builder,
+    .scenario-rail.right {
+      display: block;
+    }
+    .scenario-rail {
+      position: static;
+      margin-bottom: 14px;
+    }
+    .scenario-rail.right > * + * {
+      margin-top: 14px;
+    }
+    .scenario-tabular,
+    .branch-row {
+      grid-template-columns: 1fr;
+    }
+    .scenario-page-head {
+      align-items: flex-start !important;
+      flex-direction: column;
+    }
+  }
+</style>
 
-  <div class="page-head">
+<div x-data="scenarioEditor({% if scenario_id %}{{ scenario_id }}{% else %}null{% endif %})" x-init="init()"
+     class="scenario-workspace" data-testid="scenario-builder">
+
+  <div class="page-head scenario-page-head">
     <div>
       <h1 class="page-title"
           x-text="scenarioId ? 'Edit scenario' : 'New scenario'"></h1>
-      <p class="text-[13.5px] text-stone-500 mt-1">Keep the brief clear; add complexity only where it changes decisions.</p>
+      <p class="text-[13.5px] text-stone-500 mt-1">
+        Build the exercise brief, route injects to teams, and check the flow before launch.
+      </p>
     </div>
-    <template x-if="!scenarioId">
-      <label class="btn btn-ghost h-8 px-3 text-[13px] cursor-pointer">
-        Import JSON
-        <input type="file" accept=".json" class="hidden" @change="importFile($event)" />
-      </label>
-    </template>
+    <div class="flex flex-wrap gap-2">
+      <template x-if="!scenarioId">
+        <label class="btn btn-ghost h-8 px-3 text-[13px] cursor-pointer">
+          Import JSON
+          <input type="file" accept=".json" class="hidden" @change="importFile($event)" />
+        </label>
+      </template>
+      <button @click="save()" :disabled="saving || blockingIssues.length > 0"
+              type="button"
+              class="btn btn-primary h-8 px-4 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="scenario-save-top">
+        <span x-text="saving ? 'Saving…' : (scenarioId ? 'Save changes' : 'Create scenario')"></span>
+      </button>
+    </div>
   </div>
 
   <template x-if="error">
@@ -28,192 +185,441 @@
          x-text="success"></div>
   </template>
 
-  <!-- Metadata -->
-  <div class="surface p-5 mb-5 space-y-4">
-    <div class="smallcaps text-stone-500 mb-1">Scenario details</div>
-    <div>
-      <label class="block smallcaps text-stone-500 mb-1">Title <span class="text-red-400">*</span></label>
-      <input type="text" x-model="form.title"
-             class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
-    </div>
-    <div>
-      <label class="block smallcaps text-stone-500 mb-1">Description</label>
-      <textarea x-model="form.description" rows="2"
-                class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] resize-none bg-white"></textarea>
-    </div>
-    <div>
-      <label class="block smallcaps text-stone-500 mb-1">
-        Tags
-        <span class="text-stone-400 normal-case font-normal">(comma-separated)</span>
-      </label>
-      <input type="text" x-model="tagsInput" placeholder="cyber, ransomware, GDPR"
-             class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
-    </div>
-    <div>
-      <label class="block smallcaps text-stone-500 mb-1">Start inject</label>
-      <select x-model="form.start_inject_id"
-              class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white">
-        <template x-for="inj in form.injects" :key="inj.id">
-          <option :value="inj.id" x-text="inj.id + ' — ' + inj.title"></option>
-        </template>
-      </select>
-    </div>
-    <div>
-      <label class="block smallcaps text-stone-500 mb-1">Debrief notes</label>
-      <textarea x-model="form.debrief_notes" rows="2"
-                class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] resize-none bg-white"></textarea>
-    </div>
-  </div>
+  <div class="scenario-builder">
+    <!-- Left outline -->
+    <aside class="scenario-rail" data-testid="scenario-outline">
+      <div class="scenario-panel p-3">
+        <div class="smallcaps text-stone-500 px-1 mb-2">Builder</div>
+        <div class="space-y-1">
+          <button type="button"
+                  @click="activePanel = 'scenario'"
+                  class="builder-nav-item text-left px-3 py-2"
+                  :class="{ 'is-active': activePanel === 'scenario' }"
+                  data-testid="nav-scenario">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-[13.5px] font-medium">Scenario brief</span>
+              <span class="mono text-[11px] text-stone-400" x-text="form.title ? 'ready' : 'draft'"></span>
+            </div>
+            <div class="text-[12px] text-stone-500 mt-0.5 truncate"
+                 x-text="durationLabel"></div>
+          </button>
 
-  <!-- Participant teams -->
-  <div class="surface p-5 mb-5">
-    <div class="flex items-center justify-between mb-3">
-      <div class="smallcaps text-stone-500">Participant teams</div>
-      <button @click="addTeam()" type="button"
-              class="smallcaps text-stone-500 hover:text-stone-800">+ Add team</button>
-    </div>
-    <div class="space-y-2">
-      <template x-for="(team, i) in form.participant_teams" :key="i">
-        <div class="flex gap-2 items-center">
-          <input type="text" x-model="team.id" placeholder="id (e.g. it_ops)"
-                 class="ring-rule rounded-md px-3 py-1.5 text-[13px] bg-white w-40" />
-          <input type="text" x-model="team.label" placeholder="Label"
-                 class="ring-rule rounded-md px-3 py-1.5 text-[13px] bg-white flex-1" />
-          <button @click="removeTeam(i)" type="button"
-                  class="text-red-400 hover:text-red-600 text-[13px]">✕</button>
+          <button type="button"
+                  @click="activePanel = 'teams'"
+                  class="builder-nav-item text-left px-3 py-2"
+                  :class="{ 'is-active': activePanel === 'teams' }"
+                  data-testid="nav-teams">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-[13.5px] font-medium">Participant teams</span>
+              <span class="mono text-[11px] text-stone-400" x-text="form.participant_teams.length"></span>
+            </div>
+            <div class="text-[12px] text-stone-500 mt-0.5"
+                 x-text="form.participant_teams.length ? 'Targeted inject routing enabled' : 'Shared exercise by default'"></div>
+          </button>
         </div>
-      </template>
-      <div x-show="form.participant_teams.length === 0"
-           class="text-[12.5px] text-stone-400">No teams defined — all participants receive all injects.</div>
-    </div>
-  </div>
 
-  <!-- Injects -->
-  <div class="mb-6">
-    <div class="flex items-center justify-between mb-3">
-      <div class="section-title flex-1">
-        <span class="smallcaps text-stone-500">Injects</span>
+        <div class="border-t rule mt-3 pt-3">
+          <div class="flex items-center justify-between px-1 mb-2">
+            <div class="smallcaps text-stone-500">Injects</div>
+            <button type="button" @click="addInject()"
+                    class="smallcaps text-stone-500 hover:text-stone-800">+ Add</button>
+          </div>
+          <div class="space-y-1.5">
+            <template x-for="(inj, i) in form.injects" :key="inj._key">
+              <button type="button"
+                      @click="setActiveInject(inj)"
+                      class="inject-outline-row text-left px-3 py-2"
+                      :class="{ 'is-active': activeInjectKey === inj._key && activePanel === 'injects' }"
+                      data-testid="inject-outline-row">
+                <div class="flex items-start justify-between gap-2">
+                  <div class="min-w-0">
+                    <div class="mono text-[11px] text-stone-400 truncate"
+                         x-text="inj.id || 'inject_' + String(i + 1).padStart(2, '0')"></div>
+                    <div class="text-[13px] font-medium truncate"
+                         x-text="inj.title || 'Untitled inject'"></div>
+                  </div>
+                  <span class="mono text-[10.5px] text-stone-400 shrink-0" x-text="'#' + (i + 1)"></span>
+                </div>
+                <div class="flex flex-wrap gap-1 mt-2">
+                  <span x-show="inj.id && inj.id === form.start_inject_id"
+                        class="pill text-[10px]" style="background:#dcfce7; color:#166534; box-shadow: inset 0 0 0 1px #bbf7d0;">start</span>
+                  <span x-show="inj.options && inj.options.length > 1"
+                        class="pill text-[10px]" style="background: oklch(0.74 0.14 70 / .12); color: var(--accent-d); box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .3);">branch</span>
+                  <span x-show="!inj.options || inj.options.length === 0"
+                        class="pill text-[10px]" style="background:#e6eef8; color:#2f5b8a; box-shadow: inset 0 0 0 1px #c5d7ec;">end</span>
+                  <span x-show="inj.target_teams && inj.target_teams.length"
+                        class="pill text-[10px]" x-text="inj.target_teams.length + ' team' + (inj.target_teams.length === 1 ? '' : 's')"></span>
+                  <span x-show="inj.expected_actions && inj.expected_actions.length"
+                        class="pill text-[10px]" x-text="inj.expected_actions.length + ' action' + (inj.expected_actions.length === 1 ? '' : 's')"></span>
+                </div>
+              </button>
+            </template>
+          </div>
+        </div>
       </div>
-      <button @click="addInject()" type="button"
-              class="btn btn-primary h-8 px-3 text-[13px] ml-4">+ Add inject</button>
-    </div>
+    </aside>
 
-    <div class="space-y-3">
-      <template x-for="(inj, i) in form.injects" :key="inj._key">
-        <div class="surface p-5">
-          <div class="flex items-center justify-between mb-3">
-            <span class="mono text-[11px] text-stone-400" x-text="'#' + (i+1)"></span>
-            <button @click="removeInject(i)" type="button"
-                    class="smallcaps text-red-400 hover:text-red-600">Remove</button>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3 mb-3">
-            <div>
-              <label class="block smallcaps text-stone-500 mb-1">ID <span class="text-red-400">*</span></label>
-              <input type="text" x-model="inj.id" placeholder="inject_01"
-                     class="w-full ring-rule rounded-md px-2.5 py-1.5 text-[13px] bg-white" />
-            </div>
-            <div>
-              <label class="block smallcaps text-stone-500 mb-1">Title</label>
-              <input type="text" x-model="inj.title"
-                     class="w-full ring-rule rounded-md px-2.5 py-1.5 text-[13px] bg-white" />
-            </div>
-          </div>
-
-          <div class="mb-3">
-            <label class="block smallcaps text-stone-500 mb-1">Content</label>
-            <textarea x-model="inj.content" rows="3"
-                      class="w-full ring-rule rounded-md px-2.5 py-1.5 text-[13px] resize-none bg-white"></textarea>
-          </div>
-
-          <div class="mb-3">
-            <label class="block smallcaps text-stone-500 mb-1">
-              Target teams
-              <span class="text-stone-400 normal-case font-normal">(blank = shared)</span>
-            </label>
-            <div x-show="form.participant_teams.length"
-                 class="flex flex-wrap gap-2">
-              <template x-for="team in form.participant_teams" :key="team.id">
-                <label class="inline-flex items-center gap-2 rounded-md ring-rule px-2.5 py-1.5 text-[12.5px] cursor-pointer paper-soft">
-                  <input type="checkbox"
-                         :checked="injectTargetsTeam(inj, team.id)"
-                         @change="toggleInjectTeam(inj, team.id, $event.target.checked)"
-                         class="accent-stone-700" />
-                  <span x-text="team.label || team.id"></span>
-                </label>
-              </template>
-            </div>
-            <div x-show="!form.participant_teams.length"
-                 class="text-[12px] text-stone-400">Define participant teams above to target this inject.</div>
-          </div>
-
-          <div class="flex items-center gap-2 mb-4">
-            <input type="checkbox" :id="'ftr_' + i" x-model="inj.free_text_response"
-                   class="rounded accent-stone-700" />
-            <label :for="'ftr_' + i" class="text-[13px] text-stone-600">Allow free-text response</label>
-          </div>
-
-          <!-- Options -->
-          <div class="border-t rule pt-4">
-            <div class="flex items-center justify-between mb-2.5">
-              <span class="smallcaps text-stone-500">Branch options</span>
-              <button @click="addOption(inj)" type="button"
-                      class="smallcaps text-stone-500 hover:text-stone-800">+ Add option</button>
-            </div>
-            <div class="space-y-2">
-              <template x-for="(opt, j) in inj.options" :key="j">
-                <div class="flex gap-2 items-center">
-                  <input type="text" x-model="opt.id" placeholder="opt_a"
-                         class="ring-rule rounded-md px-2 py-1 text-[12px] bg-white w-24" />
-                  <input type="text" x-model="opt.label" placeholder="Option label"
-                         class="ring-rule rounded-md px-2 py-1 text-[12px] bg-white flex-1" />
-                  <select :value="opt.next_inject_id || ''"
-                          x-effect="$nextTick(() => { $el.value = opt.next_inject_id || '' })"
-                          @change="opt.next_inject_id = $event.target.value || null"
-                          class="ring-rule rounded-md px-2 py-1 text-[12px] bg-white w-36">
-                    <option value="">— end —</option>
-                    <template x-for="other in form.injects" :key="other.id">
-                      <option :value="other.id" x-text="other.id"></option>
-                    </template>
-                  </select>
-                  <button @click="inj.options.splice(j, 1)" type="button"
-                          class="text-red-400 hover:text-red-600 text-[12px]">✕</button>
-                </div>
-              </template>
-              <div x-show="inj.options.length === 0"
-                   class="text-[12px] text-stone-400">No options — this inject is a terminal node.</div>
-            </div>
-          </div>
-
-          <!-- Expected actions -->
-          <div class="border-t rule pt-4 mt-4">
-            <div class="flex items-center justify-between mb-2.5">
-              <span class="smallcaps text-stone-500">Expected actions</span>
-              <button @click="inj.expected_actions.push('')" type="button"
-                      class="smallcaps text-stone-500 hover:text-stone-800">+ Add action</button>
-            </div>
-            <div class="space-y-2">
-              <template x-for="(action, k) in inj.expected_actions" :key="k">
-                <div class="flex gap-2 items-center">
-                  <input type="text" x-model="inj.expected_actions[k]"
-                         placeholder="e.g. Notify CISO immediately"
-                         class="ring-rule rounded-md px-2.5 py-1.5 text-[13px] bg-white flex-1" />
-                  <button @click="inj.expected_actions.splice(k, 1)" type="button"
-                          class="text-red-400 hover:text-red-600 text-[12px]">✕</button>
-                </div>
-              </template>
-              <div x-show="inj.expected_actions.length === 0"
-                   class="text-[12px] text-stone-400">No expected actions defined.</div>
-            </div>
+    <!-- Focused center editor -->
+    <main class="scenario-editor-main">
+      <!-- Scenario details -->
+      <section x-show="activePanel === 'scenario'" class="scenario-panel p-5" data-testid="scenario-details-panel">
+        <div class="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <div class="smallcaps text-stone-500">Scenario brief</div>
+            <h2 class="text-[20px] font-semibold tracking-tight mt-1">Define the operating context</h2>
+            <p class="text-[13px] text-stone-500 mt-1">
+              Keep the brief concise, then use injects for the decision pressure.
+            </p>
           </div>
         </div>
+
+        <div class="grid gap-4">
+          <div>
+            <label class="block smallcaps text-stone-500 mb-1">Title <span class="text-red-400">*</span></label>
+            <input type="text" x-model="form.title"
+                   class="scenario-field"
+                   data-testid="scenario-title" />
+          </div>
+
+          <div>
+            <label class="block smallcaps text-stone-500 mb-1">Description</label>
+            <textarea x-model="form.description" rows="3"
+                      class="scenario-field resize-none"
+                      data-testid="scenario-description"></textarea>
+          </div>
+
+          <div class="grid gap-3" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+            <div>
+              <label class="block smallcaps text-stone-500 mb-1">Author</label>
+              <input type="text" x-model="form.metadata.author"
+                     placeholder="Deep Thought"
+                     class="scenario-field"
+                     data-testid="scenario-author" />
+            </div>
+            <div>
+              <label class="block smallcaps text-stone-500 mb-1">Estimated duration</label>
+              <div class="flex items-center gap-2">
+                <input type="number" min="1" step="1"
+                       x-model="form.metadata.estimated_duration_minutes"
+                       class="scenario-field"
+                       data-testid="scenario-duration" />
+                <span class="text-[13px] text-stone-500 shrink-0">minutes</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label class="block smallcaps text-stone-500 mb-1">Tags</label>
+            <input type="text" x-model="tagsInput" placeholder="cyber, ransomware, GDPR"
+                   class="scenario-field"
+                   data-testid="scenario-tags" />
+            <div class="flex flex-wrap gap-1.5 mt-2">
+              <template x-for="tag in tagsList" :key="tag">
+                <span class="pill text-[10.5px]" x-text="tag"></span>
+              </template>
+              <span x-show="tagsList.length === 0" class="text-[12.5px] text-stone-400">No tags yet.</span>
+            </div>
+          </div>
+
+          <div>
+            <label class="block smallcaps text-stone-500 mb-1">Start inject</label>
+            <select x-model="form.start_inject_id"
+                    class="scenario-field"
+                    data-testid="scenario-start-inject">
+              <template x-for="inj in form.injects" :key="inj._key">
+                <option :value="inj.id" x-text="(inj.id || 'untitled') + ' — ' + (inj.title || 'Untitled inject')"></option>
+              </template>
+            </select>
+          </div>
+
+          <div>
+            <label class="block smallcaps text-stone-500 mb-1">Debrief notes</label>
+            <textarea x-model="form.debrief_notes" rows="3"
+                      class="scenario-field resize-none"
+                      data-testid="scenario-debrief"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <!-- Teams -->
+      <section x-show="activePanel === 'teams'" class="scenario-panel p-5" data-testid="scenario-teams-panel">
+        <div class="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <div class="smallcaps text-stone-500">Participant teams</div>
+            <h2 class="text-[20px] font-semibold tracking-tight mt-1">Create routing groups</h2>
+            <p class="text-[13px] text-stone-500 mt-1">
+              Teams become the targeting controls on each inject.
+            </p>
+          </div>
+          <button type="button" @click="addTeam()"
+                  class="btn btn-ghost h-8 px-3 text-[13px]"
+                  data-testid="add-team">+ Add team</button>
+        </div>
+
+        <div class="space-y-2">
+          <template x-for="(team, i) in form.participant_teams" :key="team._key">
+            <div class="scenario-tabular validation-card">
+              <input type="text" x-model="team.id"
+                     @focus="team._editingId = team.id"
+                     @change="commitTeamId(team)"
+                     placeholder="team_01"
+                     class="scenario-field compact mono"
+                     data-testid="team-id" />
+              <input type="text" x-model="team.label" placeholder="Team label"
+                     class="scenario-field compact"
+                     data-testid="team-label" />
+              <button @click="removeTeam(i)" type="button"
+                      class="smallcaps text-red-400 hover:text-red-600">Remove</button>
+            </div>
+          </template>
+          <div x-show="form.participant_teams.length === 0"
+               class="validation-card text-[13px] text-stone-500">
+            No teams defined. All participants will receive all injects unless you add routing groups.
+          </div>
+        </div>
+      </section>
+
+      <!-- Active inject editor -->
+      <template x-if="activePanel === 'injects' && activeInject">
+        <section class="scenario-panel p-5" data-testid="scenario-inject-panel">
+          <div class="flex items-start justify-between gap-4 mb-5">
+            <div class="min-w-0">
+              <div class="smallcaps text-stone-500">Inject editor</div>
+              <h2 class="text-[20px] font-semibold tracking-tight mt-1 truncate"
+                  x-text="activeInject.title || activeInject.id || 'Untitled inject'"></h2>
+              <p class="text-[13px] text-stone-500 mt-1">
+                Define the participant prompt, routing, choices, and evaluator expectations.
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-2 shrink-0">
+              <button type="button" @click="moveActiveInject(-1)" :disabled="activeIndex <= 0"
+                      class="btn btn-ghost h-8 px-3 text-[13px] disabled:opacity-40">Move up</button>
+              <button type="button" @click="moveActiveInject(1)" :disabled="activeIndex >= form.injects.length - 1"
+                      class="btn btn-ghost h-8 px-3 text-[13px] disabled:opacity-40">Move down</button>
+              <button type="button" @click="removeActiveInject()"
+                      class="btn btn-ghost h-8 px-3 text-[13px]"
+                      style="color:#b91c1c;">Remove</button>
+            </div>
+          </div>
+
+          <div class="space-y-5">
+            <div class="grid gap-3" style="grid-template-columns: minmax(130px, .7fr) minmax(0, 1.5fr);">
+              <div>
+                <label class="block smallcaps text-stone-500 mb-1">ID <span class="text-red-400">*</span></label>
+                <input type="text" x-model="activeInject.id"
+                       @focus="activeInject._editingId = activeInject.id"
+                       @change="commitInjectId(activeInject)"
+                       class="scenario-field mono"
+                       data-testid="inject-id" />
+              </div>
+              <div>
+                <label class="block smallcaps text-stone-500 mb-1">Title</label>
+                <input type="text" x-model="activeInject.title"
+                       class="scenario-field"
+                       data-testid="inject-title" />
+              </div>
+            </div>
+
+            <div>
+              <label class="block smallcaps text-stone-500 mb-1">Content</label>
+              <textarea x-model="activeInject.content" rows="5"
+                        class="scenario-field resize-none"
+                        data-testid="inject-content"></textarea>
+            </div>
+
+            <div class="validation-card">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div class="smallcaps text-stone-500">Response mode</div>
+                  <div class="text-[13px] text-stone-500 mt-0.5">Participants can explain reasoning in free text.</div>
+                </div>
+                <label class="inline-flex items-center gap-2 text-[13px] text-stone-600">
+                  <input type="checkbox" x-model="activeInject.free_text_response"
+                         class="rounded accent-stone-700"
+                         data-testid="inject-free-text" />
+                  Allow free-text response
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between gap-3 mb-2">
+                <div>
+                  <div class="smallcaps text-stone-500">Target teams</div>
+                  <div class="text-[12.5px] text-stone-500 mt-0.5">Leave all unchecked for a shared inject.</div>
+                </div>
+                <button type="button" x-show="form.participant_teams.length"
+                        @click="activeInject.target_teams = []"
+                        class="smallcaps text-stone-500 hover:text-stone-800">Clear</button>
+              </div>
+              <div x-show="form.participant_teams.length" class="flex flex-wrap gap-2">
+                <template x-for="team in form.participant_teams" :key="team._key">
+                  <label class="target-chip"
+                         :class="{ 'is-on': injectTargetsTeam(activeInject, team.id) }">
+                    <input type="checkbox"
+                           :checked="injectTargetsTeam(activeInject, team.id)"
+                           @change="toggleInjectTeam(activeInject, team.id, $event.target.checked)"
+                           class="accent-stone-700"
+                           data-testid="inject-target-team" />
+                    <span x-text="team.label || team.id"></span>
+                  </label>
+                </template>
+              </div>
+              <div x-show="!form.participant_teams.length" class="validation-card text-[13px] text-stone-500">
+                Add participant teams to enable targeted routing.
+              </div>
+            </div>
+
+            <div class="border-t rule pt-5">
+              <div class="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <div class="smallcaps text-stone-500">Branch options</div>
+                  <div class="text-[12.5px] text-stone-500 mt-0.5">Choices map participant decisions to the next inject.</div>
+                </div>
+                <button @click="addOption(activeInject)" type="button"
+                        class="btn btn-ghost h-8 px-3 text-[13px]"
+                        data-testid="add-branch-option">+ Add option</button>
+              </div>
+              <div class="space-y-2">
+                <template x-for="(opt, j) in activeInject.options" :key="opt._key">
+                  <div class="branch-row validation-card">
+                    <input type="text" x-model="opt.id"
+                           @change="opt.id = normalizeId(opt.id, nextOptionId(activeInject))"
+                           placeholder="opt_01"
+                           class="scenario-field compact mono"
+                           data-testid="option-id" />
+                    <input type="text" x-model="opt.label" placeholder="Option label"
+                           class="scenario-field compact"
+                           data-testid="option-label" />
+                    <select :value="opt.next_inject_id || ''"
+                            x-effect="$nextTick(() => { $el.value = opt.next_inject_id || '' })"
+                            @change="opt.next_inject_id = $event.target.value || null"
+                            class="scenario-field compact mono"
+                            data-testid="option-next">
+                      <option value="">End branch</option>
+                      <template x-for="other in form.injects" :key="other._key">
+                        <option :value="other.id" x-text="other.id || 'untitled'"></option>
+                      </template>
+                    </select>
+                    <button @click="activeInject.options.splice(j, 1)" type="button"
+                            class="smallcaps text-red-400 hover:text-red-600">Remove</button>
+                  </div>
+                </template>
+                <div x-show="activeInject.options.length === 0"
+                     class="validation-card text-[13px] text-stone-500">No options. This inject ends its branch.</div>
+              </div>
+            </div>
+
+            <div class="border-t rule pt-5">
+              <div class="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <div class="smallcaps text-stone-500">Expected actions</div>
+                  <div class="text-[12.5px] text-stone-500 mt-0.5">Evaluator cues shown in the facilitator console.</div>
+                </div>
+                <button @click="addExpectedAction(activeInject)" type="button"
+                        class="btn btn-ghost h-8 px-3 text-[13px]"
+                        data-testid="add-expected-action">+ Add action</button>
+              </div>
+              <div class="space-y-2">
+                <template x-for="(action, k) in activeInject.expected_actions" :key="k">
+                  <div class="flex gap-2 items-center validation-card">
+                    <input type="text" x-model="activeInject.expected_actions[k]"
+                           placeholder="e.g. Notify CISO immediately"
+                           class="scenario-field compact flex-1"
+                           data-testid="expected-action" />
+                    <button @click="activeInject.expected_actions.splice(k, 1)" type="button"
+                            class="smallcaps text-red-400 hover:text-red-600">Remove</button>
+                  </div>
+                </template>
+                <div x-show="activeInject.expected_actions.length === 0"
+                     class="validation-card text-[13px] text-stone-500">No expected actions defined.</div>
+              </div>
+            </div>
+          </div>
+        </section>
       </template>
-    </div>
+    </main>
+
+    <!-- Right readiness rail -->
+    <aside class="scenario-rail right" data-testid="scenario-readiness">
+      <div class="scenario-panel p-4">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <div class="smallcaps text-stone-500">Readiness</div>
+            <div class="text-[13px] text-stone-500 mt-0.5" x-text="readinessLabel"></div>
+          </div>
+          <span class="pill text-[10.5px]" :style="readinessPillStyle" x-text="readinessState"></span>
+        </div>
+
+        <div class="grid gap-2 mb-4" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+          <div class="validation-card">
+            <div class="mono text-[18px] font-semibold" x-text="form.injects.length"></div>
+            <div class="smallcaps text-stone-500">Injects</div>
+          </div>
+          <div class="validation-card">
+            <div class="mono text-[18px] font-semibold" x-text="branchCount"></div>
+            <div class="smallcaps text-stone-500">Branches</div>
+          </div>
+          <div class="validation-card">
+            <div class="mono text-[18px] font-semibold" x-text="targetedInjectCount"></div>
+            <div class="smallcaps text-stone-500">Targeted</div>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <template x-for="issue in validationIssues" :key="issue.text">
+            <button type="button"
+                    @click="focusIssue(issue)"
+                    class="validation-card w-full text-left">
+              <div class="flex items-start gap-2">
+                <span class="dot mt-1"
+                      :style="'background:' + (issue.type === 'error' ? '#ef4444' : 'var(--accent)')"></span>
+                <span class="text-[12.5px]"
+                      :style="'color:' + (issue.type === 'error' ? '#b91c1c' : 'var(--ink-soft)')"
+                      x-text="issue.text"></span>
+              </div>
+            </button>
+          </template>
+          <div x-show="validationIssues.length === 0"
+               class="validation-card flex items-center gap-2 text-[13px]" style="color:#166534;">
+            <span class="dot" style="background:#22c55e;"></span>
+            No readiness issues found
+          </div>
+        </div>
+      </div>
+
+      <div class="scenario-panel p-4">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <div class="smallcaps text-stone-500">Flow preview</div>
+            <div class="text-[13px] text-stone-500 mt-0.5">Start path plus disconnected nodes.</div>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <template x-for="row in flowRows" :key="row.key">
+            <div class="flow-row" :style="'margin-left:' + Math.min(row.depth * 14, 42) + 'px'">
+              <div class="flex items-center gap-2">
+                <span class="mono text-[11px] text-stone-400" x-text="row.id"></span>
+                <span x-show="row.kind === 'missing'" class="pill text-[10px]" style="background:#fee2e2; color:#b91c1c; box-shadow: inset 0 0 0 1px #fecaca;">missing</span>
+                <span x-show="row.disconnected" class="pill text-[10px]">unlinked</span>
+              </div>
+              <div class="text-[12.5px] font-medium mt-0.5 truncate" x-text="row.title"></div>
+              <div class="text-[11.5px] text-stone-500 mt-0.5" x-text="row.meta"></div>
+            </div>
+          </template>
+          <div x-show="flowRows.length === 0" class="validation-card text-[13px] text-stone-500">
+            Add an inject to preview the flow.
+          </div>
+        </div>
+      </div>
+    </aside>
   </div>
 
-  <div class="flex gap-3 pb-8">
-    <button @click="save()" :disabled="saving" type="button"
-            class="btn btn-primary h-9 px-5 text-[13px] disabled:opacity-50">
+  <div class="flex flex-wrap gap-3 pt-5 pb-8">
+    <button @click="save()" :disabled="saving || blockingIssues.length > 0" type="button"
+            class="btn btn-primary h-9 px-5 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed"
+            data-testid="scenario-save-bottom">
       <span x-text="saving ? 'Saving…' : (scenarioId ? 'Save changes' : 'Create scenario')"></span>
     </button>
     <a href="/scenarios" class="btn btn-ghost h-9 px-4 text-[13px]">Cancel</a>
@@ -223,12 +629,47 @@
 
 {% block scripts %}
 <script>
-let _keyCounter = 0;
+window._scenarioEditorKeyCounter = window._scenarioEditorKeyCounter || 0;
 
-function makeInject() {
+function scenarioKey() {
+  return window._scenarioEditorKeyCounter++;
+}
+
+function normalizeId(value, fallback) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return normalized || fallback;
+}
+
+function makeTeam(id) {
   return {
-    _key: _keyCounter++,
-    id: '', title: '', content: '',
+    _key: scenarioKey(),
+    _editingId: id || '',
+    id: id || '',
+    label: '',
+  };
+}
+
+function makeOption(id) {
+  return {
+    _key: scenarioKey(),
+    id: id || '',
+    label: '',
+    next_inject_id: null,
+  };
+}
+
+function makeInject(id) {
+  const injectId = id || 'inject_01';
+  return {
+    _key: scenarioKey(),
+    _editingId: injectId,
+    id: injectId,
+    title: '',
+    content: '',
     target_teams: [],
     sequence_order: 0,
     options: [],
@@ -245,6 +686,7 @@ function scenarioEditor(scenarioId) {
       schema_version: '1.0',
       title: '',
       description: '',
+      metadata: { author: '', estimated_duration_minutes: null },
       tags: [],
       participant_teams: [],
       injects: [],
@@ -252,6 +694,8 @@ function scenarioEditor(scenarioId) {
       debrief_notes: '',
     },
     tagsInput: '',
+    activePanel: 'scenario',
+    activeInjectKey: null,
     saving: false,
     error: '',
     success: '',
@@ -261,58 +705,304 @@ function scenarioEditor(scenarioId) {
         const r = await apiFetch('/scenarios/' + this.scenarioId);
         if (r && r.ok) {
           const data = await r.json();
-          const def = data.definition;
-          this.form = {
-            ...def,
-            injects: def.injects.map(inj => ({
-              ...inj,
-              _key: _keyCounter++,
-              target_teams: inj.target_teams || [],
-              expected_actions: inj.expected_actions || [],
-            })),
-          };
-          this.tagsInput = (def.tags || []).join(', ');
+          this.applyDefinition(data.definition);
         }
       } else {
-        this.form.injects = [makeInject()];
-        this.form.start_inject_id = this.form.injects[0].id;
+        const first = makeInject('inject_01');
+        this.form.injects = [first];
+        this.form.start_inject_id = first.id;
+        this.activeInjectKey = first._key;
       }
+      this.ensureActiveInject();
+    },
+
+    applyDefinition(def) {
+      const normalized = this.normalizeDefinition(def || {});
+      this.form = normalized;
+      this.tagsInput = (normalized.tags || []).join(', ');
+      this.activeInjectKey = normalized.injects[0]?._key || null;
+      this.activePanel = 'scenario';
+    },
+
+    normalizeDefinition(def) {
+      const injects = (def.injects || []).map((inj, index) => this.normalizeInject(inj, index));
+      return {
+        schema_version: def.schema_version || '1.0',
+        title: def.title || '',
+        description: def.description || '',
+        metadata: {
+          author: def.metadata?.author || '',
+          estimated_duration_minutes: def.metadata?.estimated_duration_minutes || null,
+        },
+        tags: def.tags || [],
+        participant_teams: (def.participant_teams || []).map(team => this.normalizeTeam(team)),
+        injects,
+        start_inject_id: def.start_inject_id || injects[0]?.id || '',
+        debrief_notes: def.debrief_notes || '',
+      };
+    },
+
+    normalizeTeam(team) {
+      const id = team?.id || this.nextTeamId();
+      return {
+        _key: scenarioKey(),
+        _editingId: id,
+        id,
+        label: team?.label || '',
+      };
+    },
+
+    normalizeOption(opt, index) {
+      const id = opt?.id || `opt_${String(index + 1).padStart(2, '0')}`;
+      return {
+        _key: scenarioKey(),
+        id,
+        label: opt?.label || '',
+        next_inject_id: opt?.next_inject_id || null,
+      };
+    },
+
+    normalizeInject(inj, index) {
+      const id = inj?.id || `inject_${String(index + 1).padStart(2, '0')}`;
+      return {
+        _key: scenarioKey(),
+        _editingId: id,
+        id,
+        title: inj?.title || '',
+        content: inj?.content || '',
+        target_teams: inj?.target_teams || [],
+        sequence_order: inj?.sequence_order || index + 1,
+        options: (inj?.options || []).map((opt, optIndex) => this.normalizeOption(opt, optIndex)),
+        expected_actions: inj?.expected_actions || [],
+        free_text_response: inj?.free_text_response !== false,
+        triggers_communications: inj?.triggers_communications || [],
+      };
     },
 
     async importFile(event) {
       const file = event.target.files[0];
       if (!file) return;
       const text = await file.text();
-      let def;
-      try { def = JSON.parse(text); } catch { this.error = 'Invalid JSON file.'; return; }
-      this.form = {
-        schema_version: def.schema_version || '1.0',
-        title: def.title || '',
-        description: def.description || '',
-        tags: def.tags || [],
-        participant_teams: def.participant_teams || [],
-        injects: (def.injects || []).map(inj => ({
-          ...inj,
-          _key: _keyCounter++,
-          target_teams: inj.target_teams || [],
-          expected_actions: inj.expected_actions || [],
-        })),
-        start_inject_id: def.start_inject_id || '',
-        debrief_notes: def.debrief_notes || '',
-      };
-      this.tagsInput = (def.tags || []).join(', ');
-      this.error = '';
+      try {
+        this.applyDefinition(JSON.parse(text));
+        this.error = '';
+        this.success = 'Imported JSON into the builder.';
+      } catch {
+        this.error = 'Invalid JSON file.';
+      }
       event.target.value = '';
     },
 
-    addInject() {
-      const inj = makeInject();
-      this.form.injects.push(inj);
-      if (!this.form.start_inject_id) this.form.start_inject_id = inj.id;
+    get tagsList() {
+      return this.tagsInput.split(',').map(t => t.trim()).filter(Boolean);
     },
-    removeInject(i) { this.form.injects.splice(i, 1); },
-    addOption(inj) { inj.options.push({ id: '', label: '', next_inject_id: null }); },
-    addTeam() { this.form.participant_teams.push({ id: '', label: '' }); },
+
+    get activeInject() {
+      if (!this.form.injects.length) return null;
+      return this.form.injects.find(inj => inj._key === this.activeInjectKey) || this.form.injects[0];
+    },
+
+    get activeIndex() {
+      if (!this.activeInject) return -1;
+      return this.form.injects.findIndex(inj => inj._key === this.activeInject._key);
+    },
+
+    get durationLabel() {
+      const mins = Number(this.form.metadata?.estimated_duration_minutes || 0);
+      return mins ? `${mins} min exercise` : 'Duration not set';
+    },
+
+    get branchCount() {
+      return this.form.injects.filter(inj => inj.options && inj.options.length > 1).length;
+    },
+
+    get targetedInjectCount() {
+      return this.form.injects.filter(inj => inj.target_teams && inj.target_teams.length).length;
+    },
+
+    get blockingIssues() {
+      return this.validationIssues.filter(issue => issue.type === 'error');
+    },
+
+    get readinessState() {
+      return this.blockingIssues.length ? 'Needs work' : 'Ready';
+    },
+
+    get readinessLabel() {
+      if (this.blockingIssues.length) {
+        return `${this.blockingIssues.length} blocker${this.blockingIssues.length === 1 ? '' : 's'} before save`;
+      }
+      const warnings = this.validationIssues.filter(issue => issue.type === 'warn').length;
+      return warnings ? `${warnings} advisory note${warnings === 1 ? '' : 's'}` : 'Scenario can be saved';
+    },
+
+    get readinessPillStyle() {
+      return this.blockingIssues.length
+        ? 'background:#fee2e2; color:#b91c1c; box-shadow: inset 0 0 0 1px #fecaca;'
+        : 'background:#dcfce7; color:#166534; box-shadow: inset 0 0 0 1px #bbf7d0;';
+    },
+
+    get validationIssues() {
+      const issues = [];
+      const injectIds = this.form.injects.map(inj => inj.id).filter(Boolean);
+      const teamIds = this.form.participant_teams.map(team => team.id).filter(Boolean);
+      const duplicateInjectIds = injectIds.filter((id, index) => injectIds.indexOf(id) !== index);
+      const duplicateTeamIds = teamIds.filter((id, index) => teamIds.indexOf(id) !== index);
+
+      if (!this.form.title.trim()) {
+        issues.push({ type: 'error', target: 'scenario', text: 'Add a scenario title.' });
+      }
+      if (!this.form.injects.length) {
+        issues.push({ type: 'error', target: 'injects', text: 'Add at least one inject.' });
+      }
+      if (duplicateInjectIds.length) {
+        issues.push({ type: 'error', target: 'injects', text: `Resolve duplicate inject ID "${duplicateInjectIds[0]}".` });
+      }
+      if (duplicateTeamIds.length) {
+        issues.push({ type: 'error', target: 'teams', text: `Resolve duplicate team ID "${duplicateTeamIds[0]}".` });
+      }
+      if (!this.form.start_inject_id || !injectIds.includes(this.form.start_inject_id)) {
+        issues.push({ type: 'error', target: 'scenario', text: 'Choose a valid start inject.' });
+      }
+
+      for (const inj of this.form.injects) {
+        if (!inj.id) {
+          issues.push({ type: 'error', target: 'injects', key: inj._key, text: 'Every inject needs an ID.' });
+        }
+        if (!inj.title.trim()) {
+          issues.push({ type: 'error', target: 'injects', key: inj._key, text: `${inj.id || 'An inject'} needs a title.` });
+        }
+        if (!inj.content.trim()) {
+          issues.push({ type: 'warn', target: 'injects', key: inj._key, text: `${inj.id || 'An inject'} has no participant content yet.` });
+        }
+        for (const teamId of (inj.target_teams || [])) {
+          if (teamIds.length && !teamIds.includes(teamId)) {
+            issues.push({ type: 'error', target: 'injects', key: inj._key, text: `${inj.id || 'An inject'} targets unknown team "${teamId}".` });
+          }
+        }
+        for (const opt of (inj.options || [])) {
+          if (!opt.id) {
+            issues.push({ type: 'error', target: 'injects', key: inj._key, text: `${inj.id || 'An inject'} has a branch option without an ID.` });
+          }
+          if (!opt.label.trim()) {
+            issues.push({ type: 'warn', target: 'injects', key: inj._key, text: `${inj.id || 'An inject'} has an unlabeled branch option.` });
+          }
+          if (opt.next_inject_id && !injectIds.includes(opt.next_inject_id)) {
+            issues.push({ type: 'error', target: 'injects', key: inj._key, text: `${inj.id || 'An inject'} points to missing inject "${opt.next_inject_id}".` });
+          }
+        }
+      }
+
+      const cycle = this.detectCycle();
+      if (cycle) {
+        issues.push({ type: 'error', target: 'injects', text: `Resolve the cycle that reaches "${cycle}".` });
+      }
+      return issues;
+    },
+
+    get flowRows() {
+      const byId = Object.fromEntries(this.form.injects.filter(inj => inj.id).map(inj => [inj.id, inj]));
+      const rows = [];
+      const visited = new Set();
+      const walk = (id, depth) => {
+        if (!id) return;
+        if (visited.has(id)) return;
+        const inj = byId[id];
+        if (!inj) {
+          rows.push({
+            key: `missing-${id}-${depth}`,
+            id,
+            title: 'Missing inject',
+            meta: 'Referenced by a branch option',
+            kind: 'missing',
+            depth,
+          });
+          return;
+        }
+        visited.add(id);
+        rows.push({
+          key: `${inj._key}-${depth}`,
+          id: inj.id,
+          title: inj.title || 'Untitled inject',
+          meta: this.injectMeta(inj),
+          kind: 'inject',
+          depth,
+          disconnected: false,
+        });
+        for (const opt of (inj.options || [])) {
+          if (opt.next_inject_id) walk(opt.next_inject_id, depth + 1);
+        }
+      };
+      walk(this.form.start_inject_id, 0);
+      for (const inj of this.form.injects) {
+        if (inj.id && !visited.has(inj.id)) {
+          rows.push({
+            key: `${inj._key}-disconnected`,
+            id: inj.id,
+            title: inj.title || 'Untitled inject',
+            meta: this.injectMeta(inj),
+            kind: 'inject',
+            depth: 0,
+            disconnected: true,
+          });
+        }
+      }
+      return rows;
+    },
+
+    injectMeta(inj) {
+      const bits = [];
+      bits.push((inj.options || []).length ? `${inj.options.length} option${inj.options.length === 1 ? '' : 's'}` : 'terminal');
+      bits.push((inj.target_teams || []).length ? `${inj.target_teams.length} targeted` : 'shared');
+      if ((inj.expected_actions || []).length) bits.push(`${inj.expected_actions.length} expected`);
+      return bits.join(' · ');
+    },
+
+    ensureActiveInject() {
+      if (!this.activeInjectKey && this.form.injects[0]) this.activeInjectKey = this.form.injects[0]._key;
+      if (this.activePanel === 'injects' && !this.activeInject && this.form.injects[0]) {
+        this.activeInjectKey = this.form.injects[0]._key;
+      }
+    },
+
+    setActiveInject(inj) {
+      this.activePanel = 'injects';
+      this.activeInjectKey = inj._key;
+    },
+
+    nextSequentialId(prefix, collection) {
+      const used = new Set(collection.map(item => item.id).filter(Boolean));
+      let i = 1;
+      while (true) {
+        const candidate = `${prefix}_${String(i).padStart(2, '0')}`;
+        if (!used.has(candidate)) return candidate;
+        i += 1;
+      }
+    },
+
+    nextTeamId() {
+      return this.nextSequentialId('team', this.form.participant_teams);
+    },
+
+    nextInjectId() {
+      return this.nextSequentialId('inject', this.form.injects);
+    },
+
+    nextOptionId(inj) {
+      return this.nextSequentialId('opt', inj?.options || []);
+    },
+
+    addTeam() {
+      const id = this.nextTeamId();
+      this.form.participant_teams.push({
+        _key: scenarioKey(),
+        _editingId: id,
+        id,
+        label: '',
+      });
+      this.activePanel = 'teams';
+    },
+
     removeTeam(i) {
       const [removed] = this.form.participant_teams.splice(i, 1);
       if (removed?.id) {
@@ -321,40 +1011,168 @@ function scenarioEditor(scenarioId) {
         });
       }
     },
-    injectTargetsTeam(inj, teamId) {
-      return (inj.target_teams || []).includes(teamId);
+
+    commitTeamId(team) {
+      const previous = team._editingId || team.id;
+      const next = normalizeId(team.id, this.nextTeamId());
+      team.id = next;
+      team._editingId = next;
+      if (previous && previous !== next) {
+        this.form.injects.forEach(inj => {
+          inj.target_teams = (inj.target_teams || []).map(t => t === previous ? next : t);
+        });
+      }
     },
+
+    addInject() {
+      const inj = makeInject(this.nextInjectId());
+      inj.sequence_order = this.form.injects.length + 1;
+      this.form.injects.push(inj);
+      if (!this.form.start_inject_id) this.form.start_inject_id = inj.id;
+      this.setActiveInject(inj);
+    },
+
+    removeActiveInject() {
+      const index = this.activeIndex;
+      if (index >= 0) this.removeInject(index);
+    },
+
+    removeInject(i) {
+      const [removed] = this.form.injects.splice(i, 1);
+      if (removed?.id) {
+        this.form.injects.forEach(inj => {
+          (inj.options || []).forEach(opt => {
+            if (opt.next_inject_id === removed.id) opt.next_inject_id = null;
+          });
+        });
+      }
+      if (this.form.start_inject_id === removed?.id) {
+        this.form.start_inject_id = this.form.injects[0]?.id || '';
+      }
+      const next = this.form.injects[Math.min(i, this.form.injects.length - 1)];
+      this.activeInjectKey = next?._key || null;
+      if (!next) this.activePanel = 'scenario';
+    },
+
+    moveActiveInject(direction) {
+      const from = this.activeIndex;
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= this.form.injects.length) return;
+      const [inj] = this.form.injects.splice(from, 1);
+      this.form.injects.splice(to, 0, inj);
+    },
+
+    commitInjectId(inj) {
+      const previous = inj._editingId || inj.id;
+      const next = normalizeId(inj.id, this.nextInjectId());
+      inj.id = next;
+      inj._editingId = next;
+      if (previous && previous !== next) {
+        if (this.form.start_inject_id === previous) this.form.start_inject_id = next;
+        this.form.injects.forEach(node => {
+          (node.options || []).forEach(opt => {
+            if (opt.next_inject_id === previous) opt.next_inject_id = next;
+          });
+        });
+      }
+    },
+
+    addOption(inj) {
+      inj.options = inj.options || [];
+      inj.options.push(makeOption(this.nextOptionId(inj)));
+    },
+
+    addExpectedAction(inj) {
+      inj.expected_actions = inj.expected_actions || [];
+      inj.expected_actions.push('');
+    },
+
+    injectTargetsTeam(inj, teamId) {
+      return !!teamId && (inj.target_teams || []).includes(teamId);
+    },
+
     toggleInjectTeam(inj, teamId, checked) {
+      if (!teamId) return;
       inj.target_teams = inj.target_teams || [];
       if (checked && !inj.target_teams.includes(teamId)) inj.target_teams.push(teamId);
       if (!checked) inj.target_teams = inj.target_teams.filter(t => t !== teamId);
     },
 
+    focusIssue(issue) {
+      if (issue.target === 'scenario') this.activePanel = 'scenario';
+      if (issue.target === 'teams') this.activePanel = 'teams';
+      if (issue.target === 'injects') {
+        this.activePanel = 'injects';
+        if (issue.key) this.activeInjectKey = issue.key;
+      }
+    },
+
+    detectCycle() {
+      const byId = Object.fromEntries(this.form.injects.filter(inj => inj.id).map(inj => [inj.id, inj]));
+      const visited = new Set();
+      const stack = new Set();
+      const walk = (id) => {
+        if (!id || !byId[id]) return null;
+        if (stack.has(id)) return id;
+        if (visited.has(id)) return null;
+        visited.add(id);
+        stack.add(id);
+        for (const opt of (byId[id].options || [])) {
+          const cycle = walk(opt.next_inject_id);
+          if (cycle) return cycle;
+        }
+        stack.delete(id);
+        return null;
+      };
+      return walk(this.form.start_inject_id);
+    },
+
     buildPayload() {
-      const injects = this.form.injects.map(inj => ({
-        id: inj.id,
+      const injects = this.form.injects.map((inj, index) => ({
+        id: normalizeId(inj.id, `inject_${String(index + 1).padStart(2, '0')}`),
         title: inj.title,
         content: inj.content,
         target_teams: (inj.target_teams || []).filter(Boolean),
-        sequence_order: inj.sequence_order || 0,
-        options: inj.options.map(opt => ({
-          id: opt.id,
+        sequence_order: index + 1,
+        options: (inj.options || []).map((opt, optIndex) => ({
+          id: normalizeId(opt.id, `opt_${String(optIndex + 1).padStart(2, '0')}`),
           label: opt.label,
           next_inject_id: opt.next_inject_id || null,
         })),
-        free_text_response: inj.free_text_response,
+        free_text_response: inj.free_text_response !== false,
         triggers_communications: inj.triggers_communications || [],
-        expected_actions: (inj.expected_actions || []).filter(Boolean),
+        expected_actions: (inj.expected_actions || []).map(a => a.trim()).filter(Boolean),
       }));
       const validIds = new Set(injects.map(i => i.id).filter(Boolean));
       const start_inject_id = validIds.has(this.form.start_inject_id)
         ? this.form.start_inject_id
         : (injects.find(i => i.id)?.id || '');
-      return { ...this.form, start_inject_id, injects, tags: this.tagsInput.split(',').map(t => t.trim()).filter(Boolean) };
+      const duration = Number(this.form.metadata?.estimated_duration_minutes || 0);
+      return {
+        ...this.form,
+        metadata: {
+          author: this.form.metadata?.author || null,
+          estimated_duration_minutes: duration > 0 ? duration : null,
+        },
+        participant_teams: this.form.participant_teams.map(team => ({
+          id: normalizeId(team.id, this.nextTeamId()),
+          label: team.label || team.id,
+        })),
+        start_inject_id,
+        injects,
+        tags: this.tagsList,
+      };
     },
 
     async save() {
-      this.error = ''; this.success = ''; this.saving = true;
+      this.error = '';
+      this.success = '';
+      if (this.blockingIssues.length) {
+        this.error = this.blockingIssues[0].text;
+        this.focusIssue(this.blockingIssues[0]);
+        return;
+      }
+      this.saving = true;
       const payload = this.buildPayload();
       const url = this.scenarioId ? '/scenarios/' + this.scenarioId : '/scenarios';
       const method = this.scenarioId ? 'PUT' : 'POST';
@@ -366,10 +1184,14 @@ function scenarioEditor(scenarioId) {
           window.location.href = '/scenarios/' + data.id;
         } else {
           this.success = 'Saved successfully.';
+          this.applyDefinition(data.definition);
+          this.activePanel = 'scenario';
         }
       } else if (r) {
         const data = await r.json();
         this.error = data.detail || 'Save failed.';
+      } else {
+        this.error = 'Save failed.';
       }
     }
   }

@@ -7,6 +7,7 @@ Seed users are created by conftest (see below). Run with:
   pytest tests/test_ui.py --headed -v    # watch the browser
 """
 import json
+import re
 
 import pytest
 
@@ -191,6 +192,9 @@ def test_scenario_new_page_renders(page: Page):
     login_facilitator(page)
     page.goto(f"{BASE}/scenarios/new")
     expect(page.locator("body")).not_to_contain_text("Internal Server Error")
+    expect(page.get_by_test_id("scenario-builder")).to_be_visible()
+    expect(page.get_by_test_id("scenario-outline")).to_contain_text("Scenario brief")
+    expect(page.get_by_test_id("scenario-readiness")).to_contain_text("Readiness")
 
 
 def test_scenario_detail_page_renders(page: Page):
@@ -205,15 +209,110 @@ def test_scenario_editor_preserves_branch_targets(page: Page):
     scenario_id = _make_scenario(page)
     page.goto(f"{BASE}/scenarios/{scenario_id}/edit")
 
-    first_branch_select = page.locator("select").nth(1)
+    page.get_by_test_id("scenario-outline").get_by_text("Initial Alert").click()
+    first_branch_select = page.get_by_test_id("option-next")
     expect(first_branch_select).to_have_value("inject_02")
-    page.get_by_role("button", name="Save changes").click()
+    page.get_by_test_id("scenario-save-bottom").click()
     expect(page.get_by_text("Saved successfully.")).to_be_visible(timeout=5000)
 
     scenario_r = api_get(page, f"/scenarios/{scenario_id}")
     assert scenario_r.status == 200, scenario_r.text()
     options = scenario_r.json()["definition"]["injects"][0]["options"]
     assert options[0]["next_inject_id"] == "inject_02"
+
+
+def test_scenario_builder_creates_structured_scenario(page: Page):
+    login_facilitator(page)
+    page.goto(f"{BASE}/scenarios/new")
+
+    page.get_by_test_id("scenario-title").fill("Ops Builder Scenario")
+    page.get_by_test_id("scenario-description").fill("A full authoring flow created in the builder.")
+    page.get_by_test_id("scenario-author").fill("Exercise Design Team")
+    page.get_by_test_id("scenario-duration").fill("60")
+    page.get_by_test_id("scenario-tags").fill("cyber, resilience")
+    page.get_by_test_id("scenario-debrief").fill("Review branch quality and role coordination.")
+
+    page.get_by_test_id("nav-teams").click()
+    page.get_by_test_id("add-team").click()
+    page.get_by_test_id("team-id").fill("it_ops")
+    page.get_by_test_id("team-label").fill("IT Operations")
+
+    page.get_by_test_id("scenario-outline").get_by_text("Untitled inject").click()
+    page.get_by_test_id("inject-title").fill("Initial Alert")
+    page.get_by_test_id("inject-content").fill("Service desk reports a suspicious outage.")
+    page.get_by_test_id("inject-target-team").check()
+
+    page.get_by_test_id("scenario-outline").get_by_role("button", name="+ Add").click()
+    page.get_by_test_id("inject-title").fill("Containment Decision")
+    page.get_by_test_id("inject-content").fill("The team must choose a containment path.")
+
+    page.get_by_test_id("scenario-outline").get_by_text("Initial Alert").click()
+    page.get_by_test_id("add-branch-option").click()
+    page.get_by_test_id("option-label").fill("Escalate to incident command")
+    page.get_by_test_id("option-next").select_option("inject_02")
+    page.get_by_test_id("add-expected-action").click()
+    page.get_by_test_id("expected-action").fill("Notify the incident commander")
+
+    expect(page.get_by_test_id("scenario-readiness")).to_contain_text("Scenario can be saved")
+    page.get_by_test_id("scenario-save-bottom").click()
+    page.wait_for_url(re.compile(rf"{BASE}/scenarios/\d+$"), timeout=8000)
+
+    scenario_id = int(page.url.rstrip("/").split("/")[-1])
+    scenario_r = api_get(page, f"/scenarios/{scenario_id}")
+    assert scenario_r.status == 200, scenario_r.text()
+    definition = scenario_r.json()["definition"]
+    assert definition["metadata"]["author"] == "Exercise Design Team"
+    assert definition["metadata"]["estimated_duration_minutes"] == 60
+    assert definition["participant_teams"] == [{"id": "it_ops", "label": "IT Operations"}]
+    assert definition["injects"][0]["sequence_order"] == 1
+    assert definition["injects"][1]["sequence_order"] == 2
+    assert definition["injects"][0]["target_teams"] == ["it_ops"]
+    assert definition["injects"][0]["options"][0]["next_inject_id"] == "inject_02"
+    assert definition["injects"][0]["expected_actions"] == ["Notify the incident commander"]
+
+
+def test_scenario_editor_preserves_hidden_triggered_communications(page: Page):
+    login_facilitator(page)
+    scenario_def = {
+        "schema_version": "1.0",
+        "title": "Triggered Comms Scenario",
+        "description": "Preserve hidden comm definitions.",
+        "participant_teams": [{"id": "it_ops", "label": "IT Ops"}],
+        "injects": [
+            {
+                "id": "inject_01",
+                "title": "Initial Alert",
+                "content": "A message should be scheduled on release.",
+                "target_teams": ["it_ops"],
+                "options": [],
+                "free_text_response": True,
+                "sequence_order": 1,
+                "triggers_communications": [
+                    {
+                        "external_entity": "Media desk",
+                        "direction": "inbound",
+                        "subject": "Request for comment",
+                        "body": "Can you confirm the incident?",
+                        "delay_after_release_seconds": 2,
+                    }
+                ],
+            }
+        ],
+        "start_inject_id": "inject_01",
+    }
+    r = api_post(page, "/scenarios/import", {"definition": scenario_def})
+    assert r.status == 201, r.text()
+    scenario_id = r.json()["id"]
+
+    page.goto(f"{BASE}/scenarios/{scenario_id}/edit")
+    page.get_by_test_id("scenario-save-bottom").click()
+    expect(page.get_by_text("Saved successfully.")).to_be_visible(timeout=5000)
+
+    scenario_r = api_get(page, f"/scenarios/{scenario_id}")
+    assert scenario_r.status == 200, scenario_r.text()
+    trigger = scenario_r.json()["definition"]["injects"][0]["triggers_communications"][0]
+    assert trigger["external_entity"] == "Media desk"
+    assert trigger["delay_after_release_seconds"] == 2
 
 
 # ── Exercises ─────────────────────────────────────────────────────────────────
