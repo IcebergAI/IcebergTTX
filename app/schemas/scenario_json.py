@@ -35,6 +35,7 @@ class InjectNode(BaseModel):
     content: str
     target_teams: list[str] = []
     sequence_order: int = 0
+    next_inject_id: str | None = None
     options: list[InjectOption] = []
     free_text_response: bool = True
     triggers_communications: list[TriggerComm] = []
@@ -73,6 +74,10 @@ class ScenarioDefinition(BaseModel):
                     raise ValueError(
                         f"inject '{inj.id}': target_team '{team}' not in participant_teams"
                     )
+            if inj.next_inject_id is not None and inj.next_inject_id not in inject_ids:
+                raise ValueError(
+                    f"inject '{inj.id}': next_inject_id '{inj.next_inject_id}' not found"
+                )
             # All next_inject_id references must exist
             for opt in inj.options:
                 if opt.next_inject_id is not None and opt.next_inject_id not in inject_ids:
@@ -91,9 +96,10 @@ def _check_no_cycles(injects: list[InjectNode], start_id: str) -> None:
     """Raises ValueError if there is a cycle reachable from start_id."""
     adjacency: dict[str, list[str]] = {}
     for inj in injects:
-        adjacency[inj.id] = [
-            opt.next_inject_id for opt in inj.options if opt.next_inject_id is not None
-        ]
+        next_ids = [opt.next_inject_id for opt in inj.options if opt.next_inject_id is not None]
+        if inj.next_inject_id is not None:
+            next_ids.append(inj.next_inject_id)
+        adjacency[inj.id] = next_ids
 
     visited: set[str] = set()
     in_stack: set[str] = set()

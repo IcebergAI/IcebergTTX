@@ -126,7 +126,8 @@
                     </div>
                   </template>
 
-                  <div class="smallcaps text-stone-500 mb-1.5">Reasoning</div>
+                  <div class="smallcaps text-stone-500 mb-1.5"
+                       x-text="inj._options && inj._options.length ? 'Reasoning' : 'Response'"></div>
                   <textarea :id="'resp_' + inj.id" x-model="freeText[inj.id]"
                             placeholder="What will your team do next?"
                             rows="4"
@@ -135,7 +136,7 @@
 
                   <div class="flex items-center gap-3 mt-3">
                     <button @click="submitResponse(inj)"
-                            :disabled="exercise.state === 'paused' || submitting[inj.id] || !(freeText[inj.id] || '').trim()"
+                            :disabled="!canSubmit(inj)"
                             class="btn btn-primary h-8 px-3.5 text-[13px] disabled:opacity-40">
                       <span x-text="submitting[inj.id] ? 'Submitting…' : 'Submit response'"></span>
                     </button>
@@ -153,6 +154,49 @@
                   Response submitted.
                 </div>
               </template>
+
+              <!-- Team comments -->
+              <div x-show="isCurrentBrief(inj) || commentsFor(inj.id).length"
+                   class="mt-4 pt-4 border-t rule">
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="smallcaps text-stone-500">Team comments</span>
+                  <span class="mono text-[11px] text-stone-400"
+                        x-text="commentsFor(inj.id).length"></span>
+                </div>
+                <div x-show="commentsFor(inj.id).length"
+                     class="space-y-2 mb-3">
+                  <template x-for="comment in commentsFor(inj.id)" :key="comment.id">
+                    <div class="rounded-md ring-rule paper-soft px-3 py-2">
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class="text-[12.5px] font-medium"
+                              x-text="comment.author_name || ('User #' + comment.user_id)"></span>
+                        <span class="mono text-[10.5px] text-stone-400"
+                              x-text="fmtAgo(comment.created_at)"></span>
+                      </div>
+                      <p class="text-[13px] text-stone-700 whitespace-pre-wrap"
+                         x-text="comment.content"></p>
+                    </div>
+                  </template>
+                </div>
+                <template x-if="!isObserver && inj.state === 'released' && exercise.state === 'active'">
+                  <div>
+                    <textarea x-model="commentDraft[inj.id]"
+                              placeholder="Add a team comment…"
+                              rows="2"
+                              class="w-full rounded-md ring-rule px-3 py-2 text-[13px] resize-none bg-white"></textarea>
+                    <div class="flex items-center gap-3 mt-2">
+                      <button @click="submitComment(inj)"
+                              :disabled="!canComment(inj)"
+                              class="btn btn-ghost h-7 px-3 text-[12px] disabled:opacity-40">
+                        <span x-text="commentSubmitting[inj.id] ? 'Posting…' : 'Post comment'"></span>
+                      </button>
+                      <p x-show="commentErrors[inj.id]"
+                         class="text-[12px] text-red-400"
+                         x-text="commentErrors[inj.id]"></p>
+                    </div>
+                  </div>
+                </template>
+              </div>
             </div>
           </article>
         </template>
@@ -183,11 +227,15 @@ function participantView(exerciseId) {
     exercise: null,
     role: '',
     injects: [],
+    comments: [],
     freeText: {},
+    commentDraft: {},
     selectedOption: {},
     submitting: {},
+    commentSubmitting: {},
     submitted: {},
     responseErrors: {},
+    commentErrors: {},
     ws: null,
     wsConnected: false,
     pingInterval: null,
@@ -201,11 +249,12 @@ function participantView(exerciseId) {
     },
 
     async init() {
-      const [me, er, ir, rr] = await Promise.all([
+      const [me, er, ir, rr, cr] = await Promise.all([
         apiFetch('/auth/me'),
         apiFetch(`/exercises/${exerciseId}`),
         apiFetch(`/exercises/${exerciseId}/injects`),
         apiFetch(`/exercises/${exerciseId}/responses`),
+        apiFetch(`/exercises/${exerciseId}/inject-comments`),
       ]);
       if (me && me.ok) { const d = await me.json(); this.role = d.role; }
       if (er && er.ok) this.exercise = await er.json();
@@ -213,6 +262,7 @@ function participantView(exerciseId) {
         const responses = await rr.json();
         this.submitted = Object.fromEntries(responses.map(r => [r.inject_id, true]));
       }
+      if (cr && cr.ok) this.comments = await cr.json();
       if (ir && ir.ok) {
         const all = await ir.json();
         for (const inj of all.filter(i => i.state === 'released' || i.state === 'resolved')) {
@@ -247,10 +297,30 @@ function participantView(exerciseId) {
       return inj.id === this.currentBriefId;
     },
 
+    commentsFor(injectId) {
+      return this.comments
+        .filter(comment => comment.inject_id === injectId)
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    },
+
     briefLabel(inj) {
       if (this.isCurrentBrief(inj)) return 'Current brief';
       if (this.submitted[inj.id] || inj.state === 'resolved') return 'Completed brief';
       return 'Later brief';
+    },
+
+    requiresFreeText(inj) {
+      return inj.free_text_response !== false || !(inj._options && inj._options.length);
+    },
+
+    canSubmit(inj) {
+      if (this.exercise.state === 'paused' || this.submitting[inj.id]) return false;
+      return !this.requiresFreeText(inj) || !!(this.freeText[inj.id] || '').trim();
+    },
+
+    canComment(inj) {
+      if (this.exercise.state !== 'active' || this.commentSubmitting[inj.id]) return false;
+      return !!(this.commentDraft[inj.id] || '').trim();
     },
 
     connectWs() {
@@ -286,6 +356,9 @@ function participantView(exerciseId) {
         }
         if (msg.type === 'exercise_state_change') {
           this.exercise = { ...this.exercise, state: msg.payload.state };
+        }
+        if (msg.type === 'inject_comment_created') {
+          this.upsertComment(msg.payload);
         }
       };
     },
@@ -331,7 +404,41 @@ function participantView(exerciseId) {
       this.responseErrors = { ...this.responseErrors, [inj.id]: message };
     },
 
+    upsertComment(comment) {
+      if (!comment || !comment.id) return;
+      const idx = this.comments.findIndex(c => c.id === comment.id);
+      if (idx === -1) this.comments = [...this.comments, comment];
+      else {
+        this.comments[idx] = { ...this.comments[idx], ...comment };
+        this.comments = [...this.comments];
+      }
+    },
+
+    async submitComment(inj) {
+      const content = (this.commentDraft[inj.id] || '').trim();
+      if (!content) return;
+      this.commentErrors = { ...this.commentErrors, [inj.id]: '' };
+      this.commentSubmitting = { ...this.commentSubmitting, [inj.id]: true };
+      const r = await apiFetch(`/exercises/${exerciseId}/inject-comments`, {
+        method: 'POST',
+        body: JSON.stringify({ inject_id: inj.id, content }),
+      });
+      this.commentSubmitting = { ...this.commentSubmitting, [inj.id]: false };
+      if (r && r.ok) {
+        const comment = await r.json();
+        this.upsertComment(comment);
+        this.commentDraft = { ...this.commentDraft, [inj.id]: '' };
+        return;
+      }
+      const data = await readJson(r, {});
+      this.commentErrors = {
+        ...this.commentErrors,
+        [inj.id]: data.detail || 'Comment could not be posted.',
+      };
+    },
+
     fmtTime(s) { return fmtTime(s); },
+    fmtAgo(s) { return fmtAgo(s); },
   }
 }
 </script>

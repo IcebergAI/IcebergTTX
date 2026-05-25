@@ -113,13 +113,20 @@ async def submit(
             detail="Response already submitted for this inject",
         )
 
-    if body.selected_option is not None:
-        from app.models.scenario import Scenario
+    from app.models.scenario import Scenario
 
-        scenario = session.get(Scenario, exercise.scenario_id)
-        node = None
-        if scenario and inject.scenario_node_id is not None:
-            node = get_inject_node(export_definition(scenario), inject.scenario_node_id)
+    scenario = session.get(Scenario, exercise.scenario_id)
+    node = None
+    if scenario and inject.scenario_node_id is not None:
+        node = get_inject_node(export_definition(scenario), inject.scenario_node_id)
+
+    if node and (node.free_text_response or not node.options) and not body.content.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="content is required for this inject",
+        )
+
+    if body.selected_option is not None:
         if not node or body.selected_option not in {option.id for option in node.options}:
             raise HTTPException(
                 status_code=422,

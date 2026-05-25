@@ -245,7 +245,9 @@
                         class="pill text-[10px]" style="background:#dcfce7; color:#166534; box-shadow: inset 0 0 0 1px #bbf7d0;">start</span>
                   <span x-show="inj.options && inj.options.length > 1"
                         class="pill text-[10px]" style="background: oklch(0.74 0.14 70 / .12); color: var(--accent-d); box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .3);">branch</span>
-                  <span x-show="!inj.options || inj.options.length === 0"
+                  <span x-show="(!inj.options || inj.options.length === 0) && inj.next_inject_id"
+                        class="pill text-[10px]" style="background:#dcfce7; color:#166534; box-shadow: inset 0 0 0 1px #bbf7d0;">linear</span>
+                  <span x-show="(!inj.options || inj.options.length === 0) && !inj.next_inject_id"
                         class="pill text-[10px]" style="background:#e6eef8; color:#2f5b8a; box-shadow: inset 0 0 0 1px #c5d7ec;">end</span>
                   <span x-show="inj.target_teams && inj.target_teams.length"
                         class="pill text-[10px]" x-text="inj.target_teams.length + ' team' + (inj.target_teams.length === 1 ? '' : 's')"></span>
@@ -473,8 +475,8 @@
             <div class="border-t rule pt-5">
               <div class="flex items-center justify-between gap-3 mb-3">
                 <div>
-                  <div class="smallcaps text-stone-500">Branch options</div>
-                  <div class="text-[12.5px] text-stone-500 mt-0.5">Choices map participant decisions to the next inject.</div>
+                  <div class="smallcaps text-stone-500">Progression</div>
+                  <div class="text-[12.5px] text-stone-500 mt-0.5">Use choices for branching, or a linear next inject for free-text-only steps.</div>
                 </div>
                 <button @click="addOption(activeInject)" type="button"
                         class="btn btn-ghost h-8 px-3 text-[13px]"
@@ -506,7 +508,19 @@
                   </div>
                 </template>
                 <div x-show="activeInject.options.length === 0"
-                     class="validation-card text-[13px] text-stone-500">No options. This inject ends its branch.</div>
+                     class="validation-card">
+                  <div class="grid gap-2" style="grid-template-columns: minmax(120px, .55fr) minmax(0, 1fr); align-items: center;">
+                    <label class="smallcaps text-stone-500">Linear next</label>
+                    <select x-model="activeInject.next_inject_id"
+                            class="scenario-field compact mono"
+                            data-testid="inject-linear-next">
+                      <option value="">End scenario</option>
+                      <template x-for="other in form.injects.filter(node => node._key !== activeInject._key)" :key="other._key">
+                        <option :value="other.id" x-text="other.id || 'untitled'"></option>
+                      </template>
+                    </select>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -672,6 +686,7 @@ function makeInject(id) {
     content: '',
     target_teams: [],
     sequence_order: 0,
+    next_inject_id: null,
     options: [],
     expected_actions: [],
     free_text_response: true,
@@ -772,6 +787,7 @@ function scenarioEditor(scenarioId) {
         content: inj?.content || '',
         target_teams: inj?.target_teams || [],
         sequence_order: inj?.sequence_order || index + 1,
+        next_inject_id: inj?.next_inject_id || null,
         options: (inj?.options || []).map((opt, optIndex) => this.normalizeOption(opt, optIndex)),
         expected_actions: inj?.expected_actions || [],
         free_text_response: inj?.free_text_response !== false,
@@ -880,6 +896,9 @@ function scenarioEditor(scenarioId) {
             issues.push({ type: 'error', target: 'injects', key: inj._key, text: `${inj.id || 'An inject'} targets unknown team "${teamId}".` });
           }
         }
+        if (inj.next_inject_id && !injectIds.includes(inj.next_inject_id)) {
+          issues.push({ type: 'error', target: 'injects', key: inj._key, text: `${inj.id || 'An inject'} points to missing inject "${inj.next_inject_id}".` });
+        }
         for (const opt of (inj.options || [])) {
           if (!opt.id) {
             issues.push({ type: 'error', target: 'injects', key: inj._key, text: `${inj.id || 'An inject'} has a branch option without an ID.` });
@@ -929,9 +948,7 @@ function scenarioEditor(scenarioId) {
           depth,
           disconnected: false,
         });
-        for (const opt of (inj.options || [])) {
-          if (opt.next_inject_id) walk(opt.next_inject_id, depth + 1);
-        }
+        for (const nextId of this.nextIdsForInject(inj)) walk(nextId, depth + 1);
       };
       walk(this.form.start_inject_id, 0);
       for (const inj of this.form.injects) {
@@ -952,7 +969,13 @@ function scenarioEditor(scenarioId) {
 
     injectMeta(inj) {
       const bits = [];
-      bits.push((inj.options || []).length ? `${inj.options.length} option${inj.options.length === 1 ? '' : 's'}` : 'terminal');
+      if ((inj.options || []).length) {
+        bits.push(`${inj.options.length} option${inj.options.length === 1 ? '' : 's'}`);
+      } else if (inj.next_inject_id) {
+        bits.push(`linear to ${inj.next_inject_id}`);
+      } else {
+        bits.push('terminal');
+      }
       bits.push((inj.target_teams || []).length ? `${inj.target_teams.length} targeted` : 'shared');
       if ((inj.expected_actions || []).length) bits.push(`${inj.expected_actions.length} expected`);
       return bits.join(' · ');
@@ -1041,6 +1064,7 @@ function scenarioEditor(scenarioId) {
       const [removed] = this.form.injects.splice(i, 1);
       if (removed?.id) {
         this.form.injects.forEach(inj => {
+          if (inj.next_inject_id === removed.id) inj.next_inject_id = null;
           (inj.options || []).forEach(opt => {
             if (opt.next_inject_id === removed.id) opt.next_inject_id = null;
           });
@@ -1070,6 +1094,7 @@ function scenarioEditor(scenarioId) {
       if (previous && previous !== next) {
         if (this.form.start_inject_id === previous) this.form.start_inject_id = next;
         this.form.injects.forEach(node => {
+          if (node.next_inject_id === previous) node.next_inject_id = next;
           (node.options || []).forEach(opt => {
             if (opt.next_inject_id === previous) opt.next_inject_id = next;
           });
@@ -1079,6 +1104,7 @@ function scenarioEditor(scenarioId) {
 
     addOption(inj) {
       inj.options = inj.options || [];
+      inj.next_inject_id = null;
       inj.options.push(makeOption(this.nextOptionId(inj)));
     },
 
@@ -1117,14 +1143,20 @@ function scenarioEditor(scenarioId) {
         if (visited.has(id)) return null;
         visited.add(id);
         stack.add(id);
-        for (const opt of (byId[id].options || [])) {
-          const cycle = walk(opt.next_inject_id);
+        for (const nextId of this.nextIdsForInject(byId[id])) {
+          const cycle = walk(nextId);
           if (cycle) return cycle;
         }
         stack.delete(id);
         return null;
       };
       return walk(this.form.start_inject_id);
+    },
+
+    nextIdsForInject(inj) {
+      const ids = (inj.options || []).map(opt => opt.next_inject_id).filter(Boolean);
+      if (inj.next_inject_id) ids.push(inj.next_inject_id);
+      return ids;
     },
 
     buildPayload() {
@@ -1134,6 +1166,7 @@ function scenarioEditor(scenarioId) {
         content: inj.content,
         target_teams: (inj.target_teams || []).filter(Boolean),
         sequence_order: index + 1,
+        next_inject_id: (inj.options || []).length ? null : (inj.next_inject_id || null),
         options: (inj.options || []).map((opt, optIndex) => ({
           id: normalizeId(opt.id, `opt_${String(optIndex + 1).padStart(2, '0')}`),
           label: opt.label,

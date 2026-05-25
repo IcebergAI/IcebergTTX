@@ -59,11 +59,14 @@ def get_inject_node(definition: ScenarioDefinition, inject_id: str):
 
 
 def get_next_inject_ids(definition: ScenarioDefinition, current_inject_id: str) -> list[str]:
-    """Return all inject IDs reachable from the current node via any option."""
+    """Return inject IDs reachable after a response without a selected branch option."""
     node = get_inject_node(definition, current_inject_id)
     if node is None:
         return []
-    return [opt.next_inject_id for opt in node.options if opt.next_inject_id is not None]
+    option_next_ids = [opt.next_inject_id for opt in node.options if opt.next_inject_id is not None]
+    if option_next_ids:
+        return option_next_ids
+    return [node.next_inject_id] if node.next_inject_id is not None else []
 
 
 def resolve_branch(

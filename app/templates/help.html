@@ -35,13 +35,13 @@
         <div class="flex items-center gap-2 mb-2">
           <span class="pill" style="background: oklch(0.74 0.14 70 / .12); color: var(--accent-d); box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .3);">Facilitator</span>
         </div>
-        <p class="text-[13.5px] text-stone-700 leading-relaxed">Runs the exercise. Creates and imports scenarios, starts exercises, adds participants, and controls the inject feed — deciding when each inject is released and which branch to follow. Can inject simulated inbound communications, view all participant responses, and export transcripts.</p>
+        <p class="text-[13.5px] text-stone-700 leading-relaxed">Runs the exercise. Creates and imports scenarios, starts exercises, adds participants, and controls the inject feed — deciding when each inject is released and which branch to follow. Can inject simulated inbound communications, view all participant responses and team comments, and export transcripts.</p>
       </div>
       <div class="paper ring-rule rounded-lg p-5">
         <div class="flex items-center gap-2 mb-2">
           <span class="pill bg-stone-100 text-stone-600">Participant</span>
         </div>
-        <p class="text-[13.5px] text-stone-700 leading-relaxed">Receives injects as they are released and submits responses — choosing a stance (if options are provided) and writing free-text reasoning. Sees only the injects assigned to their team. Cannot see other participants' responses.</p>
+        <p class="text-[13.5px] text-stone-700 leading-relaxed">Receives injects as they are released, adds team comments, and submits responses — choosing a stance (if options are provided) and writing free-text reasoning. Sees only the injects and comments assigned to their team. Cannot see other participants' formal responses.</p>
       </div>
       <div class="paper ring-rule rounded-lg p-5">
         <div class="flex items-center gap-2 mb-2">
@@ -95,7 +95,7 @@
           <div class="mono text-[13px] font-semibold text-stone-400 shrink-0 w-5 pt-0.5">4</div>
           <div>
             <div class="text-[14px] font-semibold mb-1">Start the exercise and release injects</div>
-            <p class="text-[13.5px] text-stone-600 leading-relaxed">Hit <strong>Start</strong> from the exercises list or the facilitator console. Injects appear in the left pane as <strong>pending</strong> nodes. Press <strong>Release</strong> to push an inject to participants — they'll receive it instantly via WebSocket. Once they respond, review the responses in the middle pane and choose which branch to release next. You can <strong>Pause</strong> the exercise at any point to halt new submissions.</p>
+            <p class="text-[13.5px] text-stone-600 leading-relaxed">Hit <strong>Start</strong> from the exercises list or the facilitator console. Injects appear in the left pane as <strong>pending</strong> nodes. Press <strong>Release</strong> to push an inject to participants — they'll receive it instantly via WebSocket. Once they respond, review the responses and team comments in the middle pane and choose which branch to release next. You can <strong>Pause</strong> the exercise at any point to halt new submissions.</p>
           </div>
         </div>
       </div>
@@ -157,6 +157,7 @@
   "target_teams": ["it_ops"],
   "free_text_response": true,
   "sequence_order": 1,
+  "next_inject_id": null,
   "options": [
     { "id": "opt_isolate", "label": "Isolate affected systems immediately", "next_inject_id": "inject_02a" },
     { "id": "opt_monitor", "label": "Monitor and gather more information",  "next_inject_id": "inject_02b" }
@@ -182,6 +183,10 @@
       <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
         <div class="smallcaps text-stone-500 pt-0.5">options</div>
         <div class="text-stone-600">Branch choices shown to participants. <code class="mono text-[12px]">next_inject_id: null</code> ends the branch.</div>
+      </div>
+      <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
+        <div class="smallcaps text-stone-500 pt-0.5">next_inject_id</div>
+        <div class="text-stone-600">Linear continuation for injects without branch choices. Participants submit a free-text response, then facilitators can release the next inject.</div>
       </div>
       <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
         <div class="smallcaps text-stone-500 pt-0.5">triggers_communications</div>
@@ -225,7 +230,7 @@
       </div>
       <div class="flex items-start gap-3 text-[13.5px] text-stone-600 py-2 border-b rule">
         <span class="dot mt-1.5 shrink-0" style="background:#5b86b8;"></span>
-        <span>A <strong>paused</strong> exercise disables participant response submission but keeps the WebSocket connection alive — participants see the yellow "Paused" banner and the form becomes read-only.</span>
+        <span>A <strong>paused</strong> exercise disables participant response and comment submission but keeps the WebSocket connection alive — participants see the yellow "Paused" banner and forms become read-only.</span>
       </div>
       <div class="flex items-start gap-3 text-[13.5px] text-stone-600 py-2 border-b rule">
         <span class="dot mt-1.5 shrink-0" style="background:#5b86b8;"></span>

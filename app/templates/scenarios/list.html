@@ -2,6 +2,35 @@
 {% block title %}Scenarios — Deep Thought{% endblock %}
 
 {% block content %}
+<style>
+  .scenario-list-row {
+    position: relative;
+    transition: background .12s ease, box-shadow .12s ease;
+  }
+
+  .scenario-list-row:hover,
+  .scenario-list-row:focus-within {
+    background: rgba(191, 124, 22, .08);
+    box-shadow: inset 3px 0 0 var(--accent-d), inset 0 0 0 1px rgba(191, 124, 22, .18);
+  }
+
+  .scenario-list-row:hover .scenario-row-title,
+  .scenario-list-row:focus-within .scenario-row-title {
+    color: var(--ink) !important;
+  }
+
+  .scenario-list-row:hover .scenario-row-meta,
+  .scenario-list-row:focus-within .scenario-row-meta {
+    color: var(--accent-d) !important;
+  }
+
+  html[data-theme="dark"] .scenario-list-row:hover,
+  html[data-theme="dark"] .scenario-list-row:focus-within {
+    background: rgba(245, 175, 74, .12);
+    box-shadow: inset 3px 0 0 var(--accent-d), inset 0 0 0 1px rgba(245, 175, 74, .2);
+  }
+</style>
+
 <div x-data="scenarioList()" x-init="init()" class="workspace">
 
   <div class="page-head">
@@ -49,14 +78,14 @@
     </template>
 
     <template x-for="s in scenarios" :key="s.id">
-      <div class="grid gap-x-4 px-5 py-3.5 items-center border-b rule hover:bg-stone-50/70"
+      <div class="scenario-list-row grid gap-x-4 px-5 py-3.5 items-center border-b rule"
            style="grid-template-columns: minmax(260px, 1fr) minmax(120px, 160px) 112px 88px 184px; min-width: 824px;">
 
         <!-- Scenario name + ID -->
         <div>
           <a :href="'/scenarios/' + s.id"
-             class="text-[14px] font-medium hover:text-stone-900" x-text="s.title"></a>
-          <div class="mono text-[11px] text-stone-400 mt-0.5"
+             class="scenario-row-title text-[14px] font-medium hover:text-stone-900" x-text="s.title"></a>
+          <div class="scenario-row-meta mono text-[11px] text-stone-400 mt-0.5"
                x-text="'SC-' + String(s.id).padStart(3,'0')"></div>
         </div>
 
@@ -69,11 +98,11 @@
         </div>
 
         <!-- Injects / branches -->
-        <div class="mono text-[12.5px] text-stone-600 text-right"
+        <div class="scenario-row-meta mono text-[12.5px] text-stone-600 text-right"
              x-text="(s.inject_count || 0) + ' / ' + (s.branch_count || 0)"></div>
 
         <!-- Updated -->
-        <div class="mono text-[12px] text-stone-500 text-right" x-text="fmtAgo(s.updated_at)"></div>
+        <div class="scenario-row-meta mono text-[12px] text-stone-500 text-right" x-text="fmtAgo(s.updated_at)"></div>
 
         <!-- Actions -->
         <div class="flex items-center justify-end gap-x-4 whitespace-nowrap" x-show="isF">

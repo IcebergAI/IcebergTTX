@@ -11,6 +11,7 @@ from app.models import (  # noqa: F401
     communication,
     exercise,
     inject,
+    inject_comment,
     response,
     scenario,
     suggested_inject,
@@ -21,6 +22,7 @@ from app.routers import (
     communications,
     exercises,
     health,
+    inject_comments,
     injects,
     responses,
     scenarios,
@@ -64,6 +66,7 @@ app.include_router(scenarios.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(exercises.router, prefix="/api")
 app.include_router(injects.router, prefix="/api")
+app.include_router(inject_comments.router, prefix="/api")
 app.include_router(responses.router, prefix="/api")
 app.include_router(suggested_injects.router, prefix="/api")
 app.include_router(communications.router, prefix="/api")

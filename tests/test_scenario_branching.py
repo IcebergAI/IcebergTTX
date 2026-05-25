@@ -45,6 +45,13 @@ def test_bad_next_inject_id_raises():
         ])
 
 
+def test_bad_linear_next_inject_id_raises():
+    with pytest.raises(ValidationError, match="next_inject_id"):
+        _minimal([
+            InjectNode(id="inject_01", title="A", content="B", next_inject_id="MISSING"),
+        ])
+
+
 def test_bad_target_team_raises():
     with pytest.raises(ValidationError, match="target_team"):
         _minimal(
@@ -64,6 +71,14 @@ def test_cycle_detection_raises():
                 id="b", title="B", content=".",
                 options=[InjectOption(id="opt2", label="Back to A", next_inject_id="a")],
             ),
+        ], start_id="a")
+
+
+def test_linear_cycle_detection_raises():
+    with pytest.raises(ValidationError, match="Cycle"):
+        _minimal([
+            InjectNode(id="a", title="A", content=".", next_inject_id="b"),
+            InjectNode(id="b", title="B", content=".", next_inject_id="a"),
         ], start_id="a")
 
 
@@ -104,6 +119,14 @@ def test_get_next_inject_ids_leaf(sample_definition: ScenarioDefinition):
     # inject_02 has no options → no next ids
     nexts = get_next_inject_ids(sample_definition, "inject_02")
     assert nexts == []
+
+
+def test_get_next_inject_ids_linear():
+    defn = _minimal([
+        InjectNode(id="a", title="A", content=".", next_inject_id="b"),
+        InjectNode(id="b", title="B", content="."),
+    ], start_id="a")
+    assert get_next_inject_ids(defn, "a") == ["b"]
 
 
 def test_get_next_inject_ids_unknown_inject(sample_definition: ScenarioDefinition):

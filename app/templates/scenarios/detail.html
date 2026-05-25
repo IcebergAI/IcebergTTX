@@ -50,7 +50,11 @@
                     <span class="pill text-[10px]"
                           style="background: oklch(0.74 0.14 70 / .12); color: var(--accent-d); box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .3);">branch</span>
                   </template>
-                  <template x-if="!row.node.options || row.node.options.length === 0">
+                  <template x-if="(!row.node.options || row.node.options.length === 0) && row.node.next_inject_id">
+                    <span class="pill text-[10px]"
+                          style="background:#dcfce7; color:#166534; box-shadow: inset 0 0 0 1px #bbf7d0;">linear</span>
+                  </template>
+                  <template x-if="(!row.node.options || row.node.options.length === 0) && !row.node.next_inject_id">
                     <span class="pill text-[10px]" style="background:#e6eef8; color:#2f5b8a; box-shadow: inset 0 0 0 1px #c5d7ec;">end</span>
                   </template>
                   <!-- Team pills -->
@@ -74,6 +78,15 @@
                               x-text="opt.next_inject_id ? opt.next_inject_id : '(end)'"></span>
                       </div>
                     </template>
+                  </div>
+                </template>
+
+                <template x-if="(!row.node.options || row.node.options.length === 0) && row.node.next_inject_id">
+                  <div class="mt-2 flex items-center gap-2 text-[12px] text-stone-500">
+                    <span class="text-stone-300 mono">→</span>
+                    <span>Linear next</span>
+                    <span class="mono text-[10.5px] text-stone-400 ml-auto"
+                          x-text="row.node.next_inject_id"></span>
                   </div>
                 </template>
 
@@ -115,6 +128,10 @@
           <div class="flex justify-between text-[13px]">
             <span class="text-stone-500">Branch points</span>
             <span class="mono font-medium" x-text="branchCount"></span>
+          </div>
+          <div class="flex justify-between text-[13px]">
+            <span class="text-stone-500">Linear steps</span>
+            <span class="mono font-medium" x-text="linearCount"></span>
           </div>
           <div class="flex justify-between text-[13px]">
             <span class="text-stone-500">End nodes</span>
@@ -193,9 +210,7 @@ function scenarioDetail(id) {
         const node = byId[id];
         if (!node) return;
         rows.push({ node, depth });
-        for (const opt of (node.options || [])) {
-          if (opt.next_inject_id) walk(opt.next_inject_id, depth + 1);
-        }
+        for (const nextId of this.nextIdsForNode(node)) walk(nextId, depth + 1);
       };
       walk(def.start_inject_id, 0);
       // Include any disconnected injects
@@ -212,7 +227,14 @@ function scenarioDetail(id) {
 
     get endCount() {
       if (!this.scenario) return 0;
-      return (this.scenario.definition?.injects || []).filter(i => !i.options || i.options.length === 0).length;
+      return (this.scenario.definition?.injects || [])
+        .filter(i => (!i.options || i.options.length === 0) && !i.next_inject_id).length;
+    },
+
+    get linearCount() {
+      if (!this.scenario) return 0;
+      return (this.scenario.definition?.injects || [])
+        .filter(i => (!i.options || i.options.length === 0) && i.next_inject_id).length;
     },
 
     get teamsInvolved() {
@@ -235,6 +257,9 @@ function scenarioDetail(id) {
       if (!def.start_inject_id) issues.push('No start inject set');
       const ids = new Set(def.injects.map(i => i.id));
       for (const inj of def.injects) {
+        if (inj.next_inject_id && !ids.has(inj.next_inject_id)) {
+          issues.push(`Inject "${inj.id}" references unknown next inject "${inj.next_inject_id}"`);
+        }
         for (const opt of (inj.options || [])) {
           if (opt.next_inject_id && !ids.has(opt.next_inject_id)) {
             issues.push(`Inject "${inj.id}" references unknown next inject "${opt.next_inject_id}"`);
@@ -242,6 +267,12 @@ function scenarioDetail(id) {
         }
       }
       return issues;
+    },
+
+    nextIdsForNode(node) {
+      const ids = (node.options || []).map(opt => opt.next_inject_id).filter(Boolean);
+      if (node.next_inject_id) ids.push(node.next_inject_id);
+      return ids;
     },
 
     teamColor(t) { return teamColor(t); },

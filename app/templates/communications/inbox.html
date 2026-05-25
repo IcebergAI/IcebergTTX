@@ -2,6 +2,81 @@
 {% block title %}Communications — Deep Thought{% endblock %}
 
 {% block content %}
+<style>
+  .comm-filter-control {
+    height: 34px;
+    background: var(--paper-soft);
+    color: var(--ink-soft);
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 1px var(--rule-2);
+    font-size: 13px;
+    outline: none;
+    padding: 0 10px;
+  }
+
+  .comm-filter-control::placeholder {
+    color: var(--muted);
+  }
+
+  .comm-filter-control:focus {
+    box-shadow: inset 0 0 0 1px var(--accent-d), 0 0 0 2px rgba(191, 124, 22, .18);
+  }
+
+  .comm-direction-filter {
+    flex: 0 0 104px;
+    font-size: 12px;
+  }
+
+  .comm-list-row {
+    position: relative;
+    transition: background .12s ease, box-shadow .12s ease, color .12s ease;
+  }
+
+  .comm-list-row:hover {
+    background: rgba(191, 124, 22, .07);
+  }
+
+  .comm-list-row-selected {
+    background: rgba(191, 124, 22, .14);
+    box-shadow: inset 3px 0 0 var(--accent-d), inset 0 0 0 1px rgba(191, 124, 22, .22);
+  }
+
+  .comm-list-row-selected:hover {
+    background: rgba(191, 124, 22, .18);
+  }
+
+  .comm-list-row-selected .comm-row-meta,
+  .comm-list-row-selected .comm-row-time {
+    color: var(--accent-d) !important;
+  }
+
+  .comm-list-row-selected .comm-row-subject {
+    color: var(--ink) !important;
+    font-weight: 600;
+  }
+
+  .comm-list-row-selected .comm-row-preview {
+    color: var(--ink-soft) !important;
+  }
+
+  html[data-theme="dark"] .comm-filter-control:focus {
+    box-shadow: inset 0 0 0 1px var(--accent-d), 0 0 0 2px rgba(245, 175, 74, .18);
+  }
+
+  html[data-theme="dark"] .comm-list-row:hover {
+    background: rgba(245, 175, 74, .08);
+  }
+
+  html[data-theme="dark"] .comm-list-row-selected {
+    background: rgba(245, 175, 74, .16);
+    box-shadow: inset 3px 0 0 var(--accent-d), inset 0 0 0 1px rgba(245, 175, 74, .26);
+  }
+
+  html[data-theme="dark"] .comm-list-row-selected:hover {
+    background: rgba(245, 175, 74, .2);
+  }
+</style>
+
 <div x-data="commsInbox({{ exercise_id }})" x-init="init()" class="workspace">
 
   <div class="page-head">
@@ -55,18 +130,18 @@
           <div class="flex items-center gap-2 mb-1">
             <span class="dot shrink-0"
                   :style="c.direction === 'inbound' ? 'background: var(--accent-d)' : 'background:#5b86b8'"></span>
-            <span class="smallcaps truncate"
+            <span class="comm-row-meta smallcaps truncate"
                   :style="c.direction === 'inbound' ? 'color: var(--ink-soft)' : 'color: var(--muted)'"
                   x-text="commListMeta(c)"></span>
-            <span class="mono text-[10.5px] text-stone-400 ml-auto shrink-0"
+            <span class="comm-row-time mono text-[10.5px] text-stone-400 ml-auto shrink-0"
                   style="color: var(--muted);"
                   x-text="fmtAgo(c.sent_at)"></span>
           </div>
-          <div class="text-[13.5px] truncate"
+          <div class="comm-row-subject text-[13.5px] truncate"
                :class="c.read_by && c.read_by.length ? 'font-normal' : 'font-medium'"
                :style="c.read_by && c.read_by.length ? 'color: var(--ink-soft)' : 'color: var(--ink)'"
                x-text="c.subject"></div>
-          <div class="text-[12px] truncate mt-0.5"
+          <div class="comm-row-preview text-[12px] truncate mt-0.5"
                style="color: var(--muted);"
                x-text="c.body"></div>
           <template x-if="c.triggered_by_inject_id">
@@ -295,48 +370,6 @@
 {% endblock %}
 
 {% block scripts %}
-<style>
-  .comm-filter-control {
-    height: 34px;
-    background: var(--paper-soft);
-    color: var(--ink-soft);
-    border-radius: 6px;
-    box-shadow: inset 0 0 0 1px var(--rule-2);
-    font-size: 13px;
-    outline: none;
-    padding: 0 10px;
-  }
-
-  .comm-filter-control::placeholder {
-    color: var(--muted);
-  }
-
-  .comm-filter-control:focus {
-    box-shadow: inset 0 0 0 1px var(--accent-d), 0 0 0 2px oklch(0.74 0.14 70 / .16);
-  }
-
-  .comm-direction-filter {
-    flex: 0 0 104px;
-    font-size: 12px;
-  }
-
-  .comm-list-row {
-    transition: background .12s ease, box-shadow .12s ease;
-  }
-
-  .comm-list-row:hover {
-    background: color-mix(in oklab, var(--paper-soft) 86%, var(--accent) 8%);
-  }
-
-  .comm-list-row-selected {
-    background: color-mix(in oklab, var(--paper-soft) 78%, var(--accent) 16%);
-    box-shadow: inset 3px 0 0 var(--accent-d);
-  }
-
-  .comm-list-row-selected:hover {
-    background: color-mix(in oklab, var(--paper-soft) 72%, var(--accent) 20%);
-  }
-</style>
 <script>
 function commsInbox(exerciseId) {
   return {
