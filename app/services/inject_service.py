@@ -134,20 +134,24 @@ def inject_attachment_payload(inject: Inject) -> dict | None:
     }
 
 
-def _inject_options(session: Session, inject: Inject) -> list[dict]:
+def _inject_node(session: Session, inject: Inject):
     if not inject.scenario_node_id:
-        return []
+        return None
     from app.models.exercise import Exercise
     from app.models.scenario import Scenario
     from app.services.scenario_service import export_definition, get_inject_node
 
     exercise = session.get(Exercise, inject.exercise_id)
     if not exercise:
-        return []
+        return None
     scenario = session.get(Scenario, exercise.scenario_id)
     if not scenario:
-        return []
-    node = get_inject_node(export_definition(scenario), inject.scenario_node_id)
+        return None
+    return get_inject_node(export_definition(scenario), inject.scenario_node_id)
+
+
+def _inject_options(session: Session, inject: Inject) -> list[dict]:
+    node = _inject_node(session, inject)
     if not node:
         return []
     return [
@@ -157,6 +161,7 @@ def _inject_options(session: Session, inject: Inject) -> list[dict]:
 
 
 def _inject_payload(session: Session, inject: Inject) -> dict:
+    node = _inject_node(session, inject)
     return {
         "id": inject.id,
         "exercise_id": inject.exercise_id,
@@ -170,6 +175,8 @@ def _inject_payload(session: Session, inject: Inject) -> dict:
         "released_at": inject.released_at.isoformat() if inject.released_at else None,
         "released_by": inject.released_by,
         "options": _inject_options(session, inject),
+        "next_inject_id": node.next_inject_id if node else None,
+        "free_text_response": node.free_text_response if node else True,
         "attachment": inject_attachment_payload(inject),
     }
 

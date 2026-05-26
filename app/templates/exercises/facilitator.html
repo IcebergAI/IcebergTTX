@@ -175,6 +175,8 @@
         <h2 class="text-[18px] font-semibold tracking-tight">Responses</h2>
         <span class="mono text-[12px] text-stone-500"
               x-text="responses.length + ' total'"></span>
+        <span class="mono text-[12px] text-stone-400"
+              x-text="comments.length + ' comments'"></span>
         <div class="ml-auto flex items-center gap-2">
           <button class="smallcaps hover:text-stone-800"
                   :class="responseFilter === 'all' ? 'text-stone-800' : 'text-stone-400'"
@@ -191,6 +193,31 @@
       </div>
 
       <div class="px-6 pb-6 space-y-3">
+        <div x-show="comments.length" class="surface overflow-hidden mb-4">
+          <div class="px-4 py-2.5 flex items-center gap-2 border-b rule">
+            <span class="smallcaps text-stone-500">Team comments</span>
+            <span class="mono text-[11px] text-stone-400"
+                  x-text="comments.length + ' total'"></span>
+          </div>
+          <div class="divide-y" style="border-color: var(--rule);">
+            <template x-for="comment in latestComments" :key="comment.id">
+              <div class="px-4 py-2.5">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-[12.5px] font-medium"
+                        x-text="comment.author_name || userDisplayName(comment.user_id)"></span>
+                  <span class="mono text-[10.5px] text-stone-500"
+                        x-text="responseInjectLabel(comment) + ' · ' + fmtAgo(comment.created_at)"></span>
+                  <span class="pill mono ml-auto"
+                        :class="comment.group_id ? teamColor(comment.group_id) : 'bg-stone-100 text-stone-600 ring-stone-200'"
+                        x-text="groupLabel(comment.group_id)"></span>
+                </div>
+                <p class="text-[13px] text-stone-700 whitespace-pre-wrap"
+                   x-text="comment.content"></p>
+              </div>
+            </template>
+          </div>
+        </div>
+
         <div x-show="filteredResponses.length === 0"
              class="text-center py-8 smallcaps text-stone-400">No responses.</div>
 
@@ -394,6 +421,7 @@ function facilitatorConsole(exerciseId) {
     memberSearch: '',
     injects: [],
     responses: [],
+    comments: [],
     assessments: {},
     suggestedInjects: [],
     nodeMap: {},
@@ -421,6 +449,12 @@ function facilitatorConsole(exerciseId) {
       if (this.responseFilter === 'flagged')
         return this.responses.filter(r => this.assessments[r.id]?.decision_quality === 'poor');
       return this.responses;
+    },
+
+    get latestComments() {
+      return [...this.comments]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 12);
     },
 
     get injectSections() {
@@ -493,11 +527,12 @@ function facilitatorConsole(exerciseId) {
     },
 
     async load() {
-      const [er, mr, ir, rr, sir, ur] = await Promise.all([
+      const [er, mr, ir, rr, cr, sir, ur] = await Promise.all([
         apiFetch(`/exercises/${exerciseId}`),
         apiFetch(`/exercises/${exerciseId}/members`),
         apiFetch(`/exercises/${exerciseId}/injects`),
         apiFetch(`/exercises/${exerciseId}/responses`),
+        apiFetch(`/exercises/${exerciseId}/inject-comments`),
         apiFetch(`/exercises/${exerciseId}/suggested-injects`),
         apiFetch('/users'),
       ]);
@@ -512,6 +547,7 @@ function facilitatorConsole(exerciseId) {
           _next_injects: r.next_injects || [],
         }));
       }
+      if (cr && cr.ok) this.comments = await cr.json();
       if (sir && sir.ok) this.suggestedInjects = await sir.json();
       if (ur && ur.ok) this.allUsers = await ur.json();
       if (this.exercise?.scenario_id) {
@@ -571,6 +607,9 @@ function facilitatorConsole(exerciseId) {
             _next_injects: msg.payload.next_injects || [],
           };
           this.responses.unshift(r);
+        }
+        if (msg.type === 'inject_comment_created') {
+          this.upsertComment(msg.payload);
         }
         if (msg.type === 'exercise_state_change') {
           this.exercise = { ...this.exercise, state: msg.payload.state };
@@ -687,6 +726,16 @@ function facilitatorConsole(exerciseId) {
       if (r && r.ok) {
         const idx = this.suggestedInjects.findIndex(x => x.id === s.id);
         if (idx !== -1) this.suggestedInjects[idx] = { ...s, status: 'rejected' };
+      }
+    },
+
+    upsertComment(comment) {
+      if (!comment || !comment.id) return;
+      const idx = this.comments.findIndex(c => c.id === comment.id);
+      if (idx === -1) this.comments.unshift(comment);
+      else {
+        this.comments[idx] = { ...this.comments[idx], ...comment };
+        this.comments = [...this.comments];
       }
     },
 

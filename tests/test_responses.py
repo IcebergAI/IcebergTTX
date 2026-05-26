@@ -110,6 +110,14 @@ def test_submit_response_invalid_option_rejected(
     assert r.status_code == 422
 
 
+def test_submit_response_blank_free_text_rejected(
+    client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+):
+    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
+    r = _submit(client, participant_token, active_exercise.id, inject_id, content="  ")
+    assert r.status_code == 422
+
+
 def test_submit_response_duplicate_rejected(
     client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
@@ -324,6 +332,84 @@ def test_response_records_group_and_facilitator_gets_pending_next_inject(
             "id": second["id"],
             "scenario_node_id": "b",
             "title": "Next",
+            "group_id": "it_ops",
+        }
+    ]
+
+
+def test_free_text_linear_response_suggests_next_inject(
+    client: TestClient,
+    facilitator_token: str,
+    participant_token: str,
+    session: Session,
+    facilitator: User,
+    participant: User,
+):
+    from app.models.exercise import ExerciseState
+    from app.services.exercise_service import create_exercise, enrol_member, transition_state
+    from app.services.scenario_service import create_scenario
+
+    scenario = create_scenario(
+        session,
+        definition=ScenarioDefinition(
+            title="Linear Free Text",
+            participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+            injects=[
+                InjectNode(
+                    id="a",
+                    title="Briefing",
+                    content="Explain the plan.",
+                    target_teams=["it_ops"],
+                    next_inject_id="b",
+                    options=[],
+                    free_text_response=True,
+                ),
+                InjectNode(
+                    id="b",
+                    title="Follow-up",
+                    content="Continue.",
+                    target_teams=["it_ops"],
+                ),
+            ],
+            start_inject_id="a",
+        ),
+        created_by=facilitator.id,
+    )
+    exercise = create_exercise(
+        session,
+        scenario_id=scenario.id,
+        title="Linear Exercise",
+        created_by=facilitator.id,
+    )
+    enrol_member(session, exercise=exercise, user_id=participant.id)
+    transition_state(session, exercise, ExerciseState.active)
+
+    injects = client.get(
+        f"/api/exercises/{exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    ).json()
+    first = next(i for i in injects if i["scenario_node_id"] == "a")
+    second = next(i for i in injects if i["scenario_node_id"] == "b")
+    assert first["options"] == []
+    assert first["next_inject_id"] == "b"
+    assert first["free_text_response"] is True
+
+    client.post(
+        f"/api/exercises/{exercise.id}/injects/{first['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    r = _submit(client, participant_token, exercise.id, first["id"], content="We will proceed.")
+    assert r.status_code == 201
+
+    rows = client.get(
+        f"/api/exercises/{exercise.id}/responses",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    ).json()
+    assert rows[0]["next_injects"] == [
+        {
+            "id": second["id"],
+            "scenario_node_id": "b",
+            "title": "Follow-up",
             "group_id": "it_ops",
         }
     ]

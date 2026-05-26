@@ -11,6 +11,7 @@ from app.database import get_session
 from app.dependencies import get_current_user, require_role
 from app.models.exercise import Exercise, ExerciseMember, ExerciseState
 from app.models.inject import Inject
+from app.models.inject_comment import InjectComment
 from app.models.response import Response
 from app.models.scenario import Scenario
 from app.models.user import User, UserRole
@@ -228,6 +229,9 @@ def _build_export(session: Session, exercise_id: int) -> dict:
     responses = session.exec(
         select(Response).where(Response.exercise_id == exercise_id)
     ).all()
+    comments = session.exec(
+        select(InjectComment).where(InjectComment.exercise_id == exercise_id)
+    ).all()
     members = session.exec(
         select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id)
     ).all()
@@ -256,6 +260,17 @@ def _build_export(session: Session, exercise_id: int) -> dict:
                 "submitted_at": r.submitted_at.isoformat(),
             }
             for r in responses
+        ],
+        "inject_comments": [
+            {
+                "id": c.id,
+                "inject_id": c.inject_id,
+                "user_id": c.user_id,
+                "group_id": c.group_id,
+                "content": c.content,
+                "created_at": c.created_at.isoformat(),
+            }
+            for c in comments
         ],
     }
 
