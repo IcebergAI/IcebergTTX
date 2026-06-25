@@ -26,7 +26,8 @@ def test_register_duplicate_email(client: TestClient, facilitator: User):
     assert resp.status_code == 409
 
 
-def test_register_with_role(client: TestClient):
+def test_register_ignores_elevated_role(client: TestClient):
+    """Regression for #8: self-registration must never grant a privileged role."""
     resp = client.post("/api/auth/register", json={
         "email": "fac2@example.com",
         "display_name": "Fac 2",
@@ -34,7 +35,18 @@ def test_register_with_role(client: TestClient):
         "role": "facilitator",
     })
     assert resp.status_code == 201
-    assert resp.json()["role"] == "facilitator"
+    assert resp.json()["role"] == "participant"
+
+
+def test_register_ignores_observer_role(client: TestClient):
+    resp = client.post("/api/auth/register", json={
+        "email": "obs@example.com",
+        "display_name": "Obs",
+        "password": "secret123",
+        "role": "observer",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["role"] == "participant"
 
 
 def test_login_success(client: TestClient, facilitator: User):

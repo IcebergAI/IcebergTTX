@@ -22,8 +22,10 @@ class EmailMixin(BaseModel):
 class RegisterRequest(EmailMixin):
     display_name: str
     password: str
-    role: UserRole = UserRole.participant
     team: str | None = None
+    # NOTE: role is intentionally NOT accepted from the request body. Self-
+    # registration always creates a participant; elevation is a privileged,
+    # out-of-band/admin operation (#8). Extra fields are ignored by pydantic.
 
 
 class LoginRequest(EmailMixin):

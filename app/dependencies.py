@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 
 from app.database import get_session
 from app.models.user import User, UserRole
+from app.services import audit_service
 from app.services.auth_service import decode_access_token
 
 
@@ -59,10 +60,20 @@ def get_current_user(
         if email is None:
             raise credentials_exc
     except JWTError:
+        audit_service.emit(
+            "auth.token_invalid", result="fail", reason="decode error", severity="warning"
+        )
         raise credentials_exc
 
     user = session.exec(select(User).where(User.email == email)).first()
     if user is None or not user.is_active:
+        audit_service.emit(
+            "auth.token_invalid",
+            result="fail",
+            actor_email=email,
+            reason="unknown or inactive user",
+            severity="warning",
+        )
         raise credentials_exc
     return _effective_user(user, view_role, view_team)
 
@@ -78,12 +89,23 @@ def get_current_actual_user(
     return user
 
 
+def _deny(actor: User, required: tuple[UserRole, ...]) -> HTTPException:
+    audit_service.emit(
+        "authz.denied",
+        result="deny",
+        actor=actor,
+        reason=f"requires one of {[r.value for r in required]}",
+        severity="warning",
+    )
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+    )
+
+
 def require_role(*roles: UserRole):
     def _check(current_user: Annotated[User, Depends(get_current_user)]) -> User:
         if current_user.role not in roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
-            )
+            raise _deny(current_user, roles)
         return current_user
 
     return _check
@@ -92,9 +114,7 @@ def require_role(*roles: UserRole):
 def require_actual_role(*roles: UserRole):
     def _check(current_user: Annotated[User, Depends(get_current_actual_user)]) -> User:
         if current_user.role not in roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
-            )
+            raise _deny(current_user, roles)
         return current_user
 
     return _check

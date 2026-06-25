@@ -15,6 +15,7 @@ from app.dependencies import get_current_user, require_role
 from app.models.exercise import ExerciseState
 from app.models.inject import Inject
 from app.models.user import User, UserRole
+from app.services import audit_service
 from app.services.access_control import (
     require_exercise_access,
     require_inject_visible,
@@ -244,6 +245,14 @@ def delete_inject(exercise_id: int, inject_id: int, _: FacilitatorDep, session: 
     _delete_attachment_file(inject)
     session.delete(inject)
     session.commit()
+    audit_service.emit(
+        "inject.delete",
+        actor=_,
+        target_type="inject",
+        target_id=inject_id,
+        reason=f"exercise={exercise_id}",
+        severity="warning",
+    )
 
 
 @router.get("/{inject_id}/attachment")
@@ -283,7 +292,15 @@ async def release(
             detail="Only active exercises can release injects",
         )
     inject = get_inject_or_404(session, exercise_id, inject_id)
-    return _inject_out(await release_inject(session, inject, released_by=current_user.id), session)
+    released = await release_inject(session, inject, released_by=current_user.id)
+    audit_service.emit(
+        "inject.release",
+        actor=current_user,
+        target_type="inject",
+        target_id=inject_id,
+        reason=f"exercise={exercise_id}",
+    )
+    return _inject_out(released, session)
 
 
 def require_visible_bool(session: Session, inject: Inject, user: User) -> bool:

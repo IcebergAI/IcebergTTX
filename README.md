@@ -16,8 +16,9 @@ A tabletop exercise (TTX) platform for running cyber incident and business resil
 - **Team comment threads** — participants discuss released injects in group-scoped comment threads
 - **Simulated communications** — two-pane inbox/outbox for regulatory, press, and executive comms
 - **LLM assessment** — Claude evaluates participant decisions and suggests follow-up injects
-- **Role-based access** — facilitator, participant, and observer roles
+- **Role-based access** — facilitator, participant, and observer roles (self-registration always creates a participant; elevation is out-of-band)
 - **Role preview** — facilitators can view the app as a participant or observer without changing accounts
+- **Security hardening** — enforced SECRET_KEY at startup, Secure cookie + CSRF origin checks, login rate limiting, and structured audit logging
 - **Sample templates** — optional bundled scenarios can be loaded from Settings; the database stays empty by default
 - **Export** — transcript (JSON), responses (CSV), and AI assessments (JSON)
 
@@ -41,13 +42,29 @@ pip install -e ".[dev]"
 
 # Configure environment
 cp .env.example .env
-# Edit .env — set SECRET_KEY (required) and ANTHROPIC_API_KEY (optional, for LLM features)
+# Edit .env:
+#   SECRET_KEY        required — generate: python -c "import secrets; print(secrets.token_hex(32))"
+#   DEV_MODE=true     for local HTTP development (relaxes the SECRET_KEY check and the Secure cookie flag)
+#   ANTHROPIC_API_KEY optional — enables LLM features
+# Outside DEV_MODE the app refuses to start if SECRET_KEY is unset, the default, or shorter than 32 chars.
 
 # Run the development server
 uvicorn app.main:app --reload
 ```
 
-Open [http://localhost:8000](http://localhost:8000). Register a facilitator account, then create a scenario and exercise. To try the app quickly, open Settings and load a sample scenario or demo exercise. In-app help is available at [/help](http://localhost:8000/help).
+Open [http://localhost:8000](http://localhost:8000). Register an account (self-registration always creates a **participant**), then promote it to facilitator out-of-band — e.g. in a Python shell:
+
+```python
+from sqlmodel import Session, select
+from app.database import engine
+from app.models.user import User, UserRole
+with Session(engine) as s:
+    u = s.exec(select(User).where(User.email == "you@example.com")).one()
+    u.role = UserRole.facilitator
+    s.add(u); s.commit()
+```
+
+As a facilitator, create a scenario and exercise. To try the app quickly, open Settings and load a sample scenario or demo exercise. In-app help is available at [/help](http://localhost:8000/help).
 
 ## Docker Deployment
 
@@ -116,14 +133,15 @@ tailwindcss -i static/css/input.css -o static/css/output.css
 
 ```
 app/
-├── main.py          # App factory + lifespan
-├── config.py        # Settings (pydantic-settings, reads .env)
+├── main.py          # App factory + lifespan (settings validation, middleware)
+├── config.py        # Settings (pydantic-settings, reads .env) + startup validation
+├── middleware.py    # Audit request context + CSRF origin checks
 ├── database.py      # SQLite / Postgres engine + get_session dependency
 ├── dependencies.py  # FastAPI dependencies (auth, role guards)
-├── models/          # SQLModel table definitions
+├── models/          # SQLModel table definitions (incl. AuditEvent)
 ├── schemas/         # Pydantic request/response schemas
 ├── routers/         # FastAPI routers (one per resource) + ui.py (Jinja2 pages)
-├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control)
+├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control, audit_service, rate_limit)
 ├── samples/         # Bundled quick-start scenario templates (loaded only on demand)
 └── templates/       # Jinja2 HTML templates
     ├── base.html            # Persistent dark sidebar, CSS vars, shared JS helpers
