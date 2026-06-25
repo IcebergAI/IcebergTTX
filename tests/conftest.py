@@ -1,3 +1,9 @@
+import os
+
+# Must be set before app.config.Settings is instantiated at import time.
+os.environ.setdefault("DEV_MODE", "true")  # relax SECRET_KEY/cookie checks (#9, #10)
+os.environ.setdefault("AUDIT_PERSIST", "false")  # don't write audit rows to the dev DB (#23)
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
@@ -33,6 +39,16 @@ def seed_playwright_users():
             )
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_login_rate_limiter():
+    """Isolate the in-memory login limiter between tests (#11)."""
+    from app.services.rate_limit import login_rate_limiter
+
+    login_rate_limiter.clear()
+    yield
+    login_rate_limiter.clear()
 
 
 @pytest.fixture(name="session")

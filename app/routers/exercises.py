@@ -15,6 +15,7 @@ from app.models.inject_comment import InjectComment
 from app.models.response import Response
 from app.models.scenario import Scenario
 from app.models.user import User, UserRole
+from app.services import audit_service
 from app.services.access_control import (
     get_exercise_or_404,
     is_actual_facilitator,
@@ -143,7 +144,7 @@ def update_exercise(
 
 
 @router.delete("/{exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_exercise(exercise_id: int, _: FacilitatorDep, session: SessionDep):
+def delete_exercise(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
     ex = _get_or_404(session, exercise_id)
     if ex.state != ExerciseState.draft:
         raise HTTPException(
@@ -152,32 +153,48 @@ def delete_exercise(exercise_id: int, _: FacilitatorDep, session: SessionDep):
         )
     session.delete(ex)
     session.commit()
+    audit_service.emit(
+        "exercise.delete",
+        actor=current_user,
+        target_type="exercise",
+        target_id=exercise_id,
+        severity="warning",
+    )
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
-@router.post("/{exercise_id}/start")
-def start(exercise_id: int, _: FacilitatorDep, session: SessionDep):
+def _transition(
+    exercise_id: int, current_user: User, session: Session, target: ExerciseState, action: str
+) -> dict:
     ex = _get_or_404(session, exercise_id)
-    return _exercise_out(transition_state(session, ex, ExerciseState.active))
+    result = transition_state(session, ex, target)
+    audit_service.emit(
+        action, actor=current_user, target_type="exercise", target_id=exercise_id
+    )
+    return _exercise_out(result)
+
+
+@router.post("/{exercise_id}/start")
+def start(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    return _transition(exercise_id, current_user, session, ExerciseState.active, "exercise.start")
 
 
 @router.post("/{exercise_id}/pause")
-def pause(exercise_id: int, _: FacilitatorDep, session: SessionDep):
-    ex = _get_or_404(session, exercise_id)
-    return _exercise_out(transition_state(session, ex, ExerciseState.paused))
+def pause(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    return _transition(exercise_id, current_user, session, ExerciseState.paused, "exercise.pause")
 
 
 @router.post("/{exercise_id}/resume")
-def resume(exercise_id: int, _: FacilitatorDep, session: SessionDep):
-    ex = _get_or_404(session, exercise_id)
-    return _exercise_out(transition_state(session, ex, ExerciseState.active))
+def resume(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    return _transition(exercise_id, current_user, session, ExerciseState.active, "exercise.resume")
 
 
 @router.post("/{exercise_id}/complete")
-def complete(exercise_id: int, _: FacilitatorDep, session: SessionDep):
-    ex = _get_or_404(session, exercise_id)
-    return _exercise_out(transition_state(session, ex, ExerciseState.completed))
+def complete(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    return _transition(
+        exercise_id, current_user, session, ExerciseState.completed, "exercise.complete"
+    )
 
 
 # ── Members ───────────────────────────────────────────────────────────────────
@@ -193,10 +210,17 @@ def list_members(exercise_id: int, current_user: CurrentUserDep, session: Sessio
 
 @router.post("/{exercise_id}/members", status_code=status.HTTP_201_CREATED)
 def add_member(
-    exercise_id: int, body: EnrolMemberRequest, _: FacilitatorDep, session: SessionDep
+    exercise_id: int, body: EnrolMemberRequest, current_user: FacilitatorDep, session: SessionDep
 ):
     ex = _get_or_404(session, exercise_id)
     member = enrol_member(session, exercise=ex, user_id=body.user_id, group_id=body.group_id)
+    audit_service.emit(
+        "member.enrol",
+        actor=current_user,
+        target_type="user",
+        target_id=body.user_id,
+        reason=f"exercise={exercise_id} group={body.group_id}",
+    )
     return _member_out(member)
 
 
@@ -205,18 +229,35 @@ def patch_member(
     exercise_id: int,
     user_id: int,
     body: UpdateMemberRequest,
-    _: FacilitatorDep,
+    current_user: FacilitatorDep,
     session: SessionDep,
 ):
     ex = _get_or_404(session, exercise_id)
     member = update_member_group(session, exercise=ex, user_id=user_id, group_id=body.group_id)
+    audit_service.emit(
+        "member.group_change",
+        actor=current_user,
+        target_type="user",
+        target_id=user_id,
+        reason=f"exercise={exercise_id} group={body.group_id}",
+    )
     return _member_out(member)
 
 
 @router.delete("/{exercise_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_member(exercise_id: int, user_id: int, _: FacilitatorDep, session: SessionDep):
+def delete_member(
+    exercise_id: int, user_id: int, current_user: FacilitatorDep, session: SessionDep
+):
     ex = _get_or_404(session, exercise_id)
     remove_member(session, exercise=ex, user_id=user_id)
+    audit_service.emit(
+        "member.remove",
+        actor=current_user,
+        target_type="user",
+        target_id=user_id,
+        reason=f"exercise={exercise_id}",
+        severity="warning",
+    )
 
 
 # ── Export ────────────────────────────────────────────────────────────────────
@@ -276,8 +317,16 @@ def _build_export(session: Session, exercise_id: int) -> dict:
 
 
 @router.get("/{exercise_id}/export")
-def export_json(exercise_id: int, _: FacilitatorDep, session: SessionDep):
+def export_json(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
     data = _build_export(session, exercise_id)
+    audit_service.emit(
+        "exercise.export",
+        actor=current_user,
+        target_type="exercise",
+        target_id=exercise_id,
+        reason="format=json",
+        severity="warning",
+    )
     return JSONResponse(
         content=data,
         headers={"Content-Disposition": f'attachment; filename="exercise_{exercise_id}.json"'},
@@ -285,8 +334,16 @@ def export_json(exercise_id: int, _: FacilitatorDep, session: SessionDep):
 
 
 @router.get("/{exercise_id}/export.csv")
-def export_csv(exercise_id: int, _: FacilitatorDep, session: SessionDep):
+def export_csv(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
     data = _build_export(session, exercise_id)
+    audit_service.emit(
+        "exercise.export",
+        actor=current_user,
+        target_type="exercise",
+        target_id=exercise_id,
+        reason="format=csv",
+        severity="warning",
+    )
     buf = io.StringIO()
     writer = csv.writer(buf)
     cols = ["inject_id", "inject_title", "user_id", "selected_option", "content", "submitted_at"]

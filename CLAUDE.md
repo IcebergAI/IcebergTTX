@@ -35,6 +35,18 @@ API-first architecture.
 
 **WebSocket auth**: JWT passed as `?token=<jwt>` query parameter. Browsers cannot set the `Authorization` header on WebSocket upgrade requests.
 
+**Startup secret validation**: `validate_settings()` (`config.py`) is called from the lifespan startup and aborts the app if `secret_key` is unset, equal to the well-known default, or shorter than 32 chars — unless `DEV_MODE=true`. This prevents silently signing JWTs with a publicly-known key (#9). `dev_mode` also relaxes the Secure-cookie requirement for local HTTP. Tests set `DEV_MODE=true` in `conftest.py` before app import.
+
+**Self-registration is participant-only**: `RegisterRequest` no longer accepts `role` — `POST /api/auth/register` always creates a `participant` (#8). Privileged roles are assigned out-of-band (seeded or via a future admin endpoint); extra body fields are ignored by pydantic. The register template no longer offers a role selector.
+
+**Cookie security & CSRF**: the auth cookie is set with `Secure` (gated on `settings.cookies_secure`, default `not dev_mode`; override with `COOKIE_SECURE`). `CSRFOriginMiddleware` (`app/middleware.py`) verifies `Origin`/`Referer` for cookie-authenticated state-changing requests under `/api/` (#10). Bearer-`Authorization` requests and `/api/auth/*` are exempt — the app's own fetch calls use the localStorage Bearer token, so the cookie is effectively navigation-only. Extra allowed origins via `TRUSTED_ORIGINS`.
+
+**Login brute-force protection**: `app/services/rate_limit.py` is an in-memory sliding-window limiter keyed by `ip:email` (honouring `X-Forwarded-For`). After `LOGIN_MAX_ATTEMPTS` (default 5) failures within `LOGIN_LOCKOUT_SECONDS` (default 300) the login route returns `429` with `Retry-After`; a success resets the counter (#11). In-memory ⇒ single-process only (same constraint as `ws_manager`). Tests clear it via an autouse fixture.
+
+**Audit logging**: `app/services/audit_service.py` emits structured JSON audit events to the `deep_thought.audit` logger (always) and, when `AUDIT_PERSIST` is set, to the append-only `AuditEvent` table (#23). `emit()` never raises (logging must not break a request) and sanitises all free-text against log injection (CR/LF/control chars). `AuditContextMiddleware` populates per-request "where" fields (request id, source IP, method, path) via a `ContextVar`; pass `actor=user` so the **actual** identity is logged even under facilitator role-preview. Wired at: login success/failure/lockout, register, logout, password change, token-validation failures, `authz.denied` (role + exercise access), inject release/delete, exercise lifecycle, member enrol/remove/group-change, exports, CSRF blocks, app startup/shutdown, and unhandled 500s. Secrets and payload bodies are never logged. **Not yet covered** (P2 follow-up): SIEM shipping.
+
+**Facilitator trust boundary (#12, open/P2)**: any `facilitator` is currently a global super-admin over every exercise/scenario/export — there is no per-resource ownership scoping. This is a known, documented trust boundary (single trusted facilitator team), deferred as a P2 follow-up; `Exercise.created_by` already exists to support ownership checks when implemented.
+
 **LLM integration**: Uses `anthropic>=0.40` (`AsyncAnthropic`). Prompt caching applied via the `anthropic-beta: prompt-caching-2024-07-31` header — scenario context + inject content is the cached prefix; participant response text is the non-cached suffix. `run_llm_pipeline` is a background async task (fired via `asyncio.create_task`) that opens its own Session from `engine` directly (same pattern as `_delayed_comm`). The `Exercise.llm_enabled` flag gates LLM calls per exercise. Set `ANTHROPIC_API_KEY` in `.env` to enable. All API calls are mocked in `tests/test_llm.py` — no real network requests.
 
 **Tailwind**: CDN during development (Phases 1–6); switched to CLI-compiled `static/css/output.css` in Phase 7. Rebuild after template changes: `tailwindcss -i static/css/input.css -o static/css/output.css`. Tailwind v4 auto-scans `app/templates/**/*.html` — no config file needed.
@@ -61,14 +73,15 @@ API-first architecture.
 
 ```
 app/
-├── main.py          # App factory + lifespan (create_db_and_tables)
-├── config.py        # Settings via pydantic-settings (.env)
+├── main.py          # App factory + lifespan (validate_settings, create_db_and_tables, middleware)
+├── config.py        # Settings via pydantic-settings (.env) + validate_settings() startup guard
+├── middleware.py    # AuditContextMiddleware + CSRFOriginMiddleware (ASGI)
 ├── database.py      # SQLite engine, get_session dependency
 ├── dependencies.py  # get_current_user, require_role()
-├── models/          # SQLModel table definitions
+├── models/          # SQLModel table definitions (incl. audit.AuditEvent)
 ├── schemas/         # Pydantic schemas (auth, scenario_json)
 ├── routers/         # One router per resource + ui.py for Jinja2 pages
-├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control)
+├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control, audit_service, rate_limit)
 └── templates/       # Jinja2 HTML
     │   base.html            # CSS vars, sidebar layout, sidebarNav() Alpine component, shared JS helpers
     │   dashboard.html       # Command center (live exercise hero card + exercises/scenarios lists)
@@ -115,8 +128,9 @@ revised/             # Claude Design prototype (static reference, not served)
 | 13 — Dark mode + role preview + settings page + sample scenarios | ✅ Complete |
 | 14 — Containerized deployment (Docker Compose + Kubernetes + Postgres + nginx) | ✅ Complete |
 | 15 — Linear inject flows + team comment threads | ✅ Complete |
+| 16 — Security hardening (P0/P1: #8 reg roles, #9 secret validation, #10 cookie/CSRF, #11 login rate limit, #23 audit logging) | ✅ Complete |
 
-Current test count: **177 passing** (1 skipped).
+Current test count: **193 passing** (1 skipped).
 
 ---
 

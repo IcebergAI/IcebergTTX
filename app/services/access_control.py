@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 from app.models.exercise import Exercise, ExerciseMember
 from app.models.inject import Inject, InjectState
 from app.models.user import User, UserRole
+from app.services import audit_service
 
 
 def is_actual_facilitator(user: User) -> bool:
@@ -48,6 +49,15 @@ def require_exercise_access(session: Session, exercise_id: int, user: User) -> E
         return exercise
     if user.id is not None and is_exercise_member(session, exercise_id, user.id):
         return exercise
+    audit_service.emit(
+        "authz.denied",
+        result="deny",
+        actor=user,
+        target_type="exercise",
+        target_id=exercise_id,
+        reason="not an exercise member",
+        severity="warning",
+    )
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Exercise access denied")
 
 

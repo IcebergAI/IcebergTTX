@@ -1,11 +1,13 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.database import get_session
 from app.dependencies import get_current_actual_user, get_current_user
-from app.models.user import User
+from app.middleware import client_ip
+from app.models.user import User, UserRole
 from app.schemas.auth import (
     LoginRequest,
     RegisterRequest,
@@ -13,9 +15,21 @@ from app.schemas.auth import (
     UpdateMeRequest,
     UserResponse,
 )
+from app.services import audit_service
 from app.services.auth_service import create_access_token, hash_password, verify_password
+from app.services.rate_limit import login_rate_limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=settings.cookies_secure,
+        samesite="lax",
+    )
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -23,37 +37,92 @@ def register(body: RegisterRequest, session: Annotated[Session, Depends(get_sess
     if session.exec(select(User).where(User.email == body.email)).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
+    # Role is never taken from the request — self-registration is always a
+    # participant (#8). Promotion is a privileged operation done out-of-band.
     user = User(
         email=body.email,
         display_name=body.display_name,
         hashed_password=hash_password(body.password),
-        role=body.role,
+        role=UserRole.participant,
         team=body.team,
     )
     session.add(user)
     session.commit()
     session.refresh(user)
+    audit_service.emit(
+        "auth.register",
+        actor_id=user.id,
+        actor_email=user.email,
+        actor_role=user.role.value,
+        target_type="user",
+        target_id=user.id,
+    )
     return user
 
 
 @router.post("/login", response_model=TokenResponse)
 def login(
-    body: LoginRequest, response: Response, session: Annotated[Session, Depends(get_session)]
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
 ):
+    ip = client_ip(request) or "unknown"
+    rate_key = f"{ip}:{body.email}"
+    if login_rate_limiter.is_limited(rate_key):
+        retry_after = login_rate_limiter.retry_after(rate_key)
+        audit_service.emit(
+            "auth.login",
+            result="deny",
+            actor_email=body.email,
+            reason="rate limited",
+            severity="warning",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     user = session.exec(select(User).where(User.email == body.email)).first()
     if not user or not verify_password(body.password, user.hashed_password):
+        login_rate_limiter.record_failure(rate_key)
+        audit_service.emit(
+            "auth.login",
+            result="fail",
+            actor_email=body.email,
+            reason="invalid credentials",
+            severity="warning",
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not user.is_active:
+        audit_service.emit(
+            "auth.login",
+            result="deny",
+            actor_id=user.id,
+            actor_email=user.email,
+            actor_role=user.role.value,
+            reason="account disabled",
+            severity="warning",
+        )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
 
+    login_rate_limiter.reset(rate_key)
     token = create_access_token(subject=user.email, role=user.role.value)
-    response.set_cookie(key="access_token", value=token, httponly=True, samesite="lax")
+    _set_session_cookie(response, token)
+    audit_service.emit(
+        "auth.login",
+        actor_id=user.id,
+        actor_email=user.email,
+        actor_role=user.role.value,
+    )
     return TokenResponse(access_token=token)
 
 
 @router.post("/logout")
 def logout(response: Response):
     response.delete_cookie(key="access_token", path="/", samesite="lax")
+    audit_service.emit("auth.logout")
     return {"ok": True}
 
 
@@ -75,4 +144,12 @@ def update_me(
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
+    if body.password is not None:
+        audit_service.emit(
+            "auth.password_change",
+            actor=current_user,
+            target_type="user",
+            target_id=current_user.id,
+            severity="warning",
+        )
     return current_user

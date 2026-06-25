@@ -38,15 +38,6 @@
                class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300" />
       </div>
       <div>
-        <label class="block smallcaps text-stone-500 mb-1">Role</label>
-        <select x-model="role"
-                class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300">
-          <option value="participant">Participant</option>
-          <option value="facilitator">Facilitator</option>
-          <option value="observer">Observer</option>
-        </select>
-      </div>
-      <div>
         <label class="block smallcaps text-stone-500 mb-1">
           Team / department
           <span class="text-stone-400 normal-case font-normal">(optional)</span>
@@ -72,11 +63,11 @@
 <script>
 function registerForm() {
   return {
-    email: '', display_name: '', password: '', role: 'participant', team: '',
+    email: '', display_name: '', password: '', team: '',
     loading: false, error: '',
     async submit() {
       this.loading = true; this.error = '';
-      const body = { email: this.email, display_name: this.display_name, password: this.password, role: this.role };
+      const body = { email: this.email, display_name: this.display_name, password: this.password };
       if (this.team) body.team = this.team;
       const resp = await fetch('/api/auth/register', {
         method: 'POST',

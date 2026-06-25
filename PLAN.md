@@ -404,6 +404,17 @@ async def assess_response(response, inject, scenario) -> ResponseAssessment
 async def suggest_inject(response, exercise, scenario) -> SuggestedInject
 ```
 
+### Phase 16 — Security hardening (P0/P1)
+Closes GitHub issues #8, #9, #10, #11, #23 (the "auth rate limiting" item once noted under Phase 7 is delivered here).
+
+- **#9 SECRET_KEY validation**: `validate_settings()` aborts startup on an unset/default/short key unless `DEV_MODE=true`.
+- **#8 Registration privilege escalation**: `RegisterRequest` no longer accepts `role`; self-registration is always a `participant`. Regression tests assert elevated roles are ignored.
+- **#10 Cookie security + CSRF**: `Secure` flag (gated on `cookies_secure`), and `CSRFOriginMiddleware` verifying `Origin`/`Referer` for cookie-authenticated mutations (Bearer + `/api/auth/*` exempt).
+- **#11 Login rate limiting**: in-memory sliding-window limiter (`rate_limit.py`), `429` + `Retry-After` after repeated failures, reset on success.
+- **#23 Audit logging**: `AuditEvent` model + `audit_service.emit()` structured JSON logger, request-context middleware, sanitisation against log injection, real-identity attribution under role-preview.
+
+Deferred to **P2**: per-facilitator ownership scoping (#12 — documented trust boundary) and SIEM shipping (companion to #23).
+
 ---
 
 ## Testing Strategy
@@ -430,6 +441,7 @@ async def suggest_inject(response, exercise, scenario) -> SuggestedInject
 | `test_responses.py` | Submit, branch evaluation, next inject queued |
 | `test_communications.py` | Send outbound, inject inbound, visibility filtering, mark-read, triggered comms |
 | `test_llm.py` | Assessment stored, WS event fired, suggested inject created, approve/reject |
+| `test_security.py` | SECRET_KEY validation, login rate limiting, CSRF origin checks, audit logging + log-injection sanitisation |
 
 ---
 
