@@ -27,6 +27,8 @@ dev = [
     "httpx>=0.27",
     "httpx-ws>=0.6",
     "ruff>=0.4",
+    "bandit>=1.7",
+    "vulture>=2.11",
     "pyright>=1.1",
     "pytailwindcss>=0.3",
     "playwright>=1.52",
@@ -50,3 +52,30 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.bandit]
+# B101: asserts are used for type-narrowing (e.g. `assert x.id is not None`),
+# not for runtime validation, so the optimized-bytecode caveat does not apply.
+skips = ["B101"]
+exclude_dirs = ["tests"]
+
+[tool.vulture]
+min_confidence = 60
+# FastAPI route handlers and Pydantic validators are invoked by decorators,
+# so vulture cannot see their call sites.
+ignore_decorators = [
+    "@router.*",
+    "@app.*",
+    "@field_validator",
+    "@model_validator",
+]
+# Pydantic config/serialized fields and validator `cls` params are framework usage.
+ignore_names = [
+    "model_config",
+    "cls",
+    "token_type",
+    "can_switch_roles",
+    "author",
+    "schema_version",
+    "debrief_notes",
+]

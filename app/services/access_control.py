@@ -51,15 +51,6 @@ def require_exercise_access(session: Session, exercise_id: int, user: User) -> E
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Exercise access denied")
 
 
-def require_facilitator_or_observer_access(
-    session: Session, exercise_id: int, user: User
-) -> Exercise:
-    exercise = require_exercise_access(session, exercise_id, user)
-    if user.role in (UserRole.facilitator, UserRole.observer):
-        return exercise
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-
-
 def inject_target_teams(inject: Inject) -> list[str] | None:
     return json.loads(inject.target_teams) if inject.target_teams else None
 

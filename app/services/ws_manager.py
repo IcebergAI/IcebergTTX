@@ -124,7 +124,8 @@ class ConnectionManager:
                 if idle > max_idle_seconds:
                     try:
                         await c["ws"].close()
-                    except Exception:
+                    # best-effort close of an already-dead socket
+                    except Exception:  # nosec B110
                         pass
                 else:
                     live.append(c)
