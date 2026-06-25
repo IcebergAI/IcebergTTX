@@ -10,9 +10,10 @@ A tabletop exercise (TTX) platform for running cyber incident and business resil
 
 ## Features
 
-- **Scenario library** — build or import JSON scenario files with branching inject trees
+- **Scenario library** — build or import JSON scenario files with branching inject trees (or linear chained flows)
 - **Live exercises** — facilitator releases injects in real time via WebSocket push
 - **Participant responses** — free-text and multiple-choice, driving scenario branches
+- **Team comment threads** — participants discuss released injects in group-scoped comment threads
 - **Simulated communications** — two-pane inbox/outbox for regulatory, press, and executive comms
 - **LLM assessment** — Claude evaluates participant decisions and suggests follow-up injects
 - **Role-based access** — facilitator, participant, and observer roles
@@ -122,7 +123,7 @@ app/
 ├── models/          # SQLModel table definitions
 ├── schemas/         # Pydantic request/response schemas
 ├── routers/         # FastAPI routers (one per resource) + ui.py (Jinja2 pages)
-├── services/        # Business logic (auth, scenario, exercise, inject, response, comms, llm, ws_manager)
+├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control)
 ├── samples/         # Bundled quick-start scenario templates (loaded only on demand)
 └── templates/       # Jinja2 HTML templates
     ├── base.html            # Persistent dark sidebar, CSS vars, shared JS helpers

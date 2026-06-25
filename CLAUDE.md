@@ -27,6 +27,10 @@ API-first architecture.
 
 **Scenario branching**: "Pull not push" — when a participant responds, the service resolves which inject IDs are valid next steps, but the facilitator manually reviews and releases the chosen branch. This keeps human control in the loop.
 
+**Linear inject flows**: In addition to per-option `next_inject_id` branching, an `InjectNode` may set a node-level `next_inject_id` (in `scenario_json.py`) to chain to the next inject without requiring a participant decision — i.e. a straight-line sequence. The `ScenarioDefinition` validator checks the referenced ID exists, and `_check_no_cycles()` includes node-level `next_inject_id` edges in its adjacency graph so linear chains can't form a cycle.
+
+**Inject comment threads**: Participants can post team-scoped discussion comments on released injects (`InjectComment` model; `app/routers/inject_comments.py` under `/api/exercises/{exercise_id}/inject-comments`). Comment visibility is group-scoped via `comment_group_for_user()` in `inject_comment_service.py` (resolved against `Inject.group_id` / the participant's exercise group / team); facilitators and observers see all comments, participants only their own group's. Only participants may post, only while the exercise is `active` and the inject is `released`/`resolved`. New comments broadcast over WebSocket (`inject_comment_created`), group-scoped when the comment has a `group_id`. Access checks live in the shared `app/services/access_control.py`.
+
 **JWT auth**: Stored in both an `httpOnly` cookie (for page navigation/Jinja2 routes) and `localStorage` (for Alpine/fetch calls). The `get_current_user` FastAPI dependency checks both; the `Authorization` header takes precedence.
 
 **WebSocket auth**: JWT passed as `?token=<jwt>` query parameter. Browsers cannot set the `Authorization` header on WebSocket upgrade requests.
@@ -64,7 +68,7 @@ app/
 ├── models/          # SQLModel table definitions
 ├── schemas/         # Pydantic schemas (auth, scenario_json)
 ├── routers/         # One router per resource + ui.py for Jinja2 pages
-├── services/        # Business logic (auth, scenario, exercise, inject, response, comms, llm, ws_manager)
+├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control)
 └── templates/       # Jinja2 HTML
     │   base.html            # CSS vars, sidebar layout, sidebarNav() Alpine component, shared JS helpers
     │   dashboard.html       # Command center (live exercise hero card + exercises/scenarios lists)
@@ -110,8 +114,9 @@ revised/             # Claude Design prototype (static reference, not served)
 | 12 — Group-scoped injects + file attachments | ✅ Complete |
 | 13 — Dark mode + role preview + settings page + sample scenarios | ✅ Complete |
 | 14 — Containerized deployment (Docker Compose + Kubernetes + Postgres + nginx) | ✅ Complete |
+| 15 — Linear inject flows + team comment threads | ✅ Complete |
 
-Current test count: **167 passing**.
+Current test count: **177 passing** (1 skipped).
 
 ---
 
