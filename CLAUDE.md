@@ -19,7 +19,9 @@ API-first architecture.
 
 ## Key Architectural Decisions
 
-**Database (async, Postgres-only)**: PostgreSQL via the async `asyncpg` driver everywhere — dev, tests, and containers. `database.py` builds a single `create_async_engine` and exposes an `async def get_session()` yielding a SQLModel `AsyncSession` (`expire_on_commit=False`, so attributes stay populated after commit for response serialization). `make_async_url()` rewrites a plain `postgresql://` URL to `postgresql+asyncpg://`, so existing `DATABASE_URL` secrets in `docker-compose.yml`/`k8s` keep working unchanged. `create_db_and_tables()` runs `metadata.create_all` via `conn.run_sync` in the async lifespan. No Alembic yet — schema changes to an existing production DB must be applied manually until Alembic is added.
+**Database (async, Postgres-only)**: PostgreSQL via the async `asyncpg` driver everywhere — dev, tests, and containers. `database.py` builds a single `create_async_engine` and exposes an `async def get_session()` yielding a SQLModel `AsyncSession` (`expire_on_commit=False`, so attributes stay populated after commit for response serialization). `make_async_url()` rewrites a plain `postgresql://` URL to `postgresql+asyncpg://`, so existing `DATABASE_URL` secrets in `docker-compose.yml`/`k8s` keep working unchanged.
+
+**Schema migrations (Alembic, #19)**: Schema is managed by Alembic. `app/database.py` exposes `run_migrations()`, called from the async lifespan, which runs `alembic upgrade head` in a worker thread (`asyncio.to_thread` — Alembic's async `env.py` calls `asyncio.run`, which can't run inside the already-running lifespan loop). This self-migrates on startup, which suits the single-replica constraint; multi-replica rollouts should instead run `alembic upgrade head` as a dedicated deploy step. `alembic/env.py` derives the URL from `settings` via `make_async_url()` and uses `SQLModel.metadata` as the autogenerate target (importing every `app/models/*` module, same list as `app/main.py`). Create new migrations with `alembic revision --autogenerate -m "..."`; generated files under `alembic/versions/` are excluded from ruff. The test suite does **not** use Alembic — `tests/conftest.py` builds a throwaway schema with `metadata.create_all`, and `create_db_and_tables()` remains for that path. The `alembic.ini` + `alembic/` dir are copied into the Docker image so startup migration works in containers.
 
 **Everything that touches the DB is async**: services and router handlers are `async def` and `await session.exec(...)/get/commit/refresh/delete` (`session.add` stays sync). Background tasks that open their own session — `run_llm_pipeline` (`llm_service.py`), `_delayed_comm` (`communication_service.py`) — use `async with AsyncSession(engine)`. The `anthropic` client was already `AsyncAnthropic`.
 
@@ -79,7 +81,7 @@ API-first architecture.
 
 ```
 app/
-├── main.py          # App factory + lifespan (validate_settings, create_db_and_tables, middleware)
+├── main.py          # App factory + lifespan (configure_logging, validate_settings, run_migrations, middleware)
 ├── config.py        # Settings via pydantic-settings (.env) + validate_settings() startup guard
 ├── middleware.py    # AuditContextMiddleware + CSRFOriginMiddleware (ASGI)
 ├── database.py      # SQLite engine, get_session dependency
@@ -104,6 +106,7 @@ app/
     │   communications/index.html  # /communications hub (redirects to active exercise)
     │   settings.html              # Dark mode toggle, role preview, sample scenario loader
 tests/               # Pytest suite (conftest.py + one file per resource)
+alembic/             # Migration env.py + versions/ (baseline schema); alembic.ini at repo root
 static/css/          # output.css (Tailwind compiled, Phase 7+)
 app/samples/         # Bundled scenario JSON definitions (ransomware_response, vendor_outage)
 Dockerfile           # Multi-stage: Tailwind build → Python runtime (non-root, static_src/ trick)
@@ -136,8 +139,9 @@ revised/             # Claude Design prototype (static reference, not served)
 | 15 — Linear inject flows + team comment threads | ✅ Complete |
 | 16 — Security hardening (P0/P1: #8 reg roles, #9 secret validation, #10 cookie/CSRF, #11 login rate limit, #23 audit logging) | ✅ Complete |
 | 17 — Async migration (asyncpg/AsyncSession, Postgres-only, response models, FastAPI-skill alignment) | ✅ Complete |
+| 18 — Tech-debt cleanup (#17 logging config, #18 iterative cycle detection, #19 Alembic, #20 task lifecycle, #21/#31 payload/role-preview DRY, #30 WS team-spoof fix, #32 nits) | ✅ Complete |
 
-Current test count: **198 passing**.
+Current test count: **207 passing**.
 
 ---
 
@@ -148,10 +152,12 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env   # set SECRET_KEY
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload   # applies Alembic migrations to head on startup
 ```
 
 Run tests: `pytest`
+
+Schema changes: edit the models, then `alembic revision --autogenerate -m "describe change"` (against a running Postgres) and review the generated migration under `alembic/versions/`. Migrations are applied automatically on app startup; run `alembic upgrade head` manually to apply without starting the app.
 
 ---
 

@@ -1,4 +1,3 @@
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,7 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.database import get_session
 from app.dependencies import get_current_user, require_role
 from app.models.assessment import ResponseAssessment
-from app.models.exercise import Exercise, ExerciseState
+from app.models.exercise import ExerciseState
 from app.models.inject import InjectState
 from app.models.response import Response
 from app.models.user import User, UserRole
@@ -19,11 +18,13 @@ from app.services.access_control import (
     require_exercise_access,
     require_inject_visible,
 )
+from app.services.background import spawn
 from app.services.inject_service import get_inject_or_404
 from app.services.llm_service import _assessment_payload, run_llm_pipeline
 from app.services.response_service import (
     broadcast_response_submitted,
     response_next_inject_suggestions,
+    response_payload,
     submit_response,
 )
 from app.services.scenario_service import export_definition, get_inject_node
@@ -41,24 +42,6 @@ class SubmitResponseRequest(BaseModel):
     selected_option: str | None = None
 
 
-def _response_out(r: Response, next_injects: list[dict] | None = None) -> dict:
-    data = {
-        "id": r.id,
-        "inject_id": r.inject_id,
-        "exercise_id": r.exercise_id,
-        "user_id": r.user_id,
-        "group_id": r.group_id,
-        "content": r.content,
-        "selected_option": r.selected_option,
-        "submitted_at": r.submitted_at.isoformat(),
-        "assessment_id": r.assessment_id,
-    }
-    if next_injects is not None:
-        data["next_injects"] = next_injects
-        data["next_inject_ids"] = [item["scenario_node_id"] for item in next_injects]
-    return data
-
-
 @router.get("", response_model=list[ResponsePublic])
 async def list_responses(
     exercise_id: int,
@@ -69,9 +52,9 @@ async def list_responses(
     q = select(Response).where(Response.exercise_id == exercise_id)
     if current_user.role == UserRole.participant:
         q = q.where(Response.user_id == current_user.id)
-        return [_response_out(r) for r in (await session.exec(q)).all()]
+        return [response_payload(r) for r in (await session.exec(q)).all()]
     return [
-        _response_out(r, await response_next_inject_suggestions(session, r))
+        response_payload(r, await response_next_inject_suggestions(session, r))
         for r in (await session.exec(q)).all()
     ]
 
@@ -150,14 +133,11 @@ async def submit(
     )
     await broadcast_response_submitted(response, next_injects)
 
-    exercise = await session.get(Exercise, exercise_id)
-    if exercise and exercise.llm_enabled:
+    if exercise.llm_enabled:
         assert response.id is not None
-        asyncio.create_task(
-            run_llm_pipeline(response.id, body.inject_id, exercise_id)
-        )
+        spawn(run_llm_pipeline(response.id, body.inject_id, exercise_id))
 
-    return _response_out(response)
+    return response_payload(response)
 
 
 @router.get("/{response_id}", response_model=ResponsePublic)
@@ -173,7 +153,7 @@ async def get_response(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Response not found")
     if current_user.role == UserRole.participant and r.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    return _response_out(r)
+    return response_payload(r)
 
 
 @router.post("/{response_id}/assess", status_code=status.HTTP_202_ACCEPTED)
@@ -186,7 +166,7 @@ async def trigger_assess(
     r = await session.get(Response, response_id)
     if not r or r.exercise_id != exercise_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Response not found")
-    asyncio.create_task(run_llm_pipeline(response_id, r.inject_id, exercise_id))
+    spawn(run_llm_pipeline(response_id, r.inject_id, exercise_id))
     return {"detail": "Assessment queued"}
 
 

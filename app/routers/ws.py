@@ -7,8 +7,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.models.user import User, UserRole
-from app.services.access_control import exercise_member_for_user, require_exercise_access
+from app.services.access_control import (
+    exercise_member_for_user,
+    is_actual_facilitator,
+    require_exercise_access,
+)
 from app.services.auth_service import decode_access_token
+from app.services.role_preview import apply_role_preview
 from app.services.ws_manager import manager
 
 router = APIRouter()
@@ -40,22 +45,7 @@ async def exercise_ws(
     if not user or not user.is_active:
         await ws.close(code=4001)
         return
-    if user.role == UserRole.facilitator and view_role is not None:
-        actual_role = user.role
-        actual_team = user.team
-        try:
-            effective_role = UserRole(view_role)
-        except ValueError:
-            effective_role = user.role
-        user = user.model_copy(
-            update={
-                "role": effective_role,
-                "team": view_team.strip() if view_team and view_team.strip() else user.team,
-            }
-        )
-        object.__setattr__(user, "actual_role", actual_role)
-        object.__setattr__(user, "actual_team", actual_team)
-        object.__setattr__(user, "can_switch_roles", True)
+    user = apply_role_preview(user, view_role, view_team)
     try:
         await require_exercise_access(session, exercise_id, user)
     except Exception:
@@ -65,8 +55,14 @@ async def exercise_ws(
     member = await exercise_member_for_user(session, exercise_id, user.id)
     group_id = member.group_id if member else None
     if user.role == UserRole.participant:
-        group_id = view_team.strip() if view_team and view_team.strip() else group_id
-        group_id = group_id or user.team
+        # A real participant is bucketed strictly by their enrolled group; only a
+        # facilitator *previewing* as a participant derives the group from the
+        # (validated-via-apply_role_preview) preview team. This prevents a genuine
+        # participant from subscribing to another team's broadcasts via view_team (#30).
+        if is_actual_facilitator(user):
+            group_id = group_id or user.team
+        else:
+            group_id = member.group_id if member else user.team
 
     await manager.connect(
         ws, exercise_id, user_id=user.id, role=user.role.value, group_id=group_id

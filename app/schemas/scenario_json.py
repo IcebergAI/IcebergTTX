@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, field_validator, model_validator
 
+# Sanity bound on scenario size. Real tabletop scenarios have at most dozens of
+# injects; this guards against pathological or malicious payloads (#18). Set well
+# above any realistic scenario so legitimate authoring is never blocked.
+MAX_INJECTS = 5000
+
 
 class ParticipantTeam(BaseModel):
     id: str
@@ -60,6 +65,11 @@ class ScenarioDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_structure(self) -> ScenarioDefinition:
+        if len(self.injects) > MAX_INJECTS:
+            raise ValueError(
+                f"scenario has {len(self.injects)} injects (max {MAX_INJECTS})"
+            )
+
         inject_ids = {inj.id for inj in self.injects}
         team_ids = {t.id for t in self.participant_teams}
 
@@ -93,7 +103,11 @@ class ScenarioDefinition(BaseModel):
 
 
 def _check_no_cycles(injects: list[InjectNode], start_id: str) -> None:
-    """Raises ValueError if there is a cycle reachable from start_id."""
+    """Raises ValueError if there is a cycle reachable from start_id.
+
+    Iterative DFS (explicit stack) so deep linear ``next_inject_id`` chains cannot
+    overflow the recursion limit and surface as an opaque 500 (#18).
+    """
     adjacency: dict[str, list[str]] = {}
     for inj in injects:
         next_ids = [opt.next_inject_id for opt in inj.options if opt.next_inject_id is not None]
@@ -101,17 +115,23 @@ def _check_no_cycles(injects: list[InjectNode], start_id: str) -> None:
             next_ids.append(inj.next_inject_id)
         adjacency[inj.id] = next_ids
 
-    visited: set[str] = set()
-    in_stack: set[str] = set()
+    WHITE, GREY, BLACK = 0, 1, 2
+    colour: dict[str, int] = dict.fromkeys(adjacency, WHITE)
 
-    def dfs(node: str) -> None:
-        visited.add(node)
-        in_stack.add(node)
-        for neighbour in adjacency.get(node, []):
-            if neighbour not in visited:
-                dfs(neighbour)
-            elif neighbour in in_stack:
+    colour[start_id] = GREY
+    stack: list[tuple[str, object]] = [(start_id, iter(adjacency.get(start_id, [])))]
+    while stack:
+        node, neighbours = stack[-1]
+        descended = False
+        for neighbour in neighbours:  # type: ignore[attr-defined]
+            state = colour.get(neighbour, WHITE)
+            if state == GREY:
                 raise ValueError(f"Cycle detected in scenario graph at inject '{neighbour}'")
-        in_stack.discard(node)
-
-    dfs(start_id)
+            if state == WHITE:
+                colour[neighbour] = GREY
+                stack.append((neighbour, iter(adjacency.get(neighbour, []))))
+                descended = True
+                break
+        if not descended:
+            colour[node] = BLACK
+            stack.pop()

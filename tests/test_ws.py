@@ -191,3 +191,49 @@ async def test_ws_inactive_user_rejected(
     with pytest.raises(WebSocketDisconnect):
         async with aconnect_ws(_ws_url(active_exercise.id, token), client) as ws:
             await ws.receive_json()
+
+
+async def test_ws_participant_cannot_spoof_team_via_view_team(
+    client: AsyncClient,
+    participant: User,
+    participant_token: str,
+    active_exercise: Exercise,
+):
+    """A genuine participant passing a foreign view_team is still bucketed to
+    their enrolled group, so they cannot subscribe to another team's broadcasts (#30)."""
+    from app.services.ws_manager import manager
+
+    url = f"{_ws_url(active_exercise.id, participant_token)}&view_team=legal"
+    async with aconnect_ws(url, client) as ws:
+        await ws.send_json({"type": "ping"})
+        await ws.receive_json()
+        mine = [
+            c for c in manager._rooms.get(active_exercise.id, [])
+            if c["user_id"] == participant.id
+        ]
+        assert mine, "participant connection should be registered"
+        assert all(c["group_id"] == "it_ops" for c in mine)
+        assert all(c["group_id"] != "legal" for c in mine)
+
+
+async def test_ws_facilitator_preview_derives_group_from_view_team(
+    client: AsyncClient,
+    facilitator: User,
+    facilitator_token: str,
+    active_exercise: Exercise,
+):
+    """A real facilitator previewing as a participant *does* take the preview team (#30)."""
+    from app.services.ws_manager import manager
+
+    url = (
+        f"{_ws_url(active_exercise.id, facilitator_token)}"
+        "&view_role=participant&view_team=legal"
+    )
+    async with aconnect_ws(url, client) as ws:
+        await ws.send_json({"type": "ping"})
+        await ws.receive_json()
+        mine = [
+            c for c in manager._rooms.get(active_exercise.id, [])
+            if c["user_id"] == facilitator.id
+        ]
+        assert mine and all(c["group_id"] == "legal" for c in mine)

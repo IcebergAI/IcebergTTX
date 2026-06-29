@@ -23,17 +23,18 @@ def _optional_user(
         return None
     try:
         from app.services.auth_service import decode_access_token
+        from app.services.role_preview import effective_role
 
         payload = decode_access_token(access_token)
         actual_role = payload.get("role")
-        role = actual_role
-        if actual_role == "facilitator" and view_role in {"facilitator", "participant", "observer"}:
-            role = view_role
+        role = effective_role(actual_role, view_role)
+        # view_team is a facilitator preview affordance only; ignore it otherwise.
+        team = view_team if actual_role == "facilitator" else payload.get("team")
         return {
             "email": payload.get("sub"),
             "role": role,
             "actual_role": actual_role,
-            "team": view_team,
+            "team": team,
         }
     except Exception:
         return None

@@ -20,10 +20,6 @@ from typing import Any
 
 from app.config import settings
 
-# Hold references to in-flight persist tasks so they are not garbage-collected
-# before completing (best-effort, fire-and-forget).
-_persist_tasks: set[asyncio.Task] = set()
-
 audit_logger = logging.getLogger("deep_thought.audit")
 
 APP_NAME = "deep-thought"
@@ -144,15 +140,15 @@ def _persist(event: dict[str, Any]) -> None:
             severity=event.get("severity") or "info",
             security_relevant=bool(event.get("security_relevant", True)),
         )
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         return  # no running loop; JSON log line already emitted
     except Exception:  # nosec B110 # pragma: no cover - persistence is best-effort
         return
 
-    task = loop.create_task(_persist_async(row))
-    _persist_tasks.add(task)
-    task.add_done_callback(_persist_tasks.discard)
+    from app.services.background import spawn
+
+    spawn(_persist_async(row))
 
 
 async def _persist_async(row: Any) -> None:

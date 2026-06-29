@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 from sqlmodel import select
@@ -109,8 +110,6 @@ def _inject_matches_group(inject: Inject, group_id: str | None) -> bool:
     if inject.group_id is not None:
         return group_id == inject.group_id
     if inject.target_teams:
-        import json
-
         teams = json.loads(inject.target_teams)
         return group_id in teams
     return True
@@ -127,7 +126,7 @@ async def broadcast_response_submitted(
         "exercise_id": response.exercise_id,
         "timestamp": datetime.now(UTC).isoformat(),
         "payload": {
-            "response": _response_payload(response),
+            "response": response_payload(response),
             "next_inject_ids": [item["scenario_node_id"] for item in next_injects],
             "next_injects": next_injects,
         },
@@ -135,17 +134,28 @@ async def broadcast_response_submitted(
     await manager.send_to_facilitators(response.exercise_id, message)
 
 
-def _response_payload(r: Response) -> dict:
-    return {
-        "id": r.id,
-        "inject_id": r.inject_id,
-        "exercise_id": r.exercise_id,
-        "user_id": r.user_id,
-        "group_id": r.group_id,
-        "content": r.content,
-        "selected_option": r.selected_option,
-        "submitted_at": r.submitted_at.isoformat(),
-    }
+def response_payload(r: Response, next_injects: list[dict] | None = None) -> dict:
+    """Canonical response serialization (HTTP + WS) via the ResponsePublic schema (#31)."""
+    from app.schemas.api import ResponsePublic
+
+    model = ResponsePublic(
+        id=r.id,
+        inject_id=r.inject_id,
+        exercise_id=r.exercise_id,
+        user_id=r.user_id,
+        group_id=r.group_id,
+        content=r.content,
+        selected_option=r.selected_option,
+        submitted_at=r.submitted_at.isoformat(),
+        assessment_id=r.assessment_id,
+        next_injects=next_injects,
+        next_inject_ids=(
+            [item["scenario_node_id"] for item in next_injects]
+            if next_injects is not None
+            else None
+        ),
+    )
+    return model.model_dump(mode="json")
 
 
 def _next_inject_payload(inject: Inject) -> dict:

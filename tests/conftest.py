@@ -27,7 +27,6 @@ from httpx import AsyncClient  # noqa: E402
 from httpx_ws.transport import ASGIWebSocketTransport  # noqa: E402
 from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
-from sqlmodel import SQLModel  # noqa: E402
 from sqlmodel.ext.asyncio.session import AsyncSession  # noqa: E402
 
 import app.database as app_database  # noqa: E402
@@ -84,10 +83,12 @@ def _reset_login_rate_limiter():
 
 @pytest.fixture(scope="session", autouse=True)
 def _create_schema():
-    async def _create():
-        async with engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
-    asyncio.run(_create())
+    # The test suite builds a throwaway schema directly from the models rather
+    # than running Alembic migrations; create_db_and_tables uses the (already
+    # reassigned) module engine, so it targets the test database.
+    from app.database import create_db_and_tables
+
+    asyncio.run(create_db_and_tables())
     yield
 
 

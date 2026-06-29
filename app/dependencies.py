@@ -9,6 +9,7 @@ from app.database import get_session
 from app.models.user import User, UserRole
 from app.services import audit_service
 from app.services.auth_service import decode_access_token
+from app.services.role_preview import apply_role_preview
 
 
 def _extract_token(
@@ -21,28 +22,6 @@ def _extract_token(
     if access_token:
         return access_token
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-
-
-def _effective_user(user: User, view_role: str | None, view_team: str | None) -> User:
-    object.__setattr__(user, "actual_role", user.role)
-    object.__setattr__(user, "actual_team", user.team)
-    object.__setattr__(user, "can_switch_roles", user.role == UserRole.facilitator)
-    if user.role != UserRole.facilitator or view_role is None:
-        return user
-    try:
-        effective_role = UserRole(view_role)
-    except ValueError:
-        return user
-    effective = user.model_copy(
-        update={
-            "role": effective_role,
-            "team": view_team.strip() if view_team and view_team.strip() else user.team,
-        }
-    )
-    object.__setattr__(effective, "actual_role", user.role)
-    object.__setattr__(effective, "actual_team", user.team)
-    object.__setattr__(effective, "can_switch_roles", True)
-    return effective
 
 
 async def get_current_user(
@@ -76,7 +55,7 @@ async def get_current_user(
             severity="warning",
         )
         raise credentials_exc
-    return _effective_user(user, view_role, view_team)
+    return apply_role_preview(user, view_role, view_team)
 
 
 async def get_current_actual_user(
