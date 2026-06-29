@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlmodel import Session
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.dependencies import require_actual_role
@@ -18,7 +18,7 @@ from app.services.sample_service import (
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 ActualFacilitatorDep = Annotated[User, Depends(require_actual_role(UserRole.facilitator))]
-SessionDep = Annotated[Session, Depends(get_session)]
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 @router.get("/samples/scenarios")
@@ -30,10 +30,10 @@ def list_sample_scenarios(_: ActualFacilitatorDep):
 
 
 @router.post("/samples/scenarios/{sample_id}/load", status_code=status.HTTP_201_CREATED)
-def load_sample(sample_id: str, current_user: ActualFacilitatorDep, session: SessionDep):
+async def load_sample(sample_id: str, current_user: ActualFacilitatorDep, session: SessionDep):
     assert current_user.id is not None
     try:
-        scenario, created = load_sample_scenario(
+        scenario, created = await load_sample_scenario(
             session, sample_id=sample_id, created_by=current_user.id
         )
     except FileNotFoundError:

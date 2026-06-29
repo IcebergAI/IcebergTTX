@@ -22,8 +22,10 @@ jobs:
       - name: Lint
         run: ruff check app/ tests/
 
+      # The test suite starts its own Postgres via testcontainers (Docker is
+      # available on GitHub-hosted runners) and sets DATABASE_URL itself. To run
+      # against an external Postgres instead, set DATABASE_URL_OVERRIDE_FOR_TESTS.
       - name: Test
         run: pytest
         env:
           SECRET_KEY: test-secret-key-for-ci
-          DATABASE_URL: sqlite:///./test.db

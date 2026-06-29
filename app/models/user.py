@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from enum import StrEnum
 
+from sqlalchemy import DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -18,4 +19,6 @@ class User(SQLModel, table=True):
     role: UserRole = Field(default=UserRole.participant)
     team: str | None = None
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
+    )

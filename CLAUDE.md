@@ -11,15 +11,21 @@ See [PLAN.md](PLAN.md) for the full architecture and build phases.
 
 API-first architecture.
 
-- **Backend**: Python >= 3.14, FastAPI, SQLModel, SQLite
+- **Backend**: Python >= 3.14, FastAPI (fully async), SQLModel + async SQLAlchemy, PostgreSQL (asyncpg)
 - **Frontend**: Jinja2 templates (served by FastAPI) + Tailwind CSS v4 (CLI-compiled) + AlpineJS
 - **Auth**: JWT tokens (python-jose) stored in httpOnly cookie + localStorage
 - **Real-time**: WebSockets (FastAPI native)
-- **Testing**: Pytest
+- **Testing**: Pytest (`pytest-asyncio`, `httpx`/`httpx-ws`, `testcontainers` Postgres)
 
 ## Key Architectural Decisions
 
-**Database**: SQLite for local development; PostgreSQL for containerized deployments. Engine creation in `database.py` is conditionalized — `connect_args={"check_same_thread": False}` is only passed for SQLite; Postgres gets `pool_pre_ping=True` instead. `create_all()` on startup handles both fresh SQLite and fresh Postgres schemas. No Alembic yet — schema changes to an existing production DB must be applied manually until Alembic is added.
+**Database (async, Postgres-only)**: PostgreSQL via the async `asyncpg` driver everywhere — dev, tests, and containers. `database.py` builds a single `create_async_engine` and exposes an `async def get_session()` yielding a SQLModel `AsyncSession` (`expire_on_commit=False`, so attributes stay populated after commit for response serialization). `make_async_url()` rewrites a plain `postgresql://` URL to `postgresql+asyncpg://`, so existing `DATABASE_URL` secrets in `docker-compose.yml`/`k8s` keep working unchanged. `create_db_and_tables()` runs `metadata.create_all` via `conn.run_sync` in the async lifespan. No Alembic yet — schema changes to an existing production DB must be applied manually until Alembic is added.
+
+**Everything that touches the DB is async**: services and router handlers are `async def` and `await session.exec(...)/get/commit/refresh/delete` (`session.add` stays sync). Background tasks that open their own session — `run_llm_pipeline` (`llm_service.py`), `_delayed_comm` (`communication_service.py`) — use `async with AsyncSession(engine)`. The `anthropic` client was already `AsyncAnthropic`.
+
+**Timezone-aware timestamps**: all `datetime` columns are declared with `Field(sa_type=DateTime(timezone=True))` so tz-aware UTC values (`datetime.now(UTC)`) map to Postgres `timestamptz`. Without this asyncpg rejects tz-aware values against a naive `TIMESTAMP` column.
+
+**Foreign-key cascades**: Postgres enforces foreign keys natively (no per-connection pragma needed). Models declare SQLModel `Relationship(...)` with `back_populates` plus `cascade_delete=True` on the parent and `ondelete="CASCADE"`/`"SET NULL"` on the child FK (forward references are quoted strings under `TYPE_CHECKING`, with `UP037`/`UP045` ignored for `app/models/*` in `pyproject.toml`). Deleting an `Exercise` cascades to its injects/responses/members/communications/comments/suggested-injects; deleting an `Inject` cascades responses/comments and nulls `Communication.triggered_by_inject_id` (the comms record is preserved). Deleting a `Scenario` that is still referenced by an exercise is **not** cascaded — the delete route returns `409 Conflict` (`scenarios.py`).
 
 **Password hashing**: Uses `bcrypt` directly (not `passlib`). `passlib[bcrypt]` is incompatible with Python 3.14 due to a `bcrypt.__about__` removal in bcrypt 4.x.
 
@@ -43,11 +49,11 @@ API-first architecture.
 
 **Login brute-force protection**: `app/services/rate_limit.py` is an in-memory sliding-window limiter keyed by `ip:email` (honouring `X-Forwarded-For`). After `LOGIN_MAX_ATTEMPTS` (default 5) failures within `LOGIN_LOCKOUT_SECONDS` (default 300) the login route returns `429` with `Retry-After`; a success resets the counter (#11). In-memory ⇒ single-process only (same constraint as `ws_manager`). Tests clear it via an autouse fixture.
 
-**Audit logging**: `app/services/audit_service.py` emits structured JSON audit events to the `deep_thought.audit` logger (always) and, when `AUDIT_PERSIST` is set, to the append-only `AuditEvent` table (#23). `emit()` never raises (logging must not break a request) and sanitises all free-text against log injection (CR/LF/control chars). `AuditContextMiddleware` populates per-request "where" fields (request id, source IP, method, path) via a `ContextVar`; pass `actor=user` so the **actual** identity is logged even under facilitator role-preview. Wired at: login success/failure/lockout, register, logout, password change, token-validation failures, `authz.denied` (role + exercise access), inject release/delete, exercise lifecycle, member enrol/remove/group-change, exports, CSRF blocks, app startup/shutdown, and unhandled 500s. Secrets and payload bodies are never logged. **Not yet covered** (P2 follow-up): SIEM shipping.
+**Audit logging**: `app/services/audit_service.py` emits structured JSON audit events to the `deep_thought.audit` logger (always) and, when `AUDIT_PERSIST` is set, to the append-only `AuditEvent` table (#23). `emit()` stays **synchronous** (it is called from many sync sites and must never raise); the DB write is now async, so `_persist()` schedules `_persist_async()` as a fire-and-forget task on the running event loop (references held in `_persist_tasks` to avoid GC; skipped if no loop is running — the JSON log line is the durable record). `emit()` sanitises all free-text against log injection (CR/LF/control chars). `AuditContextMiddleware` populates per-request "where" fields (request id, source IP, method, path) via a `ContextVar`; pass `actor=user` so the **actual** identity is logged even under facilitator role-preview. Wired at: login success/failure/lockout, register, logout, password change, token-validation failures, `authz.denied` (role + exercise access), inject release/delete, exercise lifecycle, member enrol/remove/group-change, exports, CSRF blocks, app startup/shutdown, and unhandled 500s. Secrets and payload bodies are never logged. **Not yet covered** (P2 follow-up): SIEM shipping.
 
 **Facilitator trust boundary (#12, open/P2)**: any `facilitator` is currently a global super-admin over every exercise/scenario/export — there is no per-resource ownership scoping. This is a known, documented trust boundary (single trusted facilitator team), deferred as a P2 follow-up; `Exercise.created_by` already exists to support ownership checks when implemented.
 
-**LLM integration**: Uses `anthropic>=0.40` (`AsyncAnthropic`). Prompt caching applied via the `anthropic-beta: prompt-caching-2024-07-31` header — scenario context + inject content is the cached prefix; participant response text is the non-cached suffix. `run_llm_pipeline` is a background async task (fired via `asyncio.create_task`) that opens its own Session from `engine` directly (same pattern as `_delayed_comm`). The `Exercise.llm_enabled` flag gates LLM calls per exercise. Set `ANTHROPIC_API_KEY` in `.env` to enable. All API calls are mocked in `tests/test_llm.py` — no real network requests.
+**LLM integration**: Uses `anthropic>=0.40` (`AsyncAnthropic`). Prompt caching applied via the `anthropic-beta: prompt-caching-2024-07-31` header — scenario context + inject content is the cached prefix; participant response text is the non-cached suffix. `run_llm_pipeline` is a background async task (fired via `asyncio.create_task`) that opens its own `AsyncSession(engine)` directly (same pattern as `_delayed_comm`). The `Exercise.llm_enabled` flag gates LLM calls per exercise. Set `ANTHROPIC_API_KEY` in `.env` to enable. All API calls are mocked in `tests/test_llm.py` — no real network requests.
 
 **Tailwind**: CDN during development (Phases 1–6); switched to CLI-compiled `static/css/output.css` in Phase 7. Rebuild after template changes: `tailwindcss -i static/css/input.css -o static/css/output.css`. Tailwind v4 auto-scans `app/templates/**/*.html` — no config file needed.
 
@@ -65,7 +71,7 @@ API-first architecture.
 
 **Sample scenarios**: `app/samples/` contains bundled JSON scenario definitions (`ransomware_response.json`, `vendor_outage.json`). `app/services/sample_service.py` lists, validates, and loads them. The settings page exposes a sample loader UI for facilitators.
 
-**Containerized deployment**: `Dockerfile` is a two-stage build — stage 1 compiles Tailwind CSS (`pytailwindcss`), stage 2 is the Python runtime. The compiled `static/` directory is also copied to `static_src/` in the image; this path is never overridden by a volume mount and is used by entrypoint scripts (Docker Compose) and init containers (k8s) to populate shared static volumes so nginx always serves the version matching the running image. `docker-compose.yml` runs `app` + `postgres:17` + `nginx:alpine` on a private bridge network with named volumes for DB data, uploads, and static files. `k8s/` contains namespace, secrets, configmap, postgres StatefulSet, app Deployment, and nginx Deployment manifests. **Replica constraint**: `ws_manager.py` is in-memory only — app must run as a single replica until Redis pub/sub is added. k8s manifests enforce `replicas: 1` and `strategy: Recreate`. Install the `postgres` optional dep group (`pip install -e ".[postgres]"`) to get `psycopg2-binary`; the Dockerfile uses this extra. A minimal `GET /api/health` endpoint (`app/routers/health.py`) is used by k8s liveness/readiness probes.
+**Containerized deployment**: `Dockerfile` is a two-stage build — stage 1 compiles Tailwind CSS (`pytailwindcss`), stage 2 is the Python runtime. The compiled `static/` directory is also copied to `static_src/` in the image; this path is never overridden by a volume mount and is used by entrypoint scripts (Docker Compose) and init containers (k8s) to populate shared static volumes so nginx always serves the version matching the running image. `docker-compose.yml` runs `app` + `postgres:17` + `nginx:alpine` on a private bridge network with named volumes for DB data, uploads, and static files. `k8s/` contains namespace, secrets, configmap, postgres StatefulSet, app Deployment, and nginx Deployment manifests. **Replica constraint**: `ws_manager.py` is in-memory only — app must run as a single replica until Redis pub/sub is added. k8s manifests enforce `replicas: 1` and `strategy: Recreate`. The async `asyncpg` driver is a core dependency (no separate extra; the `DATABASE_URL` may be a plain `postgresql://` URL — it is upgraded to `asyncpg` at runtime). A minimal `GET /api/health` endpoint (`app/routers/health.py`) is used by k8s liveness/readiness probes.
 
 ---
 
@@ -129,8 +135,9 @@ revised/             # Claude Design prototype (static reference, not served)
 | 14 — Containerized deployment (Docker Compose + Kubernetes + Postgres + nginx) | ✅ Complete |
 | 15 — Linear inject flows + team comment threads | ✅ Complete |
 | 16 — Security hardening (P0/P1: #8 reg roles, #9 secret validation, #10 cookie/CSRF, #11 login rate limit, #23 audit logging) | ✅ Complete |
+| 17 — Async migration (asyncpg/AsyncSession, Postgres-only, response models, FastAPI-skill alignment) | ✅ Complete |
 
-Current test count: **193 passing** (1 skipped).
+Current test count: **198 passing**.
 
 ---
 
@@ -149,7 +156,7 @@ Run tests: `pytest`
 ---
 
 ## Testing
-Write tests for critical functionality in Pytest. Use `TestClient` (synchronous) with in-memory SQLite. One test file per resource. Fixtures in `tests/conftest.py`.
+Write tests for critical functionality in Pytest (async — `asyncio_mode = "auto"`). One test file per resource; fixtures in `tests/conftest.py`. The suite runs against a real **Postgres** spun up by `testcontainers` (`postgres:17`) before the app is imported, so `app.database.engine` and the test session share the same DB; set `DATABASE_URL_OVERRIDE_FOR_TESTS` to point at an external Postgres instead. Tests use `httpx.AsyncClient` (+ `httpx-ws` `aconnect_ws` for WebSockets) over `ASGIWebSocketTransport`, not Starlette's `TestClient`. Per-test isolation is transaction-rollback (`AsyncSession` joined to an outer transaction with `join_transaction_mode="create_savepoint"`); the `client` is session-scoped (one cookie jar — the autouse `_override_session` fixture clears cookies and wires the per-test session). The engine uses `NullPool` and tests run on one session-scoped event loop.
 
 ## Maintenance
 Keep README.md, CLAUDE.md, and PLAN.md up to date. Update the Build Status table above when phases complete. Record any significant dependency or architectural decisions here.

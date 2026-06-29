@@ -22,10 +22,10 @@ WORKDIR /app
 RUN addgroup --system --gid 1000 appgroup && \
     adduser --system --uid 1000 --gid 1000 --no-create-home appuser
 
-# Install Python dependencies (postgres extra provides psycopg2-binary)
+# Install Python dependencies (asyncpg is a core dependency)
 COPY pyproject.toml .
 COPY app/__init__.py app/__init__.py
-RUN pip install --no-cache-dir -e ".[postgres]"
+RUN pip install --no-cache-dir -e .
 
 # Copy application source
 COPY app/ app/

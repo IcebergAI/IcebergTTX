@@ -45,7 +45,7 @@ logger = logging.getLogger("deep_thought")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_settings()
-    create_db_and_tables()
+    await create_db_and_tables()
     audit_service.emit("app.startup", severity="info")
     task = asyncio.create_task(heartbeat_task())
     yield

@@ -10,6 +10,7 @@ bodies to ``emit`` — only identifiers and metadata. All free-text values are
 sanitised against log injection (CR/LF/control chars stripped).
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -18,6 +19,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.config import settings
+
+# Hold references to in-flight persist tasks so they are not garbage-collected
+# before completing (best-effort, fire-and-forget).
+_persist_tasks: set[asyncio.Task] = set()
 
 audit_logger = logging.getLogger("deep_thought.audit")
 
@@ -113,10 +118,14 @@ def emit(
 
 
 def _persist(event: dict[str, Any]) -> None:
-    try:
-        from sqlmodel import Session
+    """Schedule a best-effort async write of the audit row.
 
-        from app.database import engine
+    ``emit`` is synchronous and called from many sync call sites, so the DB write
+    (now async) is fired-and-forgotten on the running event loop. If no loop is
+    running (e.g. a sync script), the write is skipped — the JSON log line is the
+    durable record per the OWASP guidance.
+    """
+    try:
         from app.models.audit import AuditEvent
 
         row = AuditEvent(
@@ -135,8 +144,25 @@ def _persist(event: dict[str, Any]) -> None:
             severity=event.get("severity") or "info",
             security_relevant=bool(event.get("security_relevant", True)),
         )
-        with Session(engine) as session:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # no running loop; JSON log line already emitted
+    except Exception:  # nosec B110 # pragma: no cover - persistence is best-effort
+        return
+
+    task = loop.create_task(_persist_async(row))
+    _persist_tasks.add(task)
+    task.add_done_callback(_persist_tasks.discard)
+
+
+async def _persist_async(row: Any) -> None:
+    try:
+        from sqlmodel.ext.asyncio.session import AsyncSession
+
+        from app.database import engine
+
+        async with AsyncSession(engine) as session:
             session.add(row)
-            session.commit()
+            await session.commit()
     except Exception:  # nosec B110 # pragma: no cover - persistence is best-effort
         pass

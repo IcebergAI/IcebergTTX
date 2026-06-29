@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise, ExerciseState
 from app.models.inject import Inject
@@ -44,39 +45,41 @@ def sample_summary(sample_id: str, definition: ScenarioDefinition) -> dict:
     }
 
 
-def load_sample_scenario(
-    session: Session, *, sample_id: str, created_by: int
+async def load_sample_scenario(
+    session: AsyncSession, *, sample_id: str, created_by: int
 ) -> tuple[Scenario, bool]:
     definition = get_sample_definition(sample_id)
     if definition is None:
         raise FileNotFoundError(sample_id)
 
     definition_json = definition.model_dump_json()
-    existing = session.exec(
-        select(Scenario).where(Scenario.definition == definition_json)
+    existing = (
+        await session.exec(select(Scenario).where(Scenario.definition == definition_json))
     ).first()
     if existing:
         return existing, False
-    return create_scenario(session, definition=definition, created_by=created_by), True
+    return await create_scenario(session, definition=definition, created_by=created_by), True
 
 
 async def create_sample_demo_exercise(
-    session: Session, *, sample_id: str, created_by: int
+    session: AsyncSession, *, sample_id: str, created_by: int
 ) -> tuple[Scenario, Exercise]:
-    scenario, _ = load_sample_scenario(session, sample_id=sample_id, created_by=created_by)
+    scenario, _ = await load_sample_scenario(session, sample_id=sample_id, created_by=created_by)
     assert scenario.id is not None
-    exercise = create_exercise(
+    exercise = await create_exercise(
         session,
         scenario_id=scenario.id,
         title=f"Demo: {scenario.title}",
         created_by=created_by,
     )
-    enrol_member(session, exercise=exercise, user_id=created_by)
-    exercise = transition_state(session, exercise, ExerciseState.active)
-    start_inject = session.exec(
-        select(Inject)
-        .where(Inject.exercise_id == exercise.id)
-        .where(Inject.scenario_node_id == exercise.current_node_id)
+    await enrol_member(session, exercise=exercise, user_id=created_by)
+    exercise = await transition_state(session, exercise, ExerciseState.active)
+    start_inject = (
+        await session.exec(
+            select(Inject)
+            .where(Inject.exercise_id == exercise.id)
+            .where(Inject.scenario_node_id == exercise.current_node_id)
+        )
     ).first()
     if start_inject:
         await release_inject(session, start_inject, released_by=created_by)
