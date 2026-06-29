@@ -1,7 +1,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
 from app.database import get_session
@@ -33,8 +34,8 @@ def _set_session_cookie(response: Response, token: str) -> None:
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(body: RegisterRequest, session: Annotated[Session, Depends(get_session)]):
-    if session.exec(select(User).where(User.email == body.email)).first():
+async def register(body: RegisterRequest, session: Annotated[AsyncSession, Depends(get_session)]):
+    if (await session.exec(select(User).where(User.email == body.email))).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
     # Role is never taken from the request — self-registration is always a
@@ -47,8 +48,8 @@ def register(body: RegisterRequest, session: Annotated[Session, Depends(get_sess
         team=body.team,
     )
     session.add(user)
-    session.commit()
-    session.refresh(user)
+    await session.commit()
+    await session.refresh(user)
     audit_service.emit(
         "auth.register",
         actor_id=user.id,
@@ -61,11 +62,11 @@ def register(body: RegisterRequest, session: Annotated[Session, Depends(get_sess
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(
+async def login(
     body: LoginRequest,
     request: Request,
     response: Response,
-    session: Annotated[Session, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ):
     ip = client_ip(request) or "unknown"
     rate_key = f"{ip}:{body.email}"
@@ -84,7 +85,7 @@ def login(
             headers={"Retry-After": str(retry_after)},
         )
 
-    user = session.exec(select(User).where(User.email == body.email)).first()
+    user = (await session.exec(select(User).where(User.email == body.email))).first()
     if not user or not verify_password(body.password, user.hashed_password):
         login_rate_limiter.record_failure(rate_key)
         audit_service.emit(
@@ -132,19 +133,20 @@ def get_me(current_user: Annotated[User, Depends(get_current_user)]):
 
 
 @router.put("/me", response_model=UserResponse)
-def update_me(
+async def update_me(
     body: UpdateMeRequest,
     current_user: Annotated[User, Depends(get_current_actual_user)],
-    session: Annotated[Session, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ):
-    if body.display_name is not None:
-        current_user.display_name = body.display_name
-    if body.password is not None:
-        current_user.hashed_password = hash_password(body.password)
+    update_data = body.model_dump(exclude_unset=True)
+    new_password = update_data.pop("password", None)
+    if new_password is not None:
+        current_user.hashed_password = hash_password(new_password)
+    current_user.sqlmodel_update(update_data)
     session.add(current_user)
-    session.commit()
-    session.refresh(current_user)
-    if body.password is not None:
+    await session.commit()
+    await session.refresh(current_user)
+    if new_password is not None:
         audit_service.emit(
             "auth.password_change",
             actor=current_user,

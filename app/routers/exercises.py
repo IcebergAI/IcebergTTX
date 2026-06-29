@@ -5,7 +5,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.dependencies import get_current_user, require_role
@@ -15,6 +16,7 @@ from app.models.inject_comment import InjectComment
 from app.models.response import Response
 from app.models.scenario import Scenario
 from app.models.user import User, UserRole
+from app.schemas.api import ExercisePublic, MemberPublic
 from app.services import audit_service
 from app.services.access_control import (
     get_exercise_or_404,
@@ -34,7 +36,7 @@ router = APIRouter(prefix="/exercises", tags=["exercises"])
 
 FacilitatorDep = Annotated[User, Depends(require_role(UserRole.facilitator))]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
-SessionDep = Annotated[Session, Depends(get_session)]
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 # ── Request schemas ───────────────────────────────────────────────────────────
@@ -86,24 +88,24 @@ def _member_out(m: ExerciseMember) -> dict:
     }
 
 
-def _get_or_404(session: Session, exercise_id: int) -> Exercise:
-    return get_exercise_or_404(session, exercise_id)
+async def _get_or_404(session: AsyncSession, exercise_id: int) -> Exercise:
+    return await get_exercise_or_404(session, exercise_id)
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
-@router.get("")
-def list_exercises(current_user: CurrentUserDep, session: SessionDep):
+@router.get("", response_model=list[ExercisePublic])
+async def list_exercises(current_user: CurrentUserDep, session: SessionDep):
     q = select(Exercise)
     if current_user.role != UserRole.facilitator and not is_actual_facilitator(current_user):
         q = q.join(ExerciseMember).where(ExerciseMember.user_id == current_user.id)
-    return [_exercise_out(ex) for ex in session.exec(q).all()]
+    return [_exercise_out(ex) for ex in (await session.exec(q)).all()]
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
-def create(body: CreateExerciseRequest, current_user: FacilitatorDep, session: SessionDep):
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=ExercisePublic)
+async def create(body: CreateExerciseRequest, current_user: FacilitatorDep, session: SessionDep):
     assert current_user.id is not None
-    ex = create_exercise(
+    ex = await create_exercise(
         session,
         scenario_id=body.scenario_id,
         title=body.title,
@@ -113,46 +115,43 @@ def create(body: CreateExerciseRequest, current_user: FacilitatorDep, session: S
     return _exercise_out(ex)
 
 
-@router.get("/{exercise_id}")
-def get_exercise(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
-    return _exercise_out(require_exercise_access(session, exercise_id, current_user))
+@router.get("/{exercise_id}", response_model=ExercisePublic)
+async def get_exercise(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
+    return _exercise_out(await require_exercise_access(session, exercise_id, current_user))
 
 
 @router.get("/{exercise_id}/teams")
-def list_exercise_teams(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
-    exercise = require_exercise_access(session, exercise_id, current_user)
-    scenario = session.get(Scenario, exercise.scenario_id)
+async def list_exercise_teams(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
+    exercise = await require_exercise_access(session, exercise_id, current_user)
+    scenario = await session.get(Scenario, exercise.scenario_id)
     if not scenario:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found")
     definition = export_definition(scenario)
     return [team.model_dump() for team in definition.participant_teams]
 
 
-@router.put("/{exercise_id}")
-def update_exercise(
+@router.put("/{exercise_id}", response_model=ExercisePublic)
+async def update_exercise(
     exercise_id: int, body: UpdateExerciseRequest, _: FacilitatorDep, session: SessionDep
 ):
-    ex = _get_or_404(session, exercise_id)
-    if body.title is not None:
-        ex.title = body.title
-    if body.llm_enabled is not None:
-        ex.llm_enabled = body.llm_enabled
+    ex = await _get_or_404(session, exercise_id)
+    ex.sqlmodel_update(body.model_dump(exclude_unset=True))
     session.add(ex)
-    session.commit()
-    session.refresh(ex)
+    await session.commit()
+    await session.refresh(ex)
     return _exercise_out(ex)
 
 
 @router.delete("/{exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_exercise(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
-    ex = _get_or_404(session, exercise_id)
+async def delete_exercise(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    ex = await _get_or_404(session, exercise_id)
     if ex.state != ExerciseState.draft:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only draft exercises can be deleted",
         )
-    session.delete(ex)
-    session.commit()
+    await session.delete(ex)
+    await session.commit()
     audit_service.emit(
         "exercise.delete",
         actor=current_user,
@@ -164,56 +163,68 @@ def delete_exercise(exercise_id: int, current_user: FacilitatorDep, session: Ses
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
-def _transition(
-    exercise_id: int, current_user: User, session: Session, target: ExerciseState, action: str
+async def _transition(
+    exercise_id: int, current_user: User, session: AsyncSession, target: ExerciseState, action: str
 ) -> dict:
-    ex = _get_or_404(session, exercise_id)
-    result = transition_state(session, ex, target)
+    ex = await _get_or_404(session, exercise_id)
+    result = await transition_state(session, ex, target)
     audit_service.emit(
         action, actor=current_user, target_type="exercise", target_id=exercise_id
     )
     return _exercise_out(result)
 
 
-@router.post("/{exercise_id}/start")
-def start(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
-    return _transition(exercise_id, current_user, session, ExerciseState.active, "exercise.start")
+@router.post("/{exercise_id}/start", response_model=ExercisePublic)
+async def start(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    return await _transition(
+        exercise_id, current_user, session, ExerciseState.active, "exercise.start"
+    )
 
 
-@router.post("/{exercise_id}/pause")
-def pause(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
-    return _transition(exercise_id, current_user, session, ExerciseState.paused, "exercise.pause")
+@router.post("/{exercise_id}/pause", response_model=ExercisePublic)
+async def pause(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    return await _transition(
+        exercise_id, current_user, session, ExerciseState.paused, "exercise.pause"
+    )
 
 
-@router.post("/{exercise_id}/resume")
-def resume(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
-    return _transition(exercise_id, current_user, session, ExerciseState.active, "exercise.resume")
+@router.post("/{exercise_id}/resume", response_model=ExercisePublic)
+async def resume(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    return await _transition(
+        exercise_id, current_user, session, ExerciseState.active, "exercise.resume"
+    )
 
 
-@router.post("/{exercise_id}/complete")
-def complete(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
-    return _transition(
+@router.post("/{exercise_id}/complete", response_model=ExercisePublic)
+async def complete(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    return await _transition(
         exercise_id, current_user, session, ExerciseState.completed, "exercise.complete"
     )
 
 
 # ── Members ───────────────────────────────────────────────────────────────────
 
-@router.get("/{exercise_id}/members")
-def list_members(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
-    require_exercise_access(session, exercise_id, current_user)
-    members = session.exec(
-        select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id)
+@router.get("/{exercise_id}/members", response_model=list[MemberPublic])
+async def list_members(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
+    await require_exercise_access(session, exercise_id, current_user)
+    members = (
+        await session.exec(
+            select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id)
+        )
     ).all()
     return [_member_out(m) for m in members]
 
 
-@router.post("/{exercise_id}/members", status_code=status.HTTP_201_CREATED)
-def add_member(
+@router.post(
+    "/{exercise_id}/members",
+    status_code=status.HTTP_201_CREATED,
+    response_model=MemberPublic,
+)
+async def add_member(
     exercise_id: int, body: EnrolMemberRequest, current_user: FacilitatorDep, session: SessionDep
 ):
-    ex = _get_or_404(session, exercise_id)
-    member = enrol_member(session, exercise=ex, user_id=body.user_id, group_id=body.group_id)
+    ex = await _get_or_404(session, exercise_id)
+    member = await enrol_member(session, exercise=ex, user_id=body.user_id, group_id=body.group_id)
     audit_service.emit(
         "member.enrol",
         actor=current_user,
@@ -224,16 +235,18 @@ def add_member(
     return _member_out(member)
 
 
-@router.patch("/{exercise_id}/members/{user_id}")
-def patch_member(
+@router.patch("/{exercise_id}/members/{user_id}", response_model=MemberPublic)
+async def patch_member(
     exercise_id: int,
     user_id: int,
     body: UpdateMemberRequest,
     current_user: FacilitatorDep,
     session: SessionDep,
 ):
-    ex = _get_or_404(session, exercise_id)
-    member = update_member_group(session, exercise=ex, user_id=user_id, group_id=body.group_id)
+    ex = await _get_or_404(session, exercise_id)
+    member = await update_member_group(
+        session, exercise=ex, user_id=user_id, group_id=body.group_id
+    )
     audit_service.emit(
         "member.group_change",
         actor=current_user,
@@ -245,11 +258,11 @@ def patch_member(
 
 
 @router.delete("/{exercise_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_member(
+async def delete_member(
     exercise_id: int, user_id: int, current_user: FacilitatorDep, session: SessionDep
 ):
-    ex = _get_or_404(session, exercise_id)
-    remove_member(session, exercise=ex, user_id=user_id)
+    ex = await _get_or_404(session, exercise_id)
+    await remove_member(session, exercise=ex, user_id=user_id)
     audit_service.emit(
         "member.remove",
         actor=current_user,
@@ -262,19 +275,19 @@ def delete_member(
 
 # ── Export ────────────────────────────────────────────────────────────────────
 
-def _build_export(session: Session, exercise_id: int) -> dict:
-    ex = _get_or_404(session, exercise_id)
-    injects = session.exec(
-        select(Inject).where(Inject.exercise_id == exercise_id)
+async def _build_export(session: AsyncSession, exercise_id: int) -> dict:
+    ex = await _get_or_404(session, exercise_id)
+    injects = (
+        await session.exec(select(Inject).where(Inject.exercise_id == exercise_id))
     ).all()
-    responses = session.exec(
-        select(Response).where(Response.exercise_id == exercise_id)
+    responses = (
+        await session.exec(select(Response).where(Response.exercise_id == exercise_id))
     ).all()
-    comments = session.exec(
-        select(InjectComment).where(InjectComment.exercise_id == exercise_id)
+    comments = (
+        await session.exec(select(InjectComment).where(InjectComment.exercise_id == exercise_id))
     ).all()
-    members = session.exec(
-        select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id)
+    members = (
+        await session.exec(select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id))
     ).all()
     return {
         "exercise": _exercise_out(ex),
@@ -317,8 +330,8 @@ def _build_export(session: Session, exercise_id: int) -> dict:
 
 
 @router.get("/{exercise_id}/export")
-def export_json(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
-    data = _build_export(session, exercise_id)
+async def export_json(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    data = await _build_export(session, exercise_id)
     audit_service.emit(
         "exercise.export",
         actor=current_user,
@@ -334,8 +347,8 @@ def export_json(exercise_id: int, current_user: FacilitatorDep, session: Session
 
 
 @router.get("/{exercise_id}/export.csv")
-def export_csv(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
-    data = _build_export(session, exercise_id)
+async def export_csv(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    data = await _build_export(session, exercise_id)
     audit_service.emit(
         "exercise.export",
         actor=current_user,

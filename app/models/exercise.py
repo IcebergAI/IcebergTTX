@@ -1,7 +1,17 @@
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING, Optional
 
-from sqlmodel import Field, SQLModel
+from sqlalchemy import DateTime
+from sqlmodel import Field, Relationship, SQLModel
+
+if TYPE_CHECKING:
+    from app.models.communication import Communication
+    from app.models.inject import Inject
+    from app.models.inject_comment import InjectComment
+    from app.models.response import Response
+    from app.models.scenario import Scenario
+    from app.models.suggested_inject import SuggestedInject
 
 
 class ExerciseState(StrEnum):
@@ -27,15 +37,37 @@ class Exercise(SQLModel, table=True):
     state: ExerciseState = Field(default=ExerciseState.draft)
     current_node_id: str | None = None  # tracks active inject in the scenario tree
     llm_enabled: bool = Field(default=False)
-    started_at: datetime | None = None
-    ended_at: datetime | None = None
+    started_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    ended_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     created_by: int = Field(foreign_key="user.id")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
+    )
+
+    scenario: Optional["Scenario"] = Relationship(back_populates="exercises")
+    injects: list["Inject"] = Relationship(back_populates="exercise", cascade_delete=True)
+    responses: list["Response"] = Relationship(back_populates="exercise", cascade_delete=True)
+    members: list["ExerciseMember"] = Relationship(
+        back_populates="exercise", cascade_delete=True
+    )
+    communications: list["Communication"] = Relationship(
+        back_populates="exercise", cascade_delete=True
+    )
+    inject_comments: list["InjectComment"] = Relationship(
+        back_populates="exercise", cascade_delete=True
+    )
+    suggested_injects: list["SuggestedInject"] = Relationship(
+        back_populates="exercise", cascade_delete=True
+    )
 
 
 class ExerciseMember(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    exercise_id: int = Field(foreign_key="exercise.id")
+    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
     user_id: int = Field(foreign_key="user.id")
     group_id: str | None = None
-    joined_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    joined_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
+    )
+
+    exercise: Optional["Exercise"] = Relationship(back_populates="members")

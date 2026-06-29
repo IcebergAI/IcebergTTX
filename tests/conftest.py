@@ -1,20 +1,51 @@
+import atexit
 import os
 
 # Must be set before app.config.Settings is instantiated at import time.
 os.environ.setdefault("DEV_MODE", "true")  # relax SECRET_KEY/cookie checks (#9, #10)
 os.environ.setdefault("AUDIT_PERSIST", "false")  # don't write audit rows to the dev DB (#23)
 
-import pytest
-from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
+# Spin up a real Postgres before importing the app so that the module-level
+# async engine (app.database.engine, bound at import from DATABASE_URL) and the
+# test session both target the same database. The container is reused for the
+# whole test session and stopped at exit.
+from testcontainers.postgres import PostgresContainer  # noqa: E402
 
-from app.database import get_session
-from app.main import app
-from app.models.scenario import Scenario
-from app.models.user import User, UserRole
-from app.schemas.scenario_json import InjectNode, InjectOption, ScenarioDefinition
-from app.services.auth_service import create_access_token, hash_password
+_POSTGRES = PostgresContainer("postgres:17", driver="asyncpg")
+if not os.environ.get("DATABASE_URL_OVERRIDE_FOR_TESTS"):
+    _POSTGRES.start()
+    atexit.register(_POSTGRES.stop)
+    os.environ["DATABASE_URL"] = _POSTGRES.get_connection_url()
+else:
+    os.environ["DATABASE_URL"] = os.environ["DATABASE_URL_OVERRIDE_FOR_TESTS"]
+
+import asyncio  # noqa: E402
+
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from httpx import AsyncClient  # noqa: E402
+from httpx_ws.transport import ASGIWebSocketTransport  # noqa: E402
+from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
+from sqlalchemy.pool import NullPool  # noqa: E402
+from sqlmodel import SQLModel  # noqa: E402
+from sqlmodel.ext.asyncio.session import AsyncSession  # noqa: E402
+
+import app.database as app_database  # noqa: E402
+import app.services.llm_service as llm_service  # noqa: E402
+from app.database import get_session  # noqa: E402
+from app.main import app  # noqa: E402
+
+# Each test runs on its own event loop (function scope), so the engine must not
+# pool connections across loops — NullPool opens a fresh asyncpg connection per
+# checkout, bound to the current loop. Patch the module-level engine the app and
+# its background tasks use so they target the test database too.
+engine = create_async_engine(os.environ["DATABASE_URL"], poolclass=NullPool)
+app_database.engine = engine
+llm_service.engine = engine
+from app.models.scenario import Scenario  # noqa: E402
+from app.models.user import User, UserRole  # noqa: E402
+from app.schemas.scenario_json import InjectNode, InjectOption, ScenarioDefinition  # noqa: E402
+from app.services.auth_service import create_access_token, hash_password  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -51,32 +82,74 @@ def _reset_login_rate_limiter():
     login_rate_limiter.clear()
 
 
-@pytest.fixture(name="session")
-def session_fixture():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
-        yield session
-    SQLModel.metadata.drop_all(engine)
+@pytest.fixture(scope="session", autouse=True)
+def _create_schema():
+    async def _create():
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+    asyncio.run(_create())
+    yield
 
 
-@pytest.fixture(name="client")
-def client_fixture(session: Session):
-    def override_get_session():
+@pytest_asyncio.fixture(name="session")
+async def session_fixture():
+    """A transaction-scoped async session, rolled back after each test.
+
+    The session joins an outer transaction on a dedicated connection and uses
+    SAVEPOINTs (``join_transaction_mode="create_savepoint"``) so that the
+    application code's own ``commit()`` calls do not leak between tests.
+    """
+    async with engine.connect() as connection:
+        trans = await connection.begin()
+        async_session = AsyncSession(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        )
+        try:
+            yield async_session
+        finally:
+            await async_session.close()
+            await trans.rollback()
+
+
+@pytest_asyncio.fixture(name="client", scope="session")
+async def client_fixture():
+    """A single websocket-capable client for the whole session.
+
+    Opened once on the session loop. The per-test DB session is wired in via the
+    autouse ``_override_session`` fixture below, not here. pytest-asyncio runs
+    this session fixture's setup and teardown in different tasks, so closing the
+    ASGIWebSocketTransport portal raises anyio's "cancel scope in a different
+    task" error — harmless at end-of-session, so it is swallowed.
+    """
+    transport = ASGIWebSocketTransport(app=app)
+    client = AsyncClient(transport=transport, base_url="http://testserver")
+    await client.__aenter__()
+    yield client
+    try:
+        await client.__aexit__(None, None, None)
+    except RuntimeError:
+        pass
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _override_session(session: AsyncSession, client: AsyncClient):
+    # The client is session-scoped (one cookie jar); reset it so auth/role-preview
+    # cookies don't leak between tests.
+    client.cookies.clear()
+
+    async def override_get_session():
         yield session
 
     app.dependency_overrides[get_session] = override_get_session
-    with TestClient(app, raise_server_exceptions=True) as client:
-        yield client
-    app.dependency_overrides.clear()
+    yield
+    client.cookies.clear()
+    app.dependency_overrides.pop(get_session, None)
 
 
-@pytest.fixture(name="facilitator")
-def facilitator_fixture(session: Session) -> User:
+@pytest_asyncio.fixture(name="facilitator")
+async def facilitator_fixture(session: AsyncSession) -> User:
     user = User(
         email="facilitator@example.com",
         display_name="Facilitator",
@@ -84,13 +157,13 @@ def facilitator_fixture(session: Session) -> User:
         role=UserRole.facilitator,
     )
     session.add(user)
-    session.commit()
-    session.refresh(user)
+    await session.commit()
+    await session.refresh(user)
     return user
 
 
-@pytest.fixture(name="participant")
-def participant_fixture(session: Session) -> User:
+@pytest_asyncio.fixture(name="participant")
+async def participant_fixture(session: AsyncSession) -> User:
     user = User(
         email="participant@example.com",
         display_name="Participant",
@@ -99,8 +172,8 @@ def participant_fixture(session: Session) -> User:
         team="it_ops",
     )
     session.add(user)
-    session.commit()
-    session.refresh(user)
+    await session.commit()
+    await session.refresh(user)
     return user
 
 
@@ -148,20 +221,24 @@ def sample_definition_fixture() -> ScenarioDefinition:
     )
 
 
-@pytest.fixture(name="sample_scenario")
-def sample_scenario_fixture(
-    session: Session, facilitator: User, sample_definition: ScenarioDefinition
+@pytest_asyncio.fixture(name="sample_scenario")
+async def sample_scenario_fixture(
+    session: AsyncSession, facilitator: User, sample_definition: ScenarioDefinition
 ) -> Scenario:
     from app.services.scenario_service import create_scenario
 
-    return create_scenario(session, definition=sample_definition, created_by=facilitator.id)
+    return await create_scenario(
+        session, definition=sample_definition, created_by=facilitator.id
+    )
 
 
-@pytest.fixture(name="draft_exercise")
-def draft_exercise_fixture(session: Session, facilitator: User, sample_scenario: Scenario):
+@pytest_asyncio.fixture(name="draft_exercise")
+async def draft_exercise_fixture(
+    session: AsyncSession, facilitator: User, sample_scenario: Scenario
+):
     from app.services.exercise_service import create_exercise
 
-    return create_exercise(
+    return await create_exercise(
         session,
         scenario_id=sample_scenario.id,
         title="Test Exercise",
@@ -169,18 +246,18 @@ def draft_exercise_fixture(session: Session, facilitator: User, sample_scenario:
     )
 
 
-@pytest.fixture(name="active_exercise")
-def active_exercise_fixture(
-    session: Session, facilitator: User, participant: User, sample_scenario: Scenario
+@pytest_asyncio.fixture(name="active_exercise")
+async def active_exercise_fixture(
+    session: AsyncSession, facilitator: User, participant: User, sample_scenario: Scenario
 ):
     from app.models.exercise import ExerciseState
     from app.services.exercise_service import create_exercise, enrol_member, transition_state
 
-    ex = create_exercise(
+    ex = await create_exercise(
         session,
         scenario_id=sample_scenario.id,
         title="Active Exercise",
         created_by=facilitator.id,
     )
-    enrol_member(session, exercise=ex, user_id=participant.id)
-    return transition_state(session, ex, ExerciseState.active)
+    await enrol_member(session, exercise=ex, user_id=participant.id)
+    return await transition_state(session, ex, ExerciseState.active)

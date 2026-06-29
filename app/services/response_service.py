@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.inject import Inject, InjectState
 from app.models.response import Response
@@ -8,8 +9,8 @@ from app.models.scenario import Scenario
 from app.services.scenario_service import export_definition, get_next_inject_ids, resolve_branch
 
 
-def submit_response(
-    session: Session,
+async def submit_response(
+    session: AsyncSession,
     *,
     inject_id: int,
     exercise_id: int,
@@ -32,30 +33,30 @@ def submit_response(
         selected_option=selected_option,
     )
     session.add(response)
-    session.commit()
-    session.refresh(response)
+    await session.commit()
+    await session.refresh(response)
 
-    next_ids = _compute_next_inject_ids(session, exercise_id, inject_id, selected_option)
-    return response, _pending_next_injects(session, exercise_id, next_ids, group_id)
+    next_ids = await _compute_next_inject_ids(session, exercise_id, inject_id, selected_option)
+    return response, await _pending_next_injects(session, exercise_id, next_ids, group_id)
 
 
-def _compute_next_inject_ids(
-    session: Session,
+async def _compute_next_inject_ids(
+    session: AsyncSession,
     exercise_id: int,
     inject_id: int,
     selected_option: str | None,
 ) -> list[str]:
     from app.models.exercise import Exercise
 
-    exercise = session.get(Exercise, exercise_id)
+    exercise = await session.get(Exercise, exercise_id)
     if not exercise or not exercise.scenario_id:
         return []
 
-    scenario = session.get(Scenario, exercise.scenario_id)
+    scenario = await session.get(Scenario, exercise.scenario_id)
     if not scenario:
         return []
 
-    inject = session.get(Inject, inject_id)
+    inject = await session.get(Inject, inject_id)
     if not inject or not inject.scenario_node_id:
         return []
 
@@ -68,28 +69,30 @@ def _compute_next_inject_ids(
     return get_next_inject_ids(definition, inject.scenario_node_id)
 
 
-def response_next_inject_suggestions(session: Session, response: Response) -> list[dict]:
-    next_ids = _compute_next_inject_ids(
+async def response_next_inject_suggestions(session: AsyncSession, response: Response) -> list[dict]:
+    next_ids = await _compute_next_inject_ids(
         session,
         response.exercise_id,
         response.inject_id,
         response.selected_option,
     )
-    return _pending_next_injects(session, response.exercise_id, next_ids, response.group_id)
+    return await _pending_next_injects(session, response.exercise_id, next_ids, response.group_id)
 
 
-def _pending_next_injects(
-    session: Session,
+async def _pending_next_injects(
+    session: AsyncSession,
     exercise_id: int,
     scenario_node_ids: list[str],
     group_id: str | None,
 ) -> list[dict]:
     if not scenario_node_ids:
         return []
-    injects = session.exec(
-        select(Inject)
-        .where(Inject.exercise_id == exercise_id)
-        .where(Inject.state == InjectState.pending)
+    injects = (
+        await session.exec(
+            select(Inject)
+            .where(Inject.exercise_id == exercise_id)
+            .where(Inject.state == InjectState.pending)
+        )
     ).all()
     ordered_ids = {node_id: i for i, node_id in enumerate(scenario_node_ids)}
     matches = [

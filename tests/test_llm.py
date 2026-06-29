@@ -6,29 +6,29 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlmodel import Session
+from httpx import AsyncClient
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
 from app.models.user import User
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _first_released_inject_id(client: TestClient, token: str, exercise_id: int) -> int:
-    injects = client.get(
+async def _first_released_inject_id(client: AsyncClient, token: str, exercise_id: int) -> int:
+    injects = (await client.get(
         f"/api/exercises/{exercise_id}/injects",
         headers={"Authorization": f"Bearer {token}"},
-    ).json()
+    )).json()
     pending = next(i for i in injects if i["state"] == "pending")
-    released = client.post(
+    released = (await client.post(
         f"/api/exercises/{exercise_id}/injects/{pending['id']}/release",
         headers={"Authorization": f"Bearer {token}"},
-    ).json()
+    )).json()
     return released["id"]
 
 
-def _submit(client, token, exercise_id, inject_id, content="We isolated the systems."):
-    return client.post(
+async def _submit(client, token, exercise_id, inject_id, content="We isolated the systems."):
+    return await client.post(
         f"/api/exercises/{exercise_id}/responses",
         json={"inject_id": inject_id, "content": content},
         headers={"Authorization": f"Bearer {token}"},
@@ -64,7 +64,7 @@ def _suggestion_json():
 
 @pytest.mark.asyncio
 async def test_assess_response_stores_assessment(
-    session: Session, facilitator: User, sample_scenario, active_exercise: Exercise
+    session: AsyncSession, facilitator: User, sample_scenario, active_exercise: Exercise
 ):
     from app.models.inject import Inject, InjectState
     from app.models.response import Response
@@ -81,8 +81,8 @@ async def test_assess_response_stores_assessment(
         state=InjectState.released,
     )
     session.add(inject)
-    session.commit()
-    session.refresh(inject)
+    await session.commit()
+    await session.refresh(inject)
 
     response = Response(
         inject_id=inject.id,
@@ -91,10 +91,10 @@ async def test_assess_response_stores_assessment(
         content="We isolated immediately.",
     )
     session.add(response)
-    session.commit()
-    session.refresh(response)
+    await session.commit()
+    await session.refresh(response)
 
-    scenario = session.get(Scenario, active_exercise.scenario_id)
+    scenario = (await session.get(Scenario, active_exercise.scenario_id))
     definition = export_definition(scenario)
 
     with patch(
@@ -113,13 +113,13 @@ async def test_assess_response_stores_assessment(
     assert assessment.assessment_text == "Good decision — isolating quickly limits blast radius."
     assert assessment.recommended_branch_option_id == "opt_a"
 
-    session.refresh(response)
+    await session.refresh(response)
     assert response.assessment_id == assessment.id
 
 
 @pytest.mark.asyncio
 async def test_suggest_inject_stores_suggestion(
-    session: Session, facilitator: User, sample_scenario, active_exercise: Exercise
+    session: AsyncSession, facilitator: User, sample_scenario, active_exercise: Exercise
 ):
     from app.models.inject import Inject, InjectState
     from app.models.response import Response
@@ -136,8 +136,8 @@ async def test_suggest_inject_stores_suggestion(
         state=InjectState.released,
     )
     session.add(inject)
-    session.commit()
-    session.refresh(inject)
+    await session.commit()
+    await session.refresh(inject)
 
     response = Response(
         inject_id=inject.id,
@@ -146,10 +146,10 @@ async def test_suggest_inject_stores_suggestion(
         content="We isolated immediately.",
     )
     session.add(response)
-    session.commit()
-    session.refresh(response)
+    await session.commit()
+    await session.refresh(response)
 
-    scenario = session.get(Scenario, active_exercise.scenario_id)
+    scenario = (await session.get(Scenario, active_exercise.scenario_id))
     definition = export_definition(scenario)
 
     with patch(
@@ -170,7 +170,7 @@ async def test_suggest_inject_stores_suggestion(
 
 @pytest.mark.asyncio
 async def test_assess_response_handles_invalid_json(
-    session: Session, facilitator: User, sample_scenario, active_exercise: Exercise
+    session: AsyncSession, facilitator: User, sample_scenario, active_exercise: Exercise
 ):
     """When the LLM returns non-JSON, assessment_text is the raw text."""
     from app.models.inject import Inject, InjectState
@@ -188,8 +188,8 @@ async def test_assess_response_handles_invalid_json(
         state=InjectState.released,
     )
     session.add(inject)
-    session.commit()
-    session.refresh(inject)
+    await session.commit()
+    await session.refresh(inject)
 
     response = Response(
         inject_id=inject.id,
@@ -198,10 +198,10 @@ async def test_assess_response_handles_invalid_json(
         content="Some free text.",
     )
     session.add(response)
-    session.commit()
-    session.refresh(response)
+    await session.commit()
+    await session.refresh(response)
 
-    scenario = session.get(Scenario, active_exercise.scenario_id)
+    scenario = (await session.get(Scenario, active_exercise.scenario_id))
     definition = export_definition(scenario)
 
     with patch(
@@ -222,62 +222,62 @@ async def test_assess_response_handles_invalid_json(
 
 # ── REST endpoint tests ───────────────────────────────────────────────────────
 
-def test_trigger_assess_endpoint(
-    client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+async def test_trigger_assess_endpoint(
+    client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
-    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
-    resp = _submit(client, participant_token, active_exercise.id, inject_id).json()
+    inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
+    resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
 
     with patch("app.routers.responses.run_llm_pipeline", new_callable=AsyncMock):
-        r = client.post(
+        r = await client.post(
             f"/api/exercises/{active_exercise.id}/responses/{resp['id']}/assess",
             headers={"Authorization": f"Bearer {facilitator_token}"},
         )
     assert r.status_code == 202
 
 
-def test_trigger_assess_participant_forbidden(
-    client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+async def test_trigger_assess_participant_forbidden(
+    client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
-    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
-    resp = _submit(client, participant_token, active_exercise.id, inject_id).json()
+    inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
+    resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
 
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/responses/{resp['id']}/assess",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
     assert r.status_code == 403
 
 
-def test_get_assessment_not_found_when_none(
-    client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+async def test_get_assessment_not_found_when_none(
+    client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
-    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
-    resp = _submit(client, participant_token, active_exercise.id, inject_id).json()
+    inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
+    resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
 
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/responses/{resp['id']}/assessment",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 404
 
 
-def test_get_assessment_returns_data(
-    client: TestClient,
+async def test_get_assessment_returns_data(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
-    session: Session,
+    session: AsyncSession,
 ):
 
     from app.models.assessment import ResponseAssessment
     from app.models.response import Response
 
-    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
-    resp_data = _submit(client, participant_token, active_exercise.id, inject_id).json()
+    inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
+    resp_data = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
 
     # Manually create an assessment record
-    response = session.get(Response, resp_data["id"])
+    response = (await session.get(Response, resp_data["id"]))
     assessment = ResponseAssessment(
         response_id=response.id,
         llm_model="claude-sonnet-4-6",
@@ -285,13 +285,13 @@ def test_get_assessment_returns_data(
         decision_quality="good",
     )
     session.add(assessment)
-    session.commit()
-    session.refresh(assessment)
+    await session.commit()
+    await session.refresh(assessment)
     response.assessment_id = assessment.id
     session.add(response)
-    session.commit()
+    await session.commit()
 
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/responses/{resp_data['id']}/assessment",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -303,7 +303,9 @@ def test_get_assessment_returns_data(
 
 # ── Suggested injects CRUD ────────────────────────────────────────────────────
 
-def _make_suggested(session: Session, exercise_id: int, response_id: int, title="Follow-up"):
+async def _make_suggested(
+    session: AsyncSession, exercise_id: int, response_id: int, title="Follow-up"
+):
     from app.models.suggested_inject import SuggestedInject
 
     s = SuggestedInject(
@@ -314,24 +316,24 @@ def _make_suggested(session: Session, exercise_id: int, response_id: int, title=
         llm_model="claude-sonnet-4-6",
     )
     session.add(s)
-    session.commit()
-    session.refresh(s)
+    await session.commit()
+    await session.refresh(s)
     return s
 
 
-def test_list_suggested_injects(
-    client: TestClient,
+async def test_list_suggested_injects(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
-    session: Session,
+    session: AsyncSession,
 ):
-    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
-    resp = _submit(client, participant_token, active_exercise.id, inject_id).json()
-    _make_suggested(session, active_exercise.id, resp["id"], "First suggestion")
-    _make_suggested(session, active_exercise.id, resp["id"], "Second suggestion")
+    inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
+    resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
+    (await _make_suggested(session, active_exercise.id, resp["id"], "First suggestion"))
+    (await _make_suggested(session, active_exercise.id, resp["id"], "Second suggestion"))
 
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/suggested-injects",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -341,28 +343,28 @@ def test_list_suggested_injects(
     assert "Second suggestion" in titles
 
 
-def test_list_suggested_participant_forbidden(
-    client: TestClient, participant_token: str, active_exercise: Exercise
+async def test_list_suggested_participant_forbidden(
+    client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/suggested-injects",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
     assert r.status_code == 403
 
 
-def test_approve_suggested_inject(
-    client: TestClient,
+async def test_approve_suggested_inject(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
-    session: Session,
+    session: AsyncSession,
 ):
-    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
-    resp = _submit(client, participant_token, active_exercise.id, inject_id).json()
-    suggested = _make_suggested(session, active_exercise.id, resp["id"])
+    inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
+    resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
+    suggested = (await _make_suggested(session, active_exercise.id, resp["id"]))
 
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/suggested-injects/{suggested.id}/approve",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -373,45 +375,45 @@ def test_approve_suggested_inject(
 
     # Suggestion status updated
     from app.models.suggested_inject import SuggestedInjectStatus
-    session.refresh(suggested)
+    await session.refresh(suggested)
     assert suggested.status == SuggestedInjectStatus.approved
 
 
-def test_approve_already_approved_returns_409(
-    client: TestClient,
+async def test_approve_already_approved_returns_409(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
-    session: Session,
+    session: AsyncSession,
 ):
     from app.models.suggested_inject import SuggestedInjectStatus
 
-    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
-    resp = _submit(client, participant_token, active_exercise.id, inject_id).json()
-    suggested = _make_suggested(session, active_exercise.id, resp["id"])
+    inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
+    resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
+    suggested = (await _make_suggested(session, active_exercise.id, resp["id"]))
     suggested.status = SuggestedInjectStatus.approved
     session.add(suggested)
-    session.commit()
+    await session.commit()
 
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/suggested-injects/{suggested.id}/approve",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 409
 
 
-def test_reject_suggested_inject(
-    client: TestClient,
+async def test_reject_suggested_inject(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
-    session: Session,
+    session: AsyncSession,
 ):
-    inject_id = _first_released_inject_id(client, facilitator_token, active_exercise.id)
-    resp = _submit(client, participant_token, active_exercise.id, inject_id).json()
-    suggested = _make_suggested(session, active_exercise.id, resp["id"])
+    inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
+    resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
+    suggested = (await _make_suggested(session, active_exercise.id, resp["id"]))
 
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/suggested-injects/{suggested.id}/reject",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -421,7 +423,7 @@ def test_reject_suggested_inject(
 
 @pytest.mark.asyncio
 async def test_run_llm_pipeline_broadcasts_to_facilitator(
-    session: Session, facilitator: User, sample_scenario, active_exercise: Exercise
+    session: AsyncSession, facilitator: User, sample_scenario, active_exercise: Exercise
 ):
     """run_llm_pipeline calls send_to_facilitators with assessment_ready and inject_suggested."""
     from unittest.mock import patch as _patch
@@ -439,8 +441,8 @@ async def test_run_llm_pipeline_broadcasts_to_facilitator(
         state=InjectState.released,
     )
     session.add(inject)
-    session.commit()
-    session.refresh(inject)
+    await session.commit()
+    await session.refresh(inject)
 
     response = Response(
         inject_id=inject.id,
@@ -449,17 +451,18 @@ async def test_run_llm_pipeline_broadcasts_to_facilitator(
         content="We isolated the affected hosts.",
     )
     session.add(response)
-    session.commit()
-    session.refresh(response)
+    await session.commit()
+    await session.refresh(response)
 
     broadcast_calls = []
 
     async def _fake_send(exercise_id, message):
         broadcast_calls.append(message)
 
-    # run_llm_pipeline opens its own Session(engine) — patch the engine it imports
-    # so it uses the same in-memory DB as the test session.
-    test_engine = session.get_bind()
+    # run_llm_pipeline opens its own AsyncSession(engine). Patch the engine it
+    # imports with this test's AsyncConnection so its session shares the same
+    # open transaction and can see the uncommitted rows above.
+    test_engine = await session.connection()
 
     with (
         _patch(

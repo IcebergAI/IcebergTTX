@@ -1,5 +1,6 @@
-from fastapi.testclient import TestClient
-from sqlmodel import Session
+from httpx import AsyncClient
+from httpx_ws import aconnect_ws
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
 from app.models.user import User, UserRole
@@ -8,8 +9,8 @@ from app.services.exercise_service import enrol_member
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _send(
-    client: TestClient,
+async def _send(
+    client: AsyncClient,
     token: str,
     exercise_id: int,
     direction: str = "outbound",
@@ -23,15 +24,15 @@ def _send(
         payload["external_entity"] = external_entity
     if visible_to_teams:
         payload["visible_to_teams"] = visible_to_teams
-    return client.post(
+    return await client.post(
         f"/api/exercises/{exercise_id}/communications",
         json=payload,
         headers={"Authorization": f"Bearer {token}"},
     )
 
 
-def _inject_comm(
-    client: TestClient,
+async def _inject_comm(
+    client: AsyncClient,
     token: str,
     exercise_id: int,
     external_entity: str = "ICO",
@@ -42,7 +43,7 @@ def _inject_comm(
     payload = {"external_entity": external_entity, "subject": subject, "body": body}
     if visible_to_teams:
         payload["visible_to_teams"] = visible_to_teams
-    return client.post(
+    return await client.post(
         f"/api/exercises/{exercise_id}/communications/inject",
         json=payload,
         headers={"Authorization": f"Bearer {token}"},
@@ -51,10 +52,10 @@ def _inject_comm(
 
 # ── Send ──────────────────────────────────────────────────────────────────────
 
-def test_send_outbound(
-    client: TestClient, participant_token: str, active_exercise: Exercise
+async def test_send_outbound(
+    client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    r = _send(client, participant_token, active_exercise.id)
+    r = (await _send(client, participant_token, active_exercise.id))
     assert r.status_code == 201
     data = r.json()
     assert data["direction"] == "outbound"
@@ -62,10 +63,10 @@ def test_send_outbound(
     assert data["sender_team"] == "it_ops"
 
 
-def test_inject_inbound_facilitator(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_inject_inbound_facilitator(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    r = _inject_comm(client, facilitator_token, active_exercise.id)
+    r = (await _inject_comm(client, facilitator_token, active_exercise.id))
     assert r.status_code == 201
     data = r.json()
     assert data["direction"] == "inbound"
@@ -73,22 +74,22 @@ def test_inject_inbound_facilitator(
     assert data["visible_to_teams"] == ["it_ops", "legal"]
 
 
-def test_inject_inbound_participant_forbidden(
-    client: TestClient, participant_token: str, active_exercise: Exercise
+async def test_inject_inbound_participant_forbidden(
+    client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    r = _inject_comm(client, participant_token, active_exercise.id)
+    r = (await _inject_comm(client, participant_token, active_exercise.id))
     assert r.status_code == 403
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
 
-def test_list_comms_all_visible(
-    client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+async def test_list_comms_all_visible(
+    client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
-    _send(client, participant_token, active_exercise.id, subject="Message A")
-    _inject_comm(client, facilitator_token, active_exercise.id, subject="ICO Advisory")
+    (await _send(client, participant_token, active_exercise.id, subject="Message A"))
+    (await _inject_comm(client, facilitator_token, active_exercise.id, subject="ICO Advisory"))
 
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -98,15 +99,15 @@ def test_list_comms_all_visible(
     assert "ICO Advisory" in subjects
 
 
-def test_visibility_filtering(
-    client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+async def test_visibility_filtering(
+    client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
     """Comm visible only to 'legal' should NOT appear for it_ops participant."""
-    _inject_comm(
+    (await _inject_comm(
         client, facilitator_token, active_exercise.id,
         subject="Legal Only", visible_to_teams=["legal"]
-    )
-    r = client.get(
+    ))
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {participant_token}"},  # participant is it_ops
     )
@@ -115,15 +116,15 @@ def test_visibility_filtering(
     assert "Legal Only" not in subjects
 
 
-def test_visibility_own_team(
-    client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+async def test_visibility_own_team(
+    client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
     """Comm targeted to it_ops is visible to the it_ops participant."""
-    _inject_comm(
+    (await _inject_comm(
         client, facilitator_token, active_exercise.id,
         subject="IT Ops Only", visible_to_teams=["it_ops"]
-    )
-    r = client.get(
+    ))
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
@@ -132,9 +133,9 @@ def test_visibility_own_team(
     assert "IT Ops Only" in subjects
 
 
-def test_participant_does_not_see_other_participant_outbound(
-    client: TestClient,
-    session: Session,
+async def test_participant_does_not_see_other_participant_outbound(
+    client: AsyncClient,
+    session: AsyncSession,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
@@ -147,17 +148,17 @@ def test_participant_does_not_see_other_participant_outbound(
         team="legal",
     )
     session.add(legal)
-    session.commit()
-    session.refresh(legal)
-    enrol_member(session, exercise=active_exercise, user_id=legal.id, group_id="legal")
+    await session.commit()
+    await session.refresh(legal)
+    await enrol_member(session, exercise=active_exercise, user_id=legal.id, group_id="legal")
     legal_token = create_access_token(subject=legal.email, role=legal.role.value)
 
-    _send(client, participant_token, active_exercise.id, subject="IT Ops outbound")
-    legal_r = _send(client, legal_token, active_exercise.id, subject="Legal outbound")
+    (await _send(client, participant_token, active_exercise.id, subject="IT Ops outbound"))
+    legal_r = (await _send(client, legal_token, active_exercise.id, subject="Legal outbound"))
     assert legal_r.status_code == 201
     assert legal_r.json()["sender_team"] == "legal"
 
-    participant_r = client.get(
+    participant_r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
@@ -166,7 +167,7 @@ def test_participant_does_not_see_other_participant_outbound(
     assert "IT Ops outbound" in participant_subjects
     assert "Legal outbound" not in participant_subjects
 
-    facilitator_r = client.get(
+    facilitator_r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -176,9 +177,9 @@ def test_participant_does_not_see_other_participant_outbound(
     assert legal_comm["sender_team"] == "legal"
 
 
-def test_participant_can_send_outbound_to_team(
-    client: TestClient,
-    session: Session,
+async def test_participant_can_send_outbound_to_team(
+    client: AsyncClient,
+    session: AsyncSession,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
@@ -191,39 +192,39 @@ def test_participant_can_send_outbound_to_team(
         team="legal",
     )
     session.add(legal)
-    session.commit()
-    session.refresh(legal)
-    enrol_member(session, exercise=active_exercise, user_id=legal.id, group_id="legal")
+    await session.commit()
+    await session.refresh(legal)
+    await enrol_member(session, exercise=active_exercise, user_id=legal.id, group_id="legal")
     legal_token = create_access_token(subject=legal.email, role=legal.role.value)
 
-    created = _send(
+    created = (await _send(
         client,
         participant_token,
         active_exercise.id,
         subject="Legal help needed",
         visible_to_teams=["legal"],
-    )
+    ))
     assert created.status_code == 201
     payload = created.json()
     assert payload["external_entity"] is None
     assert payload["sender_team"] == "it_ops"
     assert payload["visible_to_teams"] == ["legal"]
 
-    legal_r = client.get(
+    legal_r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {legal_token}"},
     )
     assert legal_r.status_code == 200
     assert "Legal help needed" in [c["subject"] for c in legal_r.json()]
 
-    sender_r = client.get(
+    sender_r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
     assert sender_r.status_code == 200
     assert "Legal help needed" in [c["subject"] for c in sender_r.json()]
 
-    facilitator_r = client.get(
+    facilitator_r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -234,27 +235,27 @@ def test_participant_can_send_outbound_to_team(
     assert facilitator_comm["visible_to_teams"] == ["legal"]
 
 
-def test_participant_send_to_unknown_team_rejected(
-    client: TestClient, participant_token: str, active_exercise: Exercise
+async def test_participant_send_to_unknown_team_rejected(
+    client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    r = _send(
+    r = (await _send(
         client,
         participant_token,
         active_exercise.id,
         subject="Unknown team",
         visible_to_teams=["not_a_team"],
-    )
+    ))
     assert r.status_code == 422
 
 
-def test_facilitator_sees_all_regardless_of_visibility(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_facilitator_sees_all_regardless_of_visibility(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    _inject_comm(
+    (await _inject_comm(
         client, facilitator_token, active_exercise.id,
         subject="Secret", visible_to_teams=["legal"]
-    )
-    r = client.get(
+    ))
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -265,13 +266,13 @@ def test_facilitator_sees_all_regardless_of_visibility(
 
 # ── Mark read ─────────────────────────────────────────────────────────────────
 
-def test_get_comm_marks_read(
-    client: TestClient, participant_token: str, facilitator_token: str,
+async def test_get_comm_marks_read(
+    client: AsyncClient, participant_token: str, facilitator_token: str,
     active_exercise: Exercise, participant: User
 ):
-    comm = _send(client, participant_token, active_exercise.id).json()
+    comm = (await _send(client, participant_token, active_exercise.id)).json()
 
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications/{comm['id']}",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
@@ -280,10 +281,10 @@ def test_get_comm_marks_read(
     assert participant.id in data["read_by"]
 
 
-def test_get_comm_not_found(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_get_comm_not_found(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications/9999",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -292,40 +293,40 @@ def test_get_comm_not_found(
 
 # ── WS broadcast ──────────────────────────────────────────────────────────────
 
-def test_ws_receives_communication(
-    client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+async def test_ws_receives_communication(
+    client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
-    with client.websocket_connect(
+    async with aconnect_ws(
         f"/ws/exercises/{active_exercise.id}?token={participant_token}"
-    ) as ws:
-        _inject_comm(client, facilitator_token, active_exercise.id, subject="WS Test")
-        msg = ws.receive_json()
+    , client) as ws:
+        (await _inject_comm(client, facilitator_token, active_exercise.id, subject="WS Test"))
+        msg = await ws.receive_json()
 
     assert msg["type"] == "communication_received"
     assert msg["payload"]["subject"] == "WS Test"
 
 
-def test_ws_visibility_filtered_broadcast(
-    client: TestClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+async def test_ws_visibility_filtered_broadcast(
+    client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
     """Comm targeted to 'legal' should NOT arrive at the it_ops participant's WS."""
-    with client.websocket_connect(
+    async with aconnect_ws(
         f"/ws/exercises/{active_exercise.id}?token={participant_token}"
-    ) as ws:
-        _inject_comm(
+    , client) as ws:
+        (await _inject_comm(
             client, facilitator_token, active_exercise.id,
             subject="Legal Only WS", visible_to_teams=["legal"]
-        )
-        ws.send_json({"type": "ping"})
-        msg = ws.receive_json()
+        ))
+        await ws.send_json({"type": "ping"})
+        msg = await ws.receive_json()
 
     # Should receive pong, not the communication
     assert msg["type"] == "pong"
 
 
-def test_ws_team_outbound_reaches_recipient_team(
-    client: TestClient,
-    session: Session,
+async def test_ws_team_outbound_reaches_recipient_team(
+    client: AsyncClient,
+    session: AsyncSession,
     participant_token: str,
     active_exercise: Exercise,
 ):
@@ -337,22 +338,22 @@ def test_ws_team_outbound_reaches_recipient_team(
         team="legal",
     )
     session.add(legal)
-    session.commit()
-    session.refresh(legal)
-    enrol_member(session, exercise=active_exercise, user_id=legal.id, group_id="legal")
+    await session.commit()
+    await session.refresh(legal)
+    await enrol_member(session, exercise=active_exercise, user_id=legal.id, group_id="legal")
     legal_token = create_access_token(subject=legal.email, role=legal.role.value)
 
-    with client.websocket_connect(
+    async with aconnect_ws(
         f"/ws/exercises/{active_exercise.id}?token={legal_token}"
-    ) as ws:
-        _send(
+    , client) as ws:
+        (await _send(
             client,
             participant_token,
             active_exercise.id,
             subject="WS legal help",
             visible_to_teams=["legal"],
-        )
-        msg = ws.receive_json()
+        ))
+        msg = await ws.receive_json()
 
     assert msg["type"] == "communication_received"
     assert msg["payload"]["subject"] == "WS legal help"

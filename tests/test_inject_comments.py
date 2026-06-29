@@ -1,43 +1,44 @@
-from fastapi.testclient import TestClient
-from sqlmodel import Session
+from httpx import AsyncClient
+from httpx_ws import aconnect_ws
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
 from app.models.user import User, UserRole
 
 
-def _release_node(
-    client: TestClient,
+async def _release_node(
+    client: AsyncClient,
     token: str,
     exercise_id: int,
     scenario_node_id: str = "inject_01",
 ) -> dict:
-    injects = client.get(
+    injects = (await client.get(
         f"/api/exercises/{exercise_id}/injects",
         headers={"Authorization": f"Bearer {token}"},
-    ).json()
+    )).json()
     inject = next(i for i in injects if i["scenario_node_id"] == scenario_node_id)
-    return client.post(
+    return (await client.post(
         f"/api/exercises/{exercise_id}/injects/{inject['id']}/release",
         headers={"Authorization": f"Bearer {token}"},
-    ).json()
+    )).json()
 
 
-def _comment(
-    client: TestClient,
+async def _comment(
+    client: AsyncClient,
     token: str,
     exercise_id: int,
     inject_id: int,
     content: str,
 ):
-    return client.post(
+    return await client.post(
         f"/api/exercises/{exercise_id}/inject-comments",
         json={"inject_id": inject_id, "content": content},
         headers={"Authorization": f"Bearer {token}"},
     )
 
 
-def _participant(
-    session: Session,
+async def _participant(
+    session: AsyncSession,
     *,
     email: str,
     name: str,
@@ -53,8 +54,8 @@ def _participant(
         team=team,
     )
     session.add(user)
-    session.commit()
-    session.refresh(user)
+    await session.commit()
+    await session.refresh(user)
     return user
 
 
@@ -64,45 +65,45 @@ def _token(user: User) -> str:
     return create_access_token(subject=user.email, role=user.role.value)
 
 
-def test_team_members_can_comment_on_same_released_inject(
-    client: TestClient,
+async def test_team_members_can_comment_on_same_released_inject(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
-    session: Session,
+    session: AsyncSession,
 ):
     from app.services.exercise_service import enrol_member
 
-    other = _participant(
+    other = (await _participant(
         session,
         email="second-it@example.com",
         name="Second IT",
         team="it_ops",
-    )
-    enrol_member(session, exercise=active_exercise, user_id=other.id)
+    ))
+    await enrol_member(session, exercise=active_exercise, user_id=other.id)
     other_token = _token(other)
-    inject = _release_node(client, facilitator_token, active_exercise.id)
+    inject = (await _release_node(client, facilitator_token, active_exercise.id))
 
-    first = _comment(
+    first = (await _comment(
         client,
         participant_token,
         active_exercise.id,
         inject["id"],
         " First analyst note. ",
-    )
-    second = _comment(
+    ))
+    second = (await _comment(
         client,
         other_token,
         active_exercise.id,
         inject["id"],
         "Second analyst note.",
-    )
+    ))
 
     assert first.status_code == 201
     assert first.json()["content"] == "First analyst note."
     assert second.status_code == 201
 
-    visible = client.get(
+    visible = await client.get(
         f"/api/exercises/{active_exercise.id}/inject-comments",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
@@ -114,54 +115,54 @@ def test_team_members_can_comment_on_same_released_inject(
     assert {c["group_id"] for c in visible.json()} == {"it_ops"}
 
 
-def test_team_comments_are_scoped_to_the_commenters_team(
-    client: TestClient,
+async def test_team_comments_are_scoped_to_the_commenters_team(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
-    session: Session,
+    session: AsyncSession,
 ):
     from app.services.exercise_service import enrol_member
 
-    legal = _participant(
+    legal = (await _participant(
         session,
         email="legal-commenter@example.com",
         name="Legal Commenter",
         team="legal",
-    )
-    enrol_member(session, exercise=active_exercise, user_id=legal.id, group_id="legal")
+    ))
+    await enrol_member(session, exercise=active_exercise, user_id=legal.id, group_id="legal")
     legal_token = _token(legal)
 
-    it_inject = _release_node(client, facilitator_token, active_exercise.id, "inject_01")
-    legal_inject = _release_node(client, facilitator_token, active_exercise.id, "inject_02")
+    it_inject = (await _release_node(client, facilitator_token, active_exercise.id, "inject_01"))
+    legal_inject = (await _release_node(client, facilitator_token, active_exercise.id, "inject_02"))
 
-    assert _comment(
+    assert (await _comment(
         client,
         participant_token,
         active_exercise.id,
         it_inject["id"],
         "IT team note.",
-    ).status_code == 201
-    assert _comment(
+    )).status_code == 201
+    assert (await _comment(
         client,
         legal_token,
         active_exercise.id,
         legal_inject["id"],
         "Legal team note.",
-    ).status_code == 201
+    )).status_code == 201
 
-    it_rows = client.get(
+    it_rows = (await client.get(
         f"/api/exercises/{active_exercise.id}/inject-comments",
         headers={"Authorization": f"Bearer {participant_token}"},
-    ).json()
-    legal_rows = client.get(
+    )).json()
+    legal_rows = (await client.get(
         f"/api/exercises/{active_exercise.id}/inject-comments",
         headers={"Authorization": f"Bearer {legal_token}"},
-    ).json()
-    facilitator_rows = client.get(
+    )).json()
+    facilitator_rows = (await client.get(
         f"/api/exercises/{active_exercise.id}/inject-comments",
         headers={"Authorization": f"Bearer {facilitator_token}"},
-    ).json()
+    )).json()
 
     assert [c["content"] for c in it_rows] == ["IT team note."]
     assert [c["content"] for c in legal_rows] == ["Legal team note."]
@@ -171,57 +172,57 @@ def test_team_comments_are_scoped_to_the_commenters_team(
     }
 
 
-def test_comment_on_wrong_team_inject_is_forbidden(
-    client: TestClient,
+async def test_comment_on_wrong_team_inject_is_forbidden(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
 ):
-    legal_inject = _release_node(client, facilitator_token, active_exercise.id, "inject_02")
+    legal_inject = (await _release_node(client, facilitator_token, active_exercise.id, "inject_02"))
 
-    response = _comment(
+    response = (await _comment(
         client,
         participant_token,
         active_exercise.id,
         legal_inject["id"],
         "Can I see this?",
-    )
+    ))
 
     assert response.status_code == 404
 
 
-def test_blank_comment_is_rejected(
-    client: TestClient,
+async def test_blank_comment_is_rejected(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
 ):
-    inject = _release_node(client, facilitator_token, active_exercise.id)
+    inject = (await _release_node(client, facilitator_token, active_exercise.id))
 
-    response = _comment(client, participant_token, active_exercise.id, inject["id"], "   ")
+    response = (await _comment(client, participant_token, active_exercise.id, inject["id"], "   "))
 
     assert response.status_code == 422
 
 
-def test_ws_broadcasts_inject_comment_to_facilitator(
-    client: TestClient,
+async def test_ws_broadcasts_inject_comment_to_facilitator(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
 ):
-    inject = _release_node(client, facilitator_token, active_exercise.id)
+    inject = (await _release_node(client, facilitator_token, active_exercise.id))
 
-    with client.websocket_connect(
+    async with aconnect_ws(
         f"/ws/exercises/{active_exercise.id}?token={facilitator_token}"
-    ) as ws:
-        _comment(
+    , client) as ws:
+        (await _comment(
             client,
             participant_token,
             active_exercise.id,
             inject["id"],
             "Live comment.",
-        )
-        message = ws.receive_json()
+        ))
+        message = await ws.receive_json()
 
     assert message["type"] == "inject_comment_created"
     assert message["payload"]["inject_id"] == inject["id"]

@@ -106,12 +106,12 @@ async def assess_response(session, response, inject, definition):
         recommended_branch_option_id=data.get("recommended_branch_option_id"),
     )
     session.add(assessment)
-    session.commit()
-    session.refresh(assessment)
+    await session.commit()
+    await session.refresh(assessment)
 
     response.assessment_id = assessment.id
     session.add(response)
-    session.commit()
+    await session.commit()
 
     return assessment
 
@@ -151,8 +151,8 @@ async def suggest_inject(session, response, inject, exercise, definition):
         llm_model=_MODEL,
     )
     session.add(suggested)
-    session.commit()
-    session.refresh(suggested)
+    await session.commit()
+    await session.refresh(suggested)
 
     return suggested
 
@@ -166,7 +166,7 @@ async def run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) -
 
 
 async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) -> None:
-    from sqlmodel import Session as _Session
+    from sqlmodel.ext.asyncio.session import AsyncSession
 
     from app.models.exercise import Exercise
     from app.models.inject import Inject
@@ -175,13 +175,13 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
     from app.services.scenario_service import export_definition
     from app.services.ws_manager import manager
 
-    with _Session(engine) as session:
-        response = session.get(Response, response_id)
-        inject = session.get(Inject, inject_id)
-        exercise = session.get(Exercise, exercise_id)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        response = await session.get(Response, response_id)
+        inject = await session.get(Inject, inject_id)
+        exercise = await session.get(Exercise, exercise_id)
         if not (response and inject and exercise and exercise.scenario_id):
             return
-        scenario = session.get(Scenario, exercise.scenario_id)
+        scenario = await session.get(Scenario, exercise.scenario_id)
         if not scenario:
             return
 

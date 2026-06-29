@@ -2,7 +2,8 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.models.user import User, UserRole
@@ -12,7 +13,7 @@ from app.services.ws_manager import manager
 
 router = APIRouter()
 
-SessionDep = Annotated[Session, Depends(get_session)]
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 @router.websocket("/ws/exercises/{exercise_id}")
@@ -20,9 +21,9 @@ async def exercise_ws(
     ws: WebSocket,
     exercise_id: int,
     session: SessionDep,
-    token: str = Query(...),
-    view_role: str | None = Query(default=None),
-    view_team: str | None = Query(default=None),
+    token: Annotated[str, Query()],
+    view_role: Annotated[str | None, Query()] = None,
+    view_team: Annotated[str | None, Query()] = None,
 ):
     try:
         payload = decode_access_token(token)
@@ -35,7 +36,7 @@ async def exercise_ws(
         await ws.close(code=4001)
         return
 
-    user = session.exec(select(User).where(User.email == email)).first()
+    user = (await session.exec(select(User).where(User.email == email))).first()
     if not user or not user.is_active:
         await ws.close(code=4001)
         return
@@ -56,12 +57,12 @@ async def exercise_ws(
         object.__setattr__(user, "actual_team", actual_team)
         object.__setattr__(user, "can_switch_roles", True)
     try:
-        require_exercise_access(session, exercise_id, user)
+        await require_exercise_access(session, exercise_id, user)
     except Exception:
         await ws.close(code=4003)
         return
     assert user.id is not None
-    member = exercise_member_for_user(session, exercise_id, user.id)
+    member = await exercise_member_for_user(session, exercise_id, user.id)
     group_id = member.group_id if member else None
     if user.role == UserRole.participant:
         group_id = view_team.strip() if view_team and view_team.strip() else group_id

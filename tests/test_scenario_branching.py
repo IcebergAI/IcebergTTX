@@ -22,12 +22,12 @@ def _minimal(injects, start_id="inject_01", teams=None):
 
 # ── Schema validation ─────────────────────────────────────────────────────────
 
-def test_valid_scenario_parses(sample_definition: ScenarioDefinition):
+async def test_valid_scenario_parses(sample_definition: ScenarioDefinition):
     assert sample_definition.start_inject_id == "inject_01"
     assert len(sample_definition.injects) == 2
 
 
-def test_missing_start_inject_id_raises():
+async def test_missing_start_inject_id_raises():
     with pytest.raises(ValidationError, match="start_inject_id"):
         _minimal(
             [InjectNode(id="inject_01", title="A", content="B")],
@@ -35,7 +35,7 @@ def test_missing_start_inject_id_raises():
         )
 
 
-def test_bad_next_inject_id_raises():
+async def test_bad_next_inject_id_raises():
     with pytest.raises(ValidationError, match="next_inject_id"):
         _minimal([
             InjectNode(
@@ -45,14 +45,14 @@ def test_bad_next_inject_id_raises():
         ])
 
 
-def test_bad_linear_next_inject_id_raises():
+async def test_bad_linear_next_inject_id_raises():
     with pytest.raises(ValidationError, match="next_inject_id"):
         _minimal([
             InjectNode(id="inject_01", title="A", content="B", next_inject_id="MISSING"),
         ])
 
 
-def test_bad_target_team_raises():
+async def test_bad_target_team_raises():
     with pytest.raises(ValidationError, match="target_team"):
         _minimal(
             [InjectNode(id="inject_01", title="A", content="B", target_teams=["unknown_team"])],
@@ -60,7 +60,7 @@ def test_bad_target_team_raises():
         )
 
 
-def test_cycle_detection_raises():
+async def test_cycle_detection_raises():
     with pytest.raises(ValidationError, match="Cycle"):
         _minimal([
             InjectNode(
@@ -74,7 +74,7 @@ def test_cycle_detection_raises():
         ], start_id="a")
 
 
-def test_linear_cycle_detection_raises():
+async def test_linear_cycle_detection_raises():
     with pytest.raises(ValidationError, match="Cycle"):
         _minimal([
             InjectNode(id="a", title="A", content=".", next_inject_id="b"),
@@ -82,14 +82,14 @@ def test_linear_cycle_detection_raises():
         ], start_id="a")
 
 
-def test_leaf_node_valid():
+async def test_leaf_node_valid():
     defn = _minimal([
         InjectNode(id="inject_01", title="A", content="B", options=[]),
     ])
     assert defn.injects[0].options == []
 
 
-def test_empty_target_teams_means_all():
+async def test_empty_target_teams_means_all():
     defn = _minimal([
         InjectNode(id="inject_01", title="A", content="B", target_teams=[]),
     ])
@@ -98,30 +98,30 @@ def test_empty_target_teams_means_all():
 
 # ── service: get_inject_node ──────────────────────────────────────────────────
 
-def test_get_inject_node_found(sample_definition: ScenarioDefinition):
+async def test_get_inject_node_found(sample_definition: ScenarioDefinition):
     node = get_inject_node(sample_definition, "inject_01")
     assert node is not None
     assert node.id == "inject_01"
 
 
-def test_get_inject_node_not_found(sample_definition: ScenarioDefinition):
+async def test_get_inject_node_not_found(sample_definition: ScenarioDefinition):
     assert get_inject_node(sample_definition, "NOPE") is None
 
 
 # ── service: get_next_inject_ids ──────────────────────────────────────────────
 
-def test_get_next_inject_ids(sample_definition: ScenarioDefinition):
+async def test_get_next_inject_ids(sample_definition: ScenarioDefinition):
     nexts = get_next_inject_ids(sample_definition, "inject_01")
     assert "inject_02" in nexts
 
 
-def test_get_next_inject_ids_leaf(sample_definition: ScenarioDefinition):
+async def test_get_next_inject_ids_leaf(sample_definition: ScenarioDefinition):
     # inject_02 has no options → no next ids
     nexts = get_next_inject_ids(sample_definition, "inject_02")
     assert nexts == []
 
 
-def test_get_next_inject_ids_linear():
+async def test_get_next_inject_ids_linear():
     defn = _minimal([
         InjectNode(id="a", title="A", content=".", next_inject_id="b"),
         InjectNode(id="b", title="B", content="."),
@@ -129,36 +129,36 @@ def test_get_next_inject_ids_linear():
     assert get_next_inject_ids(defn, "a") == ["b"]
 
 
-def test_get_next_inject_ids_unknown_inject(sample_definition: ScenarioDefinition):
+async def test_get_next_inject_ids_unknown_inject(sample_definition: ScenarioDefinition):
     assert get_next_inject_ids(sample_definition, "nope") == []
 
 
 # ── service: resolve_branch ───────────────────────────────────────────────────
 
-def test_resolve_branch_known_option(sample_definition: ScenarioDefinition):
+async def test_resolve_branch_known_option(sample_definition: ScenarioDefinition):
     result = resolve_branch(sample_definition, "inject_01", "opt_a")
     assert result == "inject_02"
 
 
-def test_resolve_branch_leaf_option(sample_definition: ScenarioDefinition):
+async def test_resolve_branch_leaf_option(sample_definition: ScenarioDefinition):
     # opt_b has next_inject_id=None
     result = resolve_branch(sample_definition, "inject_01", "opt_b")
     assert result is None
 
 
-def test_resolve_branch_unknown_option(sample_definition: ScenarioDefinition):
+async def test_resolve_branch_unknown_option(sample_definition: ScenarioDefinition):
     result = resolve_branch(sample_definition, "inject_01", "UNKNOWN_OPT")
     assert result is None
 
 
-def test_resolve_branch_unknown_inject(sample_definition: ScenarioDefinition):
+async def test_resolve_branch_unknown_inject(sample_definition: ScenarioDefinition):
     result = resolve_branch(sample_definition, "NOPE", "opt_a")
     assert result is None
 
 
 # ── Multi-level branching ─────────────────────────────────────────────────────
 
-def test_multi_level_branch():
+async def test_multi_level_branch():
     defn = _minimal([
         InjectNode(
             id="a", title="A", content=".",

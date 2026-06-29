@@ -1,7 +1,13 @@
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING, Optional
 
-from sqlmodel import Field, SQLModel
+from sqlalchemy import DateTime
+from sqlmodel import Field, Relationship, SQLModel
+
+if TYPE_CHECKING:
+    from app.models.exercise import Exercise
+    from app.models.response import Response
 
 
 class SuggestedInjectStatus(StrEnum):
@@ -12,13 +18,20 @@ class SuggestedInjectStatus(StrEnum):
 
 class SuggestedInject(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    exercise_id: int = Field(foreign_key="exercise.id")
-    triggered_by_response_id: int = Field(foreign_key="response.id")
+    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
+    triggered_by_response_id: int = Field(foreign_key="response.id", ondelete="CASCADE")
     title: str
     content: str
     target_teams: str | None = None  # JSON list
     llm_model: str
     status: SuggestedInjectStatus = Field(default=SuggestedInjectStatus.pending_review)
-    reviewed_by: int | None = Field(default=None, foreign_key="user.id")
-    reviewed_at: datetime | None = None
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    reviewed_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    reviewed_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    generated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
+    )
+
+    exercise: Optional["Exercise"] = Relationship(back_populates="suggested_injects")
+    triggered_by_response: Optional["Response"] = Relationship(
+        back_populates="suggested_injects"
+    )

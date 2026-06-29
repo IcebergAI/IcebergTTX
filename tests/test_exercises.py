@@ -1,5 +1,6 @@
-from fastapi.testclient import TestClient
-from sqlmodel import Session, select
+from httpx import AsyncClient
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise, ExerciseState
 from app.models.inject import Inject
@@ -9,8 +10,8 @@ from app.services.exercise_service import transition_state
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
-def test_create_exercise(client: TestClient, facilitator_token: str, sample_scenario):
-    r = client.post(
+async def test_create_exercise(client: AsyncClient, facilitator_token: str, sample_scenario):
+    r = await client.post(
         "/api/exercises",
         json={"scenario_id": sample_scenario.id, "title": "My Exercise"},
         headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -23,8 +24,10 @@ def test_create_exercise(client: TestClient, facilitator_token: str, sample_scen
     assert data["llm_enabled"] is False
 
 
-def test_create_exercise_with_llm(client: TestClient, facilitator_token: str, sample_scenario):
-    r = client.post(
+async def test_create_exercise_with_llm(
+    client: AsyncClient, facilitator_token: str, sample_scenario
+):
+    r = await client.post(
         "/api/exercises",
         json={"scenario_id": sample_scenario.id, "title": "LLM Exercise", "llm_enabled": True},
         headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -33,13 +36,13 @@ def test_create_exercise_with_llm(client: TestClient, facilitator_token: str, sa
     assert r.json()["llm_enabled"] is True
 
 
-def test_create_exercise_seeds_shared_and_group_injects(
-    session: Session, facilitator: User
+async def test_create_exercise_seeds_shared_and_group_injects(
+    session: AsyncSession, facilitator: User
 ):
     from app.services.exercise_service import create_exercise
     from app.services.scenario_service import create_scenario
 
-    scenario = create_scenario(
+    scenario = await create_scenario(
         session,
         definition=ScenarioDefinition(
             title="Grouped Scenario",
@@ -61,15 +64,15 @@ def test_create_exercise_seeds_shared_and_group_injects(
         created_by=facilitator.id,
     )
 
-    exercise = create_exercise(
+    exercise = await create_exercise(
         session,
         scenario_id=scenario.id,
         title="Grouped Exercise",
         created_by=facilitator.id,
     )
-    injects = session.exec(
+    injects = (await session.exec(
         select(Inject).where(Inject.exercise_id == exercise.id)
-    ).all()
+    )).all()
 
     shared = [i for i in injects if i.scenario_node_id == "shared"]
     targeted = [i for i in injects if i.scenario_node_id == "targeted"]
@@ -78,8 +81,8 @@ def test_create_exercise_seeds_shared_and_group_injects(
     assert {i.group_id for i in targeted} == {"it_ops", "legal"}
 
 
-def test_create_exercise_missing_scenario(client: TestClient, facilitator_token: str):
-    r = client.post(
+async def test_create_exercise_missing_scenario(client: AsyncClient, facilitator_token: str):
+    r = await client.post(
         "/api/exercises",
         json={"scenario_id": 9999, "title": "Ghost"},
         headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -87,10 +90,10 @@ def test_create_exercise_missing_scenario(client: TestClient, facilitator_token:
     assert r.status_code == 404
 
 
-def test_create_exercise_participant_forbidden(
-    client: TestClient, participant_token: str, sample_scenario
+async def test_create_exercise_participant_forbidden(
+    client: AsyncClient, participant_token: str, sample_scenario
 ):
-    r = client.post(
+    r = await client.post(
         "/api/exercises",
         json={"scenario_id": sample_scenario.id, "title": "No"},
         headers={"Authorization": f"Bearer {participant_token}"},
@@ -98,33 +101,33 @@ def test_create_exercise_participant_forbidden(
     assert r.status_code == 403
 
 
-def test_list_exercises(client: TestClient, facilitator_token: str, draft_exercise):
-    r = client.get("/api/exercises", headers={"Authorization": f"Bearer {facilitator_token}"})
+async def test_list_exercises(client: AsyncClient, facilitator_token: str, draft_exercise):
+    r = await client.get("/api/exercises", headers={"Authorization": f"Bearer {facilitator_token}"})
     assert r.status_code == 200
     ids = [e["id"] for e in r.json()]
     assert draft_exercise.id in ids
 
 
-def test_list_exercises_participant_allowed(
-    client: TestClient, participant_token: str, draft_exercise
+async def test_list_exercises_participant_allowed(
+    client: AsyncClient, participant_token: str, draft_exercise
 ):
-    r = client.get("/api/exercises", headers={"Authorization": f"Bearer {participant_token}"})
+    r = await client.get("/api/exercises", headers={"Authorization": f"Bearer {participant_token}"})
     assert r.status_code == 200
     assert r.json() == []
 
 
-def test_participant_sees_enrolled_exercise(
-    client: TestClient, participant_token: str, active_exercise: Exercise
+async def test_participant_sees_enrolled_exercise(
+    client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    r = client.get("/api/exercises", headers={"Authorization": f"Bearer {participant_token}"})
+    r = await client.get("/api/exercises", headers={"Authorization": f"Bearer {participant_token}"})
     assert r.status_code == 200
     assert [ex["id"] for ex in r.json()] == [active_exercise.id]
 
 
-def test_participant_can_list_exercise_team_labels(
-    client: TestClient, participant_token: str, active_exercise: Exercise
+async def test_participant_can_list_exercise_team_labels(
+    client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/teams",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
@@ -135,8 +138,8 @@ def test_participant_can_list_exercise_team_labels(
     ]
 
 
-def test_facilitator_preview_participant_still_lists_exercises_for_testing(
-    client: TestClient,
+async def test_facilitator_preview_participant_still_lists_exercises_for_testing(
+    client: AsyncClient,
     facilitator_token: str,
     draft_exercise: Exercise,
     active_exercise: Exercise,
@@ -144,15 +147,15 @@ def test_facilitator_preview_participant_still_lists_exercises_for_testing(
     assert draft_exercise.id is not None
     assert active_exercise.id is not None
     client.cookies.set("dt_view_role", "participant")
-    r = client.get("/api/exercises", headers={"Authorization": f"Bearer {facilitator_token}"})
+    r = await client.get("/api/exercises", headers={"Authorization": f"Bearer {facilitator_token}"})
     assert r.status_code == 200
     ids = {ex["id"] for ex in r.json()}
     assert draft_exercise.id in ids
     assert active_exercise.id in ids
 
 
-def test_get_exercise(client: TestClient, facilitator_token: str, draft_exercise):
-    r = client.get(
+async def test_get_exercise(client: AsyncClient, facilitator_token: str, draft_exercise):
+    r = await client.get(
         f"/api/exercises/{draft_exercise.id}",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -160,23 +163,25 @@ def test_get_exercise(client: TestClient, facilitator_token: str, draft_exercise
     assert r.json()["id"] == draft_exercise.id
 
 
-def test_get_exercise_participant_not_enrolled_forbidden(
-    client: TestClient, participant_token: str, draft_exercise
+async def test_get_exercise_participant_not_enrolled_forbidden(
+    client: AsyncClient, participant_token: str, draft_exercise
 ):
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{draft_exercise.id}",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
     assert r.status_code == 403
 
 
-def test_get_exercise_not_found(client: TestClient, facilitator_token: str):
-    r = client.get("/api/exercises/9999", headers={"Authorization": f"Bearer {facilitator_token}"})
+async def test_get_exercise_not_found(client: AsyncClient, facilitator_token: str):
+    r = await client.get(
+        "/api/exercises/9999", headers={"Authorization": f"Bearer {facilitator_token}"}
+    )
     assert r.status_code == 404
 
 
-def test_update_exercise(client: TestClient, facilitator_token: str, draft_exercise):
-    r = client.put(
+async def test_update_exercise(client: AsyncClient, facilitator_token: str, draft_exercise):
+    r = await client.put(
         f"/api/exercises/{draft_exercise.id}",
         json={"title": "Renamed", "llm_enabled": True},
         headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -187,29 +192,50 @@ def test_update_exercise(client: TestClient, facilitator_token: str, draft_exerc
     assert data["llm_enabled"] is True
 
 
-def test_delete_draft_exercise(
-    client: TestClient, facilitator_token: str, session: Session, sample_scenario, facilitator: User
+async def test_update_exercise_preserves_omitted_fields(
+    client: AsyncClient, facilitator_token: str, draft_exercise
+):
+    headers = {"Authorization": f"Bearer {facilitator_token}"}
+    await client.put(
+        f"/api/exercises/{draft_exercise.id}", json={"llm_enabled": True}, headers=headers
+    )
+    # Updating only the title must not reset llm_enabled back to its default.
+    r = await client.put(
+        f"/api/exercises/{draft_exercise.id}", json={"title": "Renamed"}, headers=headers
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["title"] == "Renamed"
+    assert data["llm_enabled"] is True
+
+
+async def test_delete_draft_exercise(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    sample_scenario,
+    facilitator: User,
 ):
     from app.services.exercise_service import create_exercise
 
-    ex = create_exercise(
+    ex = await create_exercise(
         session,
         scenario_id=sample_scenario.id,
         title="To Delete",
         created_by=facilitator.id,
     )
-    r = client.delete(
+    r = await client.delete(
         f"/api/exercises/{ex.id}",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 204
-    assert session.get(Exercise, ex.id) is None
+    assert (await session.get(Exercise, ex.id)) is None
 
 
-def test_delete_active_exercise_forbidden(
-    client: TestClient, facilitator_token: str, active_exercise
+async def test_delete_active_exercise_forbidden(
+    client: AsyncClient, facilitator_token: str, active_exercise
 ):
-    r = client.delete(
+    r = await client.delete(
         f"/api/exercises/{active_exercise.id}",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -218,8 +244,8 @@ def test_delete_active_exercise_forbidden(
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
-def test_start_exercise(client: TestClient, facilitator_token: str, draft_exercise):
-    r = client.post(
+async def test_start_exercise(client: AsyncClient, facilitator_token: str, draft_exercise):
+    r = await client.post(
         f"/api/exercises/{draft_exercise.id}/start",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -229,8 +255,8 @@ def test_start_exercise(client: TestClient, facilitator_token: str, draft_exerci
     assert data["started_at"] is not None
 
 
-def test_pause_exercise(client: TestClient, facilitator_token: str, active_exercise):
-    r = client.post(
+async def test_pause_exercise(client: AsyncClient, facilitator_token: str, active_exercise):
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/pause",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -238,11 +264,11 @@ def test_pause_exercise(client: TestClient, facilitator_token: str, active_exerc
     assert r.json()["state"] == "paused"
 
 
-def test_resume_exercise(
-    client: TestClient, facilitator_token: str, session: Session, active_exercise
+async def test_resume_exercise(
+    client: AsyncClient, facilitator_token: str, session: AsyncSession, active_exercise
 ):
-    paused = transition_state(session, active_exercise, ExerciseState.paused)
-    r = client.post(
+    paused = await transition_state(session, active_exercise, ExerciseState.paused)
+    r = await client.post(
         f"/api/exercises/{paused.id}/resume",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -250,8 +276,10 @@ def test_resume_exercise(
     assert r.json()["state"] == "active"
 
 
-def test_complete_active_exercise(client: TestClient, facilitator_token: str, active_exercise):
-    r = client.post(
+async def test_complete_active_exercise(
+    client: AsyncClient, facilitator_token: str, active_exercise
+):
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/complete",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -261,11 +289,11 @@ def test_complete_active_exercise(client: TestClient, facilitator_token: str, ac
     assert data["ended_at"] is not None
 
 
-def test_complete_paused_exercise(
-    client: TestClient, facilitator_token: str, session: Session, active_exercise
+async def test_complete_paused_exercise(
+    client: AsyncClient, facilitator_token: str, session: AsyncSession, active_exercise
 ):
-    paused = transition_state(session, active_exercise, ExerciseState.paused)
-    r = client.post(
+    paused = await transition_state(session, active_exercise, ExerciseState.paused)
+    r = await client.post(
         f"/api/exercises/{paused.id}/complete",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -273,52 +301,52 @@ def test_complete_paused_exercise(
     assert r.json()["state"] == "completed"
 
 
-def test_invalid_transition_draft_to_completed(
-    client: TestClient, facilitator_token: str, draft_exercise
+async def test_invalid_transition_draft_to_completed(
+    client: AsyncClient, facilitator_token: str, draft_exercise
 ):
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{draft_exercise.id}/complete",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 409
 
 
-def test_invalid_transition_completed_to_active(
-    client: TestClient, facilitator_token: str, session: Session, active_exercise
+async def test_invalid_transition_completed_to_active(
+    client: AsyncClient, facilitator_token: str, session: AsyncSession, active_exercise
 ):
-    transition_state(session, active_exercise, ExerciseState.completed)
-    r = client.post(
+    await transition_state(session, active_exercise, ExerciseState.completed)
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/start",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 409
 
 
-def test_start_sets_started_at_only_once(
-    client: TestClient, facilitator_token: str, session: Session, draft_exercise
+async def test_start_sets_started_at_only_once(
+    client: AsyncClient, facilitator_token: str, session: AsyncSession, draft_exercise
 ):
-    client.post(
+    await client.post(
         f"/api/exercises/{draft_exercise.id}/start",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
-    first_start = session.get(Exercise, draft_exercise.id).started_at
+    first_start = (await session.get(Exercise, draft_exercise.id)).started_at
 
-    client.post(
+    await client.post(
         f"/api/exercises/{draft_exercise.id}/pause",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
-    client.post(
+    await client.post(
         f"/api/exercises/{draft_exercise.id}/resume",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
-    second_start = session.get(Exercise, draft_exercise.id).started_at
+    second_start = (await session.get(Exercise, draft_exercise.id)).started_at
     assert first_start == second_start
 
 
-def test_lifecycle_participant_forbidden(
-    client: TestClient, participant_token: str, draft_exercise
+async def test_lifecycle_participant_forbidden(
+    client: AsyncClient, participant_token: str, draft_exercise
 ):
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{draft_exercise.id}/start",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
@@ -327,10 +355,10 @@ def test_lifecycle_participant_forbidden(
 
 # ── Members ───────────────────────────────────────────────────────────────────
 
-def test_enrol_member(
-    client: TestClient, facilitator_token: str, draft_exercise, participant: User
+async def test_enrol_member(
+    client: AsyncClient, facilitator_token: str, draft_exercise, participant: User
 ):
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{draft_exercise.id}/members",
         json={"user_id": participant.id},
         headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -340,10 +368,10 @@ def test_enrol_member(
     assert r.json()["group_id"] == "it_ops"
 
 
-def test_enrol_member_with_group_id(
-    client: TestClient, facilitator_token: str, draft_exercise, participant: User
+async def test_enrol_member_with_group_id(
+    client: AsyncClient, facilitator_token: str, draft_exercise, participant: User
 ):
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{draft_exercise.id}/members",
         json={"user_id": participant.id, "group_id": "legal"},
         headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -352,10 +380,10 @@ def test_enrol_member_with_group_id(
     assert r.json()["group_id"] == "legal"
 
 
-def test_enrol_member_rejects_unknown_group(
-    client: TestClient, facilitator_token: str, draft_exercise, participant: User
+async def test_enrol_member_rejects_unknown_group(
+    client: AsyncClient, facilitator_token: str, draft_exercise, participant: User
 ):
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{draft_exercise.id}/members",
         json={"user_id": participant.id, "group_id": "unknown"},
         headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -363,37 +391,37 @@ def test_enrol_member_rejects_unknown_group(
     assert r.status_code == 422
 
 
-def test_enrol_member_idempotent(
-    client: TestClient, facilitator_token: str, draft_exercise, participant: User
+async def test_enrol_member_idempotent(
+    client: AsyncClient, facilitator_token: str, draft_exercise, participant: User
 ):
-    client.post(
+    await client.post(
         f"/api/exercises/{draft_exercise.id}/members",
         json={"user_id": participant.id},
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{draft_exercise.id}/members",
         json={"user_id": participant.id},
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 201
 
-    members = client.get(
+    members = (await client.get(
         f"/api/exercises/{draft_exercise.id}/members",
         headers={"Authorization": f"Bearer {facilitator_token}"},
-    ).json()
+    )).json()
     assert sum(1 for m in members if m["user_id"] == participant.id) == 1
 
 
-def test_list_members(
-    client: TestClient, facilitator_token: str, draft_exercise, participant: User
+async def test_list_members(
+    client: AsyncClient, facilitator_token: str, draft_exercise, participant: User
 ):
-    client.post(
+    await client.post(
         f"/api/exercises/{draft_exercise.id}/members",
         json={"user_id": participant.id},
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{draft_exercise.id}/members",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -401,15 +429,15 @@ def test_list_members(
     assert any(m["user_id"] == participant.id for m in r.json())
 
 
-def test_update_member_group(
-    client: TestClient, facilitator_token: str, draft_exercise, participant: User
+async def test_update_member_group(
+    client: AsyncClient, facilitator_token: str, draft_exercise, participant: User
 ):
-    client.post(
+    await client.post(
         f"/api/exercises/{draft_exercise.id}/members",
         json={"user_id": participant.id},
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
-    r = client.patch(
+    r = await client.patch(
         f"/api/exercises/{draft_exercise.id}/members/{participant.id}",
         json={"group_id": "legal"},
         headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -418,41 +446,41 @@ def test_update_member_group(
     assert r.json()["group_id"] == "legal"
 
 
-def test_remove_member(
-    client: TestClient, facilitator_token: str, draft_exercise, participant: User
+async def test_remove_member(
+    client: AsyncClient, facilitator_token: str, draft_exercise, participant: User
 ):
-    client.post(
+    await client.post(
         f"/api/exercises/{draft_exercise.id}/members",
         json={"user_id": participant.id},
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
-    r = client.delete(
+    r = await client.delete(
         f"/api/exercises/{draft_exercise.id}/members/{participant.id}",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 204
 
-    members = client.get(
+    members = (await client.get(
         f"/api/exercises/{draft_exercise.id}/members",
         headers={"Authorization": f"Bearer {facilitator_token}"},
-    ).json()
+    )).json()
     assert not any(m["user_id"] == participant.id for m in members)
 
 
-def test_remove_member_not_found(
-    client: TestClient, facilitator_token: str, draft_exercise, participant: User
+async def test_remove_member_not_found(
+    client: AsyncClient, facilitator_token: str, draft_exercise, participant: User
 ):
-    r = client.delete(
+    r = await client.delete(
         f"/api/exercises/{draft_exercise.id}/members/{participant.id}",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 404
 
 
-def test_enrol_member_participant_forbidden(
-    client: TestClient, participant_token: str, draft_exercise, participant: User
+async def test_enrol_member_participant_forbidden(
+    client: AsyncClient, participant_token: str, draft_exercise, participant: User
 ):
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{draft_exercise.id}/members",
         json={"user_id": participant.id},
         headers={"Authorization": f"Bearer {participant_token}"},

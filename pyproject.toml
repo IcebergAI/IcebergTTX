@@ -18,6 +18,7 @@ dependencies = [
     "aiofiles>=23.0",
     "email-validator>=2.0",
     "anthropic>=0.40",
+    "asyncpg>=0.29",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "httpx>=0.27",
     "httpx-ws>=0.6",
+    "testcontainers[postgres]>=4.0",
     "ruff>=0.4",
     "bandit>=1.7",
     "vulture>=2.11",
@@ -34,12 +36,14 @@ dev = [
     "playwright>=1.52",
     "pytest-playwright>=0.7",
 ]
-postgres = [
-    "psycopg2-binary>=2.9",
-]
+
+[tool.fastapi]
+entrypoint = "app.main:app"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
@@ -52,6 +56,14 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# SQLModel relationships across split model files require quoted string forward
+# references (Optional["Exercise"], list["Inject"]) so the mapper can resolve them
+# lazily from the class registry. Unquoting (UP037) or rewriting Optional to
+# `X | None` (UP045) would evaluate names imported only under TYPE_CHECKING and
+# break mapper configuration at import time.
+"app/models/*.py" = ["UP037", "UP045"]
 
 [tool.bandit]
 # B101: asserts are used for type-narrowing (e.g. `assert x.id is not None`),

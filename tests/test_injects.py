@@ -1,13 +1,13 @@
-from fastapi.testclient import TestClient
-from sqlmodel import Session
+from httpx import AsyncClient
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
 from app.models.user import User
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _create_inject(
-    client: TestClient,
+async def _create_inject(
+    client: AsyncClient,
     token: str,
     exercise_id: int,
     title: str = "Test Inject",
@@ -18,7 +18,7 @@ def _create_inject(
     body = {"title": title, "content": content, "sequence_order": sequence_order}
     if target_teams is not None:
         body["target_teams"] = target_teams
-    return client.post(
+    return await client.post(
         f"/api/exercises/{exercise_id}/injects",
         json=body,
         headers={"Authorization": f"Bearer {token}"},
@@ -27,10 +27,10 @@ def _create_inject(
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
-def test_create_inject(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_create_inject(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    r = _create_inject(client, facilitator_token, active_exercise.id)
+    r = (await _create_inject(client, facilitator_token, active_exercise.id))
     assert r.status_code == 201
     data = r.json()
     assert data["title"] == "Test Inject"
@@ -38,24 +38,24 @@ def test_create_inject(
     assert data["target_teams"] is None
 
 
-def test_create_inject_with_teams(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_create_inject_with_teams(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    r = _create_inject(
+    r = (await _create_inject(
         client, facilitator_token, active_exercise.id, target_teams=["it_ops", "legal"]
-    )
+    ))
     assert r.status_code == 201
     assert r.json()["target_teams"] == ["it_ops", "legal"]
 
 
-def test_create_inject_with_attachment(
-    client: TestClient,
+async def test_create_inject_with_attachment(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
 ):
     content = b"attached brief"
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/injects",
         data={"title": "Attached", "content": "Read the file", "sequence_order": "5"},
         files={"attachment": ("brief.txt", content, "text/plain")},
@@ -68,17 +68,17 @@ def test_create_inject_with_attachment(
     assert data["attachment"]["content_type"] == "text/plain"
     assert data["attachment"]["size"] == len(content)
 
-    pending_download = client.get(
+    pending_download = await client.get(
         data["attachment"]["url"],
         headers={"Authorization": f"Bearer {participant_token}"},
     )
     assert pending_download.status_code == 404
 
-    client.post(
+    await client.post(
         f"/api/exercises/{active_exercise.id}/injects/{data['id']}/release",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
-    download = client.get(
+    download = await client.get(
         data["attachment"]["url"],
         headers={"Authorization": f"Bearer {participant_token}"},
     )
@@ -87,20 +87,24 @@ def test_create_inject_with_attachment(
     assert "brief.txt" in download.headers["content-disposition"]
 
 
-def test_create_inject_participant_forbidden(
-    client: TestClient, participant_token: str, active_exercise: Exercise
+async def test_create_inject_participant_forbidden(
+    client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    r = _create_inject(client, participant_token, active_exercise.id)
+    r = (await _create_inject(client, participant_token, active_exercise.id))
     assert r.status_code == 403
 
 
-def test_list_injects(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_list_injects(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
     # Exercise is pre-seeded from the scenario; add two more at higher sequence_order
-    _create_inject(client, facilitator_token, active_exercise.id, title="A", sequence_order=10)
-    _create_inject(client, facilitator_token, active_exercise.id, title="B", sequence_order=11)
-    r = client.get(
+    await _create_inject(
+        client, facilitator_token, active_exercise.id, title="A", sequence_order=10
+    )
+    await _create_inject(
+        client, facilitator_token, active_exercise.id, title="B", sequence_order=11
+    )
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -111,10 +115,10 @@ def test_list_injects(
     assert titles.index("A") < titles.index("B")
 
 
-def test_list_injects_participant_allowed(
-    client: TestClient, participant_token: str, active_exercise: Exercise
+async def test_list_injects_participant_allowed(
+    client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
@@ -122,26 +126,26 @@ def test_list_injects_participant_allowed(
     assert r.json() == []
 
 
-def test_participant_sees_only_released_visible_injects(
-    client: TestClient, participant_token: str, facilitator_token: str, active_exercise: Exercise
+async def test_participant_sees_only_released_visible_injects(
+    client: AsyncClient, participant_token: str, facilitator_token: str, active_exercise: Exercise
 ):
-    injects = client.get(
+    injects = (await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
         headers={"Authorization": f"Bearer {facilitator_token}"},
-    ).json()
+    )).json()
     it_ops_inject = next(i for i in injects if i["scenario_node_id"] == "inject_01")
     legal_inject = next(i for i in injects if i["scenario_node_id"] == "inject_02")
 
-    client.post(
+    await client.post(
         f"/api/exercises/{active_exercise.id}/injects/{it_ops_inject['id']}/release",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
-    client.post(
+    await client.post(
         f"/api/exercises/{active_exercise.id}/injects/{legal_inject['id']}/release",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
 
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
@@ -152,25 +156,25 @@ def test_participant_sees_only_released_visible_injects(
     assert payload[0]["group_id"] == "it_ops"
 
 
-def test_facilitator_preview_participant_uses_preview_team_for_visibility(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_facilitator_preview_participant_uses_preview_team_for_visibility(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    injects = client.get(
+    injects = (await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
         headers={"Authorization": f"Bearer {facilitator_token}"},
-    ).json()
+    )).json()
     it_ops_inject = next(i for i in injects if i["scenario_node_id"] == "inject_01")
     legal_inject = next(i for i in injects if i["scenario_node_id"] == "inject_02")
 
     for inject in (it_ops_inject, legal_inject):
-        client.post(
+        await client.post(
             f"/api/exercises/{active_exercise.id}/injects/{inject['id']}/release",
             headers={"Authorization": f"Bearer {facilitator_token}"},
         )
 
     client.cookies.set("dt_view_role", "participant")
     client.cookies.set("dt_view_team", "it_ops")
-    r = client.get(
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -181,12 +185,12 @@ def test_facilitator_preview_participant_uses_preview_team_for_visibility(
     assert payload[0]["group_id"] == "it_ops"
 
 
-def test_different_groups_see_different_released_injects(
-    client: TestClient,
+async def test_different_groups_see_different_released_injects(
+    client: AsyncClient,
     participant_token: str,
     facilitator_token: str,
     active_exercise: Exercise,
-    session: Session,
+    session: AsyncSession,
 ):
     from app.models.user import UserRole
     from app.services.auth_service import create_access_token, hash_password
@@ -200,15 +204,15 @@ def test_different_groups_see_different_released_injects(
         team="legal",
     )
     session.add(legal)
-    session.commit()
-    session.refresh(legal)
-    enrol_member(session, exercise=active_exercise, user_id=legal.id)
+    await session.commit()
+    await session.refresh(legal)
+    await enrol_member(session, exercise=active_exercise, user_id=legal.id)
     legal_token = create_access_token(subject=legal.email, role=legal.role.value)
 
-    injects = client.get(
+    injects = (await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
         headers={"Authorization": f"Bearer {facilitator_token}"},
-    ).json()
+    )).json()
     it_ops_inject = next(
         i for i in injects if i["scenario_node_id"] == "inject_01" and i["group_id"] == "it_ops"
     )
@@ -217,29 +221,29 @@ def test_different_groups_see_different_released_injects(
     )
 
     for inject in (it_ops_inject, legal_inject):
-        client.post(
+        await client.post(
             f"/api/exercises/{active_exercise.id}/injects/{inject['id']}/release",
             headers={"Authorization": f"Bearer {facilitator_token}"},
         )
 
-    it_ops_payload = client.get(
+    it_ops_payload = (await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
         headers={"Authorization": f"Bearer {participant_token}"},
-    ).json()
-    legal_payload = client.get(
+    )).json()
+    legal_payload = (await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
         headers={"Authorization": f"Bearer {legal_token}"},
-    ).json()
+    )).json()
 
     assert [i["group_id"] for i in it_ops_payload] == ["it_ops"]
     assert [i["group_id"] for i in legal_payload] == ["legal"]
 
 
-def test_get_inject(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_get_inject(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    created = _create_inject(client, facilitator_token, active_exercise.id).json()
-    r = client.get(
+    created = (await _create_inject(client, facilitator_token, active_exercise.id)).json()
+    r = await client.get(
         f"/api/exercises/{active_exercise.id}/injects/{created['id']}",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -247,35 +251,35 @@ def test_get_inject(
     assert r.json()["id"] == created["id"]
 
 
-def test_get_inject_wrong_exercise(
-    client: TestClient,
+async def test_get_inject_wrong_exercise(
+    client: AsyncClient,
     facilitator_token: str,
     active_exercise: Exercise,
-    session: Session,
+    session: AsyncSession,
     facilitator: User,
     sample_scenario,
 ):
     from app.services.exercise_service import create_exercise
 
-    other = create_exercise(
+    other = await create_exercise(
         session,
         scenario_id=sample_scenario.id,
         title="Other",
         created_by=facilitator.id,
     )
-    created = _create_inject(client, facilitator_token, active_exercise.id).json()
-    r = client.get(
+    created = (await _create_inject(client, facilitator_token, active_exercise.id)).json()
+    r = await client.get(
         f"/api/exercises/{other.id}/injects/{created['id']}",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 404
 
 
-def test_delete_inject(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_delete_inject(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    created = _create_inject(client, facilitator_token, active_exercise.id).json()
-    r = client.delete(
+    created = (await _create_inject(client, facilitator_token, active_exercise.id)).json()
+    r = await client.delete(
         f"/api/exercises/{active_exercise.id}/injects/{created['id']}",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -284,11 +288,11 @@ def test_delete_inject(
 
 # ── Release ───────────────────────────────────────────────────────────────────
 
-def test_release_inject(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_release_inject(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    created = _create_inject(client, facilitator_token, active_exercise.id).json()
-    r = client.post(
+    created = (await _create_inject(client, facilitator_token, active_exercise.id)).json()
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/injects/{created['id']}/release",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -299,40 +303,40 @@ def test_release_inject(
     assert data["released_by"] is not None
 
 
-def test_release_already_released(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_release_already_released(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    created = _create_inject(client, facilitator_token, active_exercise.id).json()
-    client.post(
+    created = (await _create_inject(client, facilitator_token, active_exercise.id)).json()
+    await client.post(
         f"/api/exercises/{active_exercise.id}/injects/{created['id']}/release",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
-    r = client.post(
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/injects/{created['id']}/release",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 409
 
 
-def test_release_inject_participant_forbidden(
-    client: TestClient, participant_token: str, facilitator_token: str, active_exercise: Exercise
+async def test_release_inject_participant_forbidden(
+    client: AsyncClient, participant_token: str, facilitator_token: str, active_exercise: Exercise
 ):
-    created = _create_inject(client, facilitator_token, active_exercise.id).json()
-    r = client.post(
+    created = (await _create_inject(client, facilitator_token, active_exercise.id)).json()
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/injects/{created['id']}/release",
         headers={"Authorization": f"Bearer {participant_token}"},
     )
     assert r.status_code == 403
 
 
-def test_release_broadcast_all(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_release_broadcast_all(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
     """Broadcast inject (no target_teams) is released to all."""
-    created = _create_inject(
+    created = (await _create_inject(
         client, facilitator_token, active_exercise.id, target_teams=None
-    ).json()
-    r = client.post(
+    )).json()
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/injects/{created['id']}/release",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
@@ -340,14 +344,14 @@ def test_release_broadcast_all(
     assert r.json()["target_teams"] is None
 
 
-def test_release_broadcast_team_targeted(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_release_broadcast_team_targeted(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
     """Team-targeted inject is released only to named teams."""
-    created = _create_inject(
+    created = (await _create_inject(
         client, facilitator_token, active_exercise.id, target_teams=["it_ops"]
-    ).json()
-    r = client.post(
+    )).json()
+    r = await client.post(
         f"/api/exercises/{active_exercise.id}/injects/{created['id']}/release",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )

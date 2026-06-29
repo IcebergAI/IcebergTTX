@@ -1,6 +1,7 @@
 import pytest
-from fastapi.testclient import TestClient
-from sqlmodel import Session
+from httpx import AsyncClient
+from httpx_ws import WebSocketDisconnect, aconnect_ws
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
 from app.models.user import User, UserRole
@@ -14,43 +15,43 @@ def _ws_url(exercise_id: int, token: str) -> str:
 
 # ── Connection ────────────────────────────────────────────────────────────────
 
-def test_ws_connect_valid_token(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_ws_connect_valid_token(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    with client.websocket_connect(_ws_url(active_exercise.id, facilitator_token)) as ws:
-        ws.send_json({"type": "ping"})
-        msg = ws.receive_json()
+    async with aconnect_ws(_ws_url(active_exercise.id, facilitator_token), client) as ws:
+        await ws.send_json({"type": "ping"})
+        msg = await ws.receive_json()
     assert msg["type"] == "pong"
     assert msg["exercise_id"] == active_exercise.id
 
 
-def test_ws_connect_invalid_token(client: TestClient, active_exercise: Exercise):
-    with pytest.raises(Exception):
-        with client.websocket_connect(_ws_url(active_exercise.id, "bad.token.here")) as ws:
-            ws.receive_json()
+async def test_ws_connect_invalid_token(client: AsyncClient, active_exercise: Exercise):
+    with pytest.raises(WebSocketDisconnect):
+        async with aconnect_ws(_ws_url(active_exercise.id, "bad.token.here"), client) as ws:
+            await ws.receive_json()
 
 
-def test_ws_connect_participant(
-    client: TestClient, participant_token: str, active_exercise: Exercise
+async def test_ws_connect_participant(
+    client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    with client.websocket_connect(_ws_url(active_exercise.id, participant_token)) as ws:
-        ws.send_json({"type": "ping"})
-        msg = ws.receive_json()
+    async with aconnect_ws(_ws_url(active_exercise.id, participant_token), client) as ws:
+        await ws.send_json({"type": "ping"})
+        msg = await ws.receive_json()
     assert msg["type"] == "pong"
 
 
-def test_ws_connect_facilitator_preview_participant(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_ws_connect_facilitator_preview_participant(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
     url = f"{_ws_url(active_exercise.id, facilitator_token)}&view_role=participant&view_team=it_ops"
-    with client.websocket_connect(url) as ws:
-        ws.send_json({"type": "ping"})
-        msg = ws.receive_json()
+    async with aconnect_ws(url, client) as ws:
+        await ws.send_json({"type": "ping"})
+        msg = await ws.receive_json()
     assert msg["type"] == "pong"
 
 
-def test_ws_connect_nonmember_rejected(
-    client: TestClient, session: Session, active_exercise: Exercise
+async def test_ws_connect_nonmember_rejected(
+    client: AsyncClient, session: AsyncSession, active_exercise: Exercise
 ):
     other = User(
         email="ws-nonmember@example.com",
@@ -60,23 +61,23 @@ def test_ws_connect_nonmember_rejected(
         team="it_ops",
     )
     session.add(other)
-    session.commit()
-    session.refresh(other)
+    await session.commit()
+    await session.refresh(other)
     token = create_access_token(subject=other.email, role=other.role.value)
 
-    with pytest.raises(Exception):
-        with client.websocket_connect(_ws_url(active_exercise.id, token)) as ws:
-            ws.receive_json()
+    with pytest.raises(WebSocketDisconnect):
+        async with aconnect_ws(_ws_url(active_exercise.id, token), client) as ws:
+            await ws.receive_json()
 
 
 # ── Heartbeat ─────────────────────────────────────────────────────────────────
 
-def test_ws_ping_pong(
-    client: TestClient, facilitator_token: str, active_exercise: Exercise
+async def test_ws_ping_pong(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    with client.websocket_connect(_ws_url(active_exercise.id, facilitator_token)) as ws:
-        ws.send_json({"type": "ping"})
-        msg = ws.receive_json()
+    async with aconnect_ws(_ws_url(active_exercise.id, facilitator_token), client) as ws:
+        await ws.send_json({"type": "ping"})
+        msg = await ws.receive_json()
         assert msg["type"] == "pong"
         assert "timestamp" in msg
         assert "payload" in msg
@@ -84,26 +85,26 @@ def test_ws_ping_pong(
 
 # ── Inject released event ─────────────────────────────────────────────────────
 
-def test_ws_receives_inject_released(
-    client: TestClient,
+async def test_ws_receives_inject_released(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
 ):
     # Create an inject first
-    create_r = client.post(
+    create_r = await client.post(
         f"/api/exercises/{active_exercise.id}/injects",
         json={"title": "WS Test Inject", "content": "What do you do?"},
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     inject_id = create_r.json()["id"]
 
-    with client.websocket_connect(_ws_url(active_exercise.id, participant_token)) as ws:
-        client.post(
+    async with aconnect_ws(_ws_url(active_exercise.id, participant_token), client) as ws:
+        await client.post(
             f"/api/exercises/{active_exercise.id}/injects/{inject_id}/release",
             headers={"Authorization": f"Bearer {facilitator_token}"},
         )
-        msg = ws.receive_json()
+        msg = await ws.receive_json()
 
     assert msg["type"] == "inject_released"
     assert msg["payload"]["id"] == inject_id
@@ -111,8 +112,8 @@ def test_ws_receives_inject_released(
     assert "options" in msg["payload"]
 
 
-def test_ws_team_targeted_inject_reaches_team_member(
-    client: TestClient,
+async def test_ws_team_targeted_inject_reaches_team_member(
+    client: AsyncClient,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
@@ -121,7 +122,7 @@ def test_ws_team_targeted_inject_reaches_team_member(
     """Participant on it_ops team receives inject targeted to it_ops."""
     assert participant.team == "it_ops"
 
-    create_r = client.post(
+    create_r = await client.post(
         f"/api/exercises/{active_exercise.id}/injects",
         json={
             "title": "IT Ops Only",
@@ -132,24 +133,24 @@ def test_ws_team_targeted_inject_reaches_team_member(
     )
     inject_id = create_r.json()["id"]
 
-    with client.websocket_connect(_ws_url(active_exercise.id, participant_token)) as ws:
-        client.post(
+    async with aconnect_ws(_ws_url(active_exercise.id, participant_token), client) as ws:
+        await client.post(
             f"/api/exercises/{active_exercise.id}/injects/{inject_id}/release",
             headers={"Authorization": f"Bearer {facilitator_token}"},
         )
-        msg = ws.receive_json()
+        msg = await ws.receive_json()
 
     assert msg["type"] == "inject_released"
     assert msg["payload"]["target_teams"] == ["it_ops"]
 
 
-def test_ws_facilitator_always_receives_team_targeted(
-    client: TestClient,
+async def test_ws_facilitator_always_receives_team_targeted(
+    client: AsyncClient,
     facilitator_token: str,
     active_exercise: Exercise,
 ):
     """Facilitator receives team-targeted injects even though they have no team."""
-    create_r = client.post(
+    create_r = await client.post(
         f"/api/exercises/{active_exercise.id}/injects",
         json={
             "title": "Legal Only",
@@ -160,19 +161,19 @@ def test_ws_facilitator_always_receives_team_targeted(
     )
     inject_id = create_r.json()["id"]
 
-    with client.websocket_connect(_ws_url(active_exercise.id, facilitator_token)) as ws:
-        client.post(
+    async with aconnect_ws(_ws_url(active_exercise.id, facilitator_token), client) as ws:
+        await client.post(
             f"/api/exercises/{active_exercise.id}/injects/{inject_id}/release",
             headers={"Authorization": f"Bearer {facilitator_token}"},
         )
-        msg = ws.receive_json()
+        msg = await ws.receive_json()
 
     assert msg["type"] == "inject_released"
 
 
-def test_ws_inactive_user_rejected(
-    client: TestClient,
-    session: Session,
+async def test_ws_inactive_user_rejected(
+    client: AsyncClient,
+    session: AsyncSession,
     active_exercise: Exercise,
 ):
     inactive = User(
@@ -183,10 +184,10 @@ def test_ws_inactive_user_rejected(
         is_active=False,
     )
     session.add(inactive)
-    session.commit()
-    session.refresh(inactive)
+    await session.commit()
+    await session.refresh(inactive)
 
     token = create_access_token(subject=inactive.email, role=inactive.role.value)
-    with pytest.raises(Exception):
-        with client.websocket_connect(_ws_url(active_exercise.id, token)) as ws:
-            ws.receive_json()
+    with pytest.raises(WebSocketDisconnect):
+        async with aconnect_ws(_ws_url(active_exercise.id, token), client) as ws:
+            await ws.receive_json()

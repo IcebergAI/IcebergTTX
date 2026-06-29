@@ -8,7 +8,7 @@ MIN_SECRET_KEY_LENGTH = 32
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
-    database_url: str = "sqlite:///./deep_thought.db"
+    database_url: str = "postgresql+asyncpg://deep_thought:deep_thought@localhost:5432/deep_thought"
     secret_key: str = DEFAULT_SECRET_KEY
     access_token_expire_minutes: int = 480
     algorithm: str = "HS256"

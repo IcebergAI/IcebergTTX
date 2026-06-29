@@ -1,4 +1,4 @@
-from fastapi.testclient import TestClient
+from httpx import AsyncClient
 
 from app.models.scenario import Scenario
 from app.schemas.scenario_json import ScenarioDefinition
@@ -10,36 +10,38 @@ def _headers(token: str) -> dict:
 
 # ── List ──────────────────────────────────────────────────────────────────────
 
-def test_list_scenarios_empty(client: TestClient, facilitator_token: str):
-    resp = client.get("/api/scenarios", headers=_headers(facilitator_token))
+async def test_list_scenarios_empty(client: AsyncClient, facilitator_token: str):
+    resp = await client.get("/api/scenarios", headers=_headers(facilitator_token))
     assert resp.status_code == 200
     assert resp.json() == []
 
 
-def test_list_scenarios(client: TestClient, facilitator_token: str, sample_scenario: Scenario):
-    resp = client.get("/api/scenarios", headers=_headers(facilitator_token))
+async def test_list_scenarios(
+    client: AsyncClient, facilitator_token: str, sample_scenario: Scenario
+):
+    resp = await client.get("/api/scenarios", headers=_headers(facilitator_token))
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
     assert data[0]["title"] == sample_scenario.title
 
 
-def test_list_requires_auth(client: TestClient):
-    resp = client.get("/api/scenarios")
+async def test_list_requires_auth(client: AsyncClient):
+    resp = await client.get("/api/scenarios")
     assert resp.status_code == 401
 
 
-def test_list_requires_facilitator(client: TestClient, participant_token: str):
-    resp = client.get("/api/scenarios", headers=_headers(participant_token))
+async def test_list_requires_facilitator(client: AsyncClient, participant_token: str):
+    resp = await client.get("/api/scenarios", headers=_headers(participant_token))
     assert resp.status_code == 403
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
-def test_create_scenario(
-    client: TestClient, facilitator_token: str, sample_definition: ScenarioDefinition
+async def test_create_scenario(
+    client: AsyncClient, facilitator_token: str, sample_definition: ScenarioDefinition
 ):
-    resp = client.post(
+    resp = await client.post(
         "/api/scenarios", json=sample_definition.model_dump(), headers=_headers(facilitator_token)
     )
     assert resp.status_code == 201
@@ -49,10 +51,10 @@ def test_create_scenario(
     assert data["definition"]["start_inject_id"] == "inject_01"
 
 
-def test_create_requires_facilitator(
-    client: TestClient, participant_token: str, sample_definition: ScenarioDefinition
+async def test_create_requires_facilitator(
+    client: AsyncClient, participant_token: str, sample_definition: ScenarioDefinition
 ):
-    resp = client.post(
+    resp = await client.post(
         "/api/scenarios", json=sample_definition.model_dump(), headers=_headers(participant_token)
     )
     assert resp.status_code == 403
@@ -60,36 +62,40 @@ def test_create_requires_facilitator(
 
 # ── Get ───────────────────────────────────────────────────────────────────────
 
-def test_get_scenario(client: TestClient, facilitator_token: str, sample_scenario: Scenario):
-    resp = client.get(f"/api/scenarios/{sample_scenario.id}", headers=_headers(facilitator_token))
+async def test_get_scenario(client: AsyncClient, facilitator_token: str, sample_scenario: Scenario):
+    resp = await client.get(
+        f"/api/scenarios/{sample_scenario.id}", headers=_headers(facilitator_token)
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["id"] == sample_scenario.id
     assert "definition" in data
 
 
-def test_get_scenario_not_found(client: TestClient, facilitator_token: str):
-    resp = client.get("/api/scenarios/9999", headers=_headers(facilitator_token))
+async def test_get_scenario_not_found(client: AsyncClient, facilitator_token: str):
+    resp = await client.get("/api/scenarios/9999", headers=_headers(facilitator_token))
     assert resp.status_code == 404
 
 
-def test_get_scenario_requires_facilitator(
-    client: TestClient, participant_token: str, sample_scenario: Scenario
+async def test_get_scenario_requires_facilitator(
+    client: AsyncClient, participant_token: str, sample_scenario: Scenario
 ):
-    resp = client.get(f"/api/scenarios/{sample_scenario.id}", headers=_headers(participant_token))
+    resp = await client.get(
+        f"/api/scenarios/{sample_scenario.id}", headers=_headers(participant_token)
+    )
     assert resp.status_code == 403
 
 
 # ── Update ────────────────────────────────────────────────────────────────────
 
-def test_update_scenario(
-    client: TestClient,
+async def test_update_scenario(
+    client: AsyncClient,
     facilitator_token: str,
     sample_scenario: Scenario,
     sample_definition: ScenarioDefinition,
 ):
     updated = sample_definition.model_copy(update={"title": "Updated Title"})
-    resp = client.put(
+    resp = await client.put(
         f"/api/scenarios/{sample_scenario.id}",
         json=updated.model_dump(),
         headers=_headers(facilitator_token),
@@ -100,21 +106,25 @@ def test_update_scenario(
 
 # ── Delete ────────────────────────────────────────────────────────────────────
 
-def test_delete_scenario(client: TestClient, facilitator_token: str, sample_scenario: Scenario):
-    resp = client.delete(
+async def test_delete_scenario(
+    client: AsyncClient, facilitator_token: str, sample_scenario: Scenario
+):
+    resp = await client.delete(
         f"/api/scenarios/{sample_scenario.id}", headers=_headers(facilitator_token)
     )
     assert resp.status_code == 204
-    resp2 = client.get(f"/api/scenarios/{sample_scenario.id}", headers=_headers(facilitator_token))
+    resp2 = await client.get(
+        f"/api/scenarios/{sample_scenario.id}", headers=_headers(facilitator_token)
+    )
     assert resp2.status_code == 404
 
 
 # ── Import ────────────────────────────────────────────────────────────────────
 
-def test_import_valid_json(
-    client: TestClient, facilitator_token: str, sample_definition: ScenarioDefinition
+async def test_import_valid_json(
+    client: AsyncClient, facilitator_token: str, sample_definition: ScenarioDefinition
 ):
-    resp = client.post(
+    resp = await client.post(
         "/api/scenarios/import",
         json={"definition": sample_definition.model_dump()},
         headers=_headers(facilitator_token),
@@ -123,8 +133,8 @@ def test_import_valid_json(
     assert resp.json()["title"] == sample_definition.title
 
 
-def test_import_invalid_json_missing_field(client: TestClient, facilitator_token: str):
-    resp = client.post(
+async def test_import_invalid_json_missing_field(client: AsyncClient, facilitator_token: str):
+    resp = await client.post(
         "/api/scenarios/import",
         json={"definition": {"title": "Missing injects"}},
         headers=_headers(facilitator_token),
@@ -132,7 +142,7 @@ def test_import_invalid_json_missing_field(client: TestClient, facilitator_token
     assert resp.status_code == 422
 
 
-def test_import_invalid_json_bad_reference(client: TestClient, facilitator_token: str):
+async def test_import_invalid_json_bad_reference(client: AsyncClient, facilitator_token: str):
     bad_def = {
         "title": "Bad ref",
         "participant_teams": [],
@@ -146,7 +156,7 @@ def test_import_invalid_json_bad_reference(client: TestClient, facilitator_token
         ],
         "start_inject_id": "inject_01",
     }
-    resp = client.post(
+    resp = await client.post(
         "/api/scenarios/import",
         json={"definition": bad_def},
         headers=_headers(facilitator_token),
@@ -156,13 +166,13 @@ def test_import_invalid_json_bad_reference(client: TestClient, facilitator_token
 
 # ── Export ────────────────────────────────────────────────────────────────────
 
-def test_export_roundtrip(
-    client: TestClient,
+async def test_export_roundtrip(
+    client: AsyncClient,
     facilitator_token: str,
     sample_scenario: Scenario,
     sample_definition: ScenarioDefinition,
 ):
-    resp = client.get(
+    resp = await client.get(
         f"/api/scenarios/{sample_scenario.id}/export", headers=_headers(facilitator_token)
     )
     assert resp.status_code == 200
@@ -174,10 +184,10 @@ def test_export_roundtrip(
 
 # ── Validate ──────────────────────────────────────────────────────────────────
 
-def test_validate_valid_scenario(
-    client: TestClient, facilitator_token: str, sample_scenario: Scenario
+async def test_validate_valid_scenario(
+    client: AsyncClient, facilitator_token: str, sample_scenario: Scenario
 ):
-    resp = client.get(
+    resp = await client.get(
         f"/api/scenarios/{sample_scenario.id}/validate", headers=_headers(facilitator_token)
     )
     assert resp.status_code == 200

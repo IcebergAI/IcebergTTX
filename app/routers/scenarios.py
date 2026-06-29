@@ -5,12 +5,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel as _BaseModel
 from pydantic import ValidationError
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.dependencies import get_current_user, require_actual_role
+from app.models.exercise import Exercise
 from app.models.scenario import Scenario
 from app.models.user import User, UserRole
+from app.schemas.api import ScenarioDetail, ScenarioSummary
 from app.schemas.scenario_json import ScenarioDefinition
 from app.services.scenario_service import (
     create_scenario,
@@ -28,7 +31,7 @@ router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 
 FacilitatorDep = Annotated[User, Depends(require_actual_role(UserRole.facilitator))]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
-SessionDep = Annotated[Session, Depends(get_session)]
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 def _scenario_summary(scenario: Scenario) -> dict:
@@ -54,8 +57,8 @@ def _scenario_detail(scenario: Scenario) -> dict:
     return summary
 
 
-def _get_or_404(session: Session, scenario_id: int) -> Scenario:
-    scenario = session.get(Scenario, scenario_id)
+async def _get_or_404(session: AsyncSession, scenario_id: int) -> Scenario:
+    scenario = await session.get(Scenario, scenario_id)
     if not scenario:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found")
     return scenario
@@ -63,60 +66,72 @@ def _get_or_404(session: Session, scenario_id: int) -> Scenario:
 
 # ── List ──────────────────────────────────────────────────────────────────────
 
-@router.get("")
-def list_scenarios(_: FacilitatorDep, session: SessionDep):
-    scenarios = session.exec(select(Scenario)).all()
+@router.get("", response_model=list[ScenarioSummary])
+async def list_scenarios(_: FacilitatorDep, session: SessionDep):
+    scenarios = (await session.exec(select(Scenario))).all()
     return [_scenario_summary(s) for s in scenarios]
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
-@router.post("", status_code=status.HTTP_201_CREATED)
-def create(body: ScenarioDefinition, current_user: FacilitatorDep, session: SessionDep):
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=ScenarioDetail)
+async def create(body: ScenarioDefinition, current_user: FacilitatorDep, session: SessionDep):
     assert current_user.id is not None
-    scenario = create_scenario(session, definition=body, created_by=current_user.id)
+    scenario = await create_scenario(session, definition=body, created_by=current_user.id)
     return _scenario_detail(scenario)
 
 
 # ── Import from JSON body ─────────────────────────────────────────────────────
 
-@router.post("/import", status_code=status.HTTP_201_CREATED)
-def import_scenario(body: _ImportBody, current_user: FacilitatorDep, session: SessionDep):
+@router.post("/import", status_code=status.HTTP_201_CREATED, response_model=ScenarioDetail)
+async def import_scenario(body: _ImportBody, current_user: FacilitatorDep, session: SessionDep):
     assert current_user.id is not None
-    scenario = create_scenario(session, definition=body.definition, created_by=current_user.id)
+    scenario = await create_scenario(
+        session, definition=body.definition, created_by=current_user.id
+    )
     return _scenario_detail(scenario)
 
 
 # ── Get ───────────────────────────────────────────────────────────────────────
 
-@router.get("/{scenario_id}")
-def get_scenario(scenario_id: int, _: FacilitatorDep, session: SessionDep):
-    return _scenario_detail(_get_or_404(session, scenario_id))
+@router.get("/{scenario_id}", response_model=ScenarioDetail)
+async def get_scenario(scenario_id: int, _: FacilitatorDep, session: SessionDep):
+    return _scenario_detail(await _get_or_404(session, scenario_id))
 
 
 # ── Update ────────────────────────────────────────────────────────────────────
 
-@router.put("/{scenario_id}")
-def update(scenario_id: int, body: ScenarioDefinition, _: FacilitatorDep, session: SessionDep):
-    scenario = _get_or_404(session, scenario_id)
-    scenario = update_scenario(session, scenario, definition=body)
+@router.put("/{scenario_id}", response_model=ScenarioDetail)
+async def update(
+    scenario_id: int, body: ScenarioDefinition, _: FacilitatorDep, session: SessionDep
+):
+    scenario = await _get_or_404(session, scenario_id)
+    scenario = await update_scenario(session, scenario, definition=body)
     return _scenario_detail(scenario)
 
 
 # ── Delete ────────────────────────────────────────────────────────────────────
 
 @router.delete("/{scenario_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete(scenario_id: int, _: FacilitatorDep, session: SessionDep):
-    scenario = _get_or_404(session, scenario_id)
-    session.delete(scenario)
-    session.commit()
+async def delete(scenario_id: int, _: FacilitatorDep, session: SessionDep):
+    scenario = await _get_or_404(session, scenario_id)
+    in_use = (
+        await session.exec(select(Exercise.id).where(Exercise.scenario_id == scenario_id))
+    ).first()
+    if in_use is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Scenario is in use by one or more exercises",
+        )
+    await session.delete(scenario)
+    await session.commit()
 
 
 # ── Export as downloadable JSON ───────────────────────────────────────────────
 
 @router.get("/{scenario_id}/export")
-def export(scenario_id: int, _: FacilitatorDep, session: SessionDep):
-    scenario = _get_or_404(session, scenario_id)
+async def export(scenario_id: int, _: FacilitatorDep, session: SessionDep):
+    scenario = await _get_or_404(session, scenario_id)
     definition = export_definition(scenario)
     import re
     safe = re.sub(r"[^\w\-]", "_", scenario.title.lower())
@@ -130,8 +145,8 @@ def export(scenario_id: int, _: FacilitatorDep, session: SessionDep):
 # ── Validate ──────────────────────────────────────────────────────────────────
 
 @router.get("/{scenario_id}/validate")
-def validate(scenario_id: int, _: FacilitatorDep, session: SessionDep):
-    scenario = _get_or_404(session, scenario_id)
+async def validate(scenario_id: int, _: FacilitatorDep, session: SessionDep):
+    scenario = await _get_or_404(session, scenario_id)
     try:
         parse_definition(scenario.definition)
         return {"valid": True, "errors": []}

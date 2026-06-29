@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlmodel import Session
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.inject import Inject
 from app.models.inject_comment import InjectComment
@@ -8,12 +8,12 @@ from app.models.user import User
 from app.services.access_control import exercise_group_for_user, inject_target_teams
 
 
-def comment_group_for_user(session: Session, inject: Inject, user: User) -> str | None:
+async def comment_group_for_user(session: AsyncSession, inject: Inject, user: User) -> str | None:
     """Return the exercise team thread a participant comment belongs to."""
     if inject.group_id:
         return inject.group_id
 
-    exercise_group = exercise_group_for_user(session, inject.exercise_id, user)
+    exercise_group = await exercise_group_for_user(session, inject.exercise_id, user)
     teams = inject_target_teams(inject)
     if teams:
         if exercise_group in teams:
@@ -23,8 +23,8 @@ def comment_group_for_user(session: Session, inject: Inject, user: User) -> str 
     return exercise_group or user.team
 
 
-def create_inject_comment(
-    session: Session,
+async def create_inject_comment(
+    session: AsyncSession,
     *,
     inject_id: int,
     exercise_id: int,
@@ -40,8 +40,8 @@ def create_inject_comment(
         content=content,
     )
     session.add(comment)
-    session.commit()
-    session.refresh(comment)
+    await session.commit()
+    await session.refresh(comment)
     return comment
 
 

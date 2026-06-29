@@ -2,7 +2,8 @@ from typing import Annotated
 
 from fastapi import Cookie, Depends, Header, HTTPException, status
 from jose import JWTError
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.models.user import User, UserRole
@@ -44,9 +45,9 @@ def _effective_user(user: User, view_role: str | None, view_team: str | None) ->
     return effective
 
 
-def get_current_user(
+async def get_current_user(
     token: Annotated[str, Depends(_extract_token)],
-    session: Annotated[Session, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     view_role: Annotated[str | None, Cookie(alias="dt_view_role")] = None,
     view_team: Annotated[str | None, Cookie(alias="dt_view_team")] = None,
 ) -> User:
@@ -65,7 +66,7 @@ def get_current_user(
         )
         raise credentials_exc
 
-    user = session.exec(select(User).where(User.email == email)).first()
+    user = (await session.exec(select(User).where(User.email == email))).first()
     if user is None or not user.is_active:
         audit_service.emit(
             "auth.token_invalid",
@@ -78,11 +79,11 @@ def get_current_user(
     return _effective_user(user, view_role, view_team)
 
 
-def get_current_actual_user(
+async def get_current_actual_user(
     token: Annotated[str, Depends(_extract_token)],
-    session: Annotated[Session, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> User:
-    user = get_current_user(token, session, view_role=None, view_team=None)
+    user = await get_current_user(token, session, view_role=None, view_team=None)
     object.__setattr__(user, "actual_role", user.role)
     object.__setattr__(user, "actual_team", user.team)
     object.__setattr__(user, "can_switch_roles", user.role == UserRole.facilitator)

@@ -1,7 +1,7 @@
 import json
 from datetime import UTC, datetime
 
-from sqlmodel import Session
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.scenario import Scenario
 from app.schemas.scenario_json import ScenarioDefinition
@@ -12,8 +12,8 @@ def parse_definition(definition_json: str) -> ScenarioDefinition:
     return ScenarioDefinition.model_validate_json(definition_json)
 
 
-def create_scenario(
-    session: Session,
+async def create_scenario(
+    session: AsyncSession,
     *,
     definition: ScenarioDefinition,
     created_by: int,
@@ -27,13 +27,13 @@ def create_scenario(
         created_by=created_by,
     )
     session.add(scenario)
-    session.commit()
-    session.refresh(scenario)
+    await session.commit()
+    await session.refresh(scenario)
     return scenario
 
 
-def update_scenario(
-    session: Session,
+async def update_scenario(
+    session: AsyncSession,
     scenario: Scenario,
     *,
     definition: ScenarioDefinition,
@@ -44,8 +44,8 @@ def update_scenario(
     scenario.definition = definition.model_dump_json()
     scenario.updated_at = datetime.now(UTC)
     session.add(scenario)
-    session.commit()
-    session.refresh(scenario)
+    await session.commit()
+    await session.refresh(scenario)
     return scenario
 
 

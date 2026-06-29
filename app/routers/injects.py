@@ -7,7 +7,8 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ValidationError
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 from starlette.datastructures import UploadFile
 
 from app.database import get_session
@@ -15,6 +16,7 @@ from app.dependencies import get_current_user, require_role
 from app.models.exercise import ExerciseState
 from app.models.inject import Inject
 from app.models.user import User, UserRole
+from app.schemas.api import InjectPublic
 from app.services import audit_service
 from app.services.access_control import (
     require_exercise_access,
@@ -35,7 +37,7 @@ MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 FacilitatorDep = Annotated[User, Depends(require_role(UserRole.facilitator))]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
-SessionDep = Annotated[Session, Depends(get_session)]
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 class CreateInjectRequest(BaseModel):
@@ -47,24 +49,24 @@ class CreateInjectRequest(BaseModel):
     sequence_order: int = 0
 
 
-def _inject_node(session: Session, inject: Inject):
+async def _inject_node(session: AsyncSession, inject: Inject):
     if not inject.scenario_node_id:
         return None
     from app.models.exercise import Exercise
     from app.models.scenario import Scenario
     from app.services.scenario_service import export_definition, get_inject_node
 
-    exercise = session.get(Exercise, inject.exercise_id)
+    exercise = await session.get(Exercise, inject.exercise_id)
     if not exercise:
         return None
-    scenario = session.get(Scenario, exercise.scenario_id)
+    scenario = await session.get(Scenario, exercise.scenario_id)
     if not scenario:
         return None
     return get_inject_node(export_definition(scenario), inject.scenario_node_id)
 
 
-def _inject_options(session: Session, inject: Inject) -> list[dict]:
-    node = _inject_node(session, inject)
+async def _inject_options(session: AsyncSession, inject: Inject) -> list[dict]:
+    node = await _inject_node(session, inject)
     if not node:
         return []
     return [
@@ -73,8 +75,8 @@ def _inject_options(session: Session, inject: Inject) -> list[dict]:
     ]
 
 
-def _inject_out(inject: Inject, session: Session | None = None) -> dict:
-    node = _inject_node(session, inject) if session is not None else None
+async def _inject_out(inject: Inject, session: AsyncSession | None = None) -> dict:
+    node = await _inject_node(session, inject) if session is not None else None
     data = {
         "id": inject.id,
         "exercise_id": inject.exercise_id,
@@ -90,7 +92,7 @@ def _inject_out(inject: Inject, session: Session | None = None) -> dict:
         "attachment": inject_attachment_payload(inject),
     }
     if session is not None:
-        data["options"] = _inject_options(session, inject)
+        data["options"] = await _inject_options(session, inject)
         data["next_inject_id"] = node.next_inject_id if node else None
         data["free_text_response"] = node.free_text_response if node else True
     return data
@@ -181,24 +183,26 @@ def _delete_attachment_file(inject: Inject) -> None:
         pass
 
 
-@router.get("")
-def list_injects(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
-    require_exercise_access(session, exercise_id, current_user)
-    injects = session.exec(
-        select(Inject)
-        .where(Inject.exercise_id == exercise_id)
-        .order_by(cast(Any, Inject.sequence_order))
+@router.get("", response_model=list[InjectPublic])
+async def list_injects(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
+    await require_exercise_access(session, exercise_id, current_user)
+    injects = (
+        await session.exec(
+            select(Inject)
+            .where(Inject.exercise_id == exercise_id)
+            .order_by(cast(Any, Inject.sequence_order))
+        )
     ).all()
     visible = [
         i
         for i in injects
         if current_user.role == UserRole.facilitator
-        or require_visible_bool(session, i, current_user)
+        or await require_visible_bool(session, i, current_user)
     ]
-    return [_inject_out(i, session) for i in visible]
+    return [await _inject_out(i, session) for i in visible]
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=InjectPublic)
 async def create(
     exercise_id: int,
     request: Request,
@@ -212,12 +216,12 @@ async def create(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    exercise = require_exercise_access(session, exercise_id, _)
-    group_id = validate_group_id(session, exercise, body.group_id)
+    exercise = await require_exercise_access(session, exercise_id, _)
+    group_id = await validate_group_id(session, exercise, body.group_id)
     if group_id is None and body.target_teams and len(body.target_teams) == 1:
-        group_id = validate_group_id(session, exercise, body.target_teams[0])
+        group_id = await validate_group_id(session, exercise, body.target_teams[0])
     attachment_fields = await _save_attachment(attachment, exercise_id)
-    inject = create_inject(
+    inject = await create_inject(
         session,
         exercise_id=exercise_id,
         title=body.title,
@@ -228,23 +232,25 @@ async def create(
         sequence_order=body.sequence_order,
         **attachment_fields,
     )
-    return _inject_out(inject, session)
+    return await _inject_out(inject, session)
 
 
-@router.get("/{inject_id}")
-def get_inject(exercise_id: int, inject_id: int, current_user: CurrentUserDep, session: SessionDep):
-    require_exercise_access(session, exercise_id, current_user)
-    inject = get_inject_or_404(session, exercise_id, inject_id)
-    require_inject_visible(session, inject, current_user)
-    return _inject_out(inject, session)
+@router.get("/{inject_id}", response_model=InjectPublic)
+async def get_inject(
+    exercise_id: int, inject_id: int, current_user: CurrentUserDep, session: SessionDep
+):
+    await require_exercise_access(session, exercise_id, current_user)
+    inject = await get_inject_or_404(session, exercise_id, inject_id)
+    await require_inject_visible(session, inject, current_user)
+    return await _inject_out(inject, session)
 
 
 @router.delete("/{inject_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_inject(exercise_id: int, inject_id: int, _: FacilitatorDep, session: SessionDep):
-    inject = get_inject_or_404(session, exercise_id, inject_id)
+async def delete_inject(exercise_id: int, inject_id: int, _: FacilitatorDep, session: SessionDep):
+    inject = await get_inject_or_404(session, exercise_id, inject_id)
     _delete_attachment_file(inject)
-    session.delete(inject)
-    session.commit()
+    await session.delete(inject)
+    await session.commit()
     audit_service.emit(
         "inject.delete",
         actor=_,
@@ -256,15 +262,15 @@ def delete_inject(exercise_id: int, inject_id: int, _: FacilitatorDep, session: 
 
 
 @router.get("/{inject_id}/attachment")
-def download_attachment(
+async def download_attachment(
     exercise_id: int,
     inject_id: int,
     current_user: CurrentUserDep,
     session: SessionDep,
 ):
-    require_exercise_access(session, exercise_id, current_user)
-    inject = get_inject_or_404(session, exercise_id, inject_id)
-    require_inject_visible(session, inject, current_user)
+    await require_exercise_access(session, exercise_id, current_user)
+    inject = await get_inject_or_404(session, exercise_id, inject_id)
+    await require_inject_visible(session, inject, current_user)
     if not inject.attachment_path or not inject.attachment_filename:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     path = Path(inject.attachment_path)
@@ -277,7 +283,7 @@ def download_attachment(
     )
 
 
-@router.post("/{inject_id}/release")
+@router.post("/{inject_id}/release", response_model=InjectPublic)
 async def release(
     exercise_id: int,
     inject_id: int,
@@ -285,13 +291,13 @@ async def release(
     session: SessionDep,
 ):
     assert current_user.id is not None
-    exercise = require_exercise_access(session, exercise_id, current_user)
+    exercise = await require_exercise_access(session, exercise_id, current_user)
     if exercise.state != ExerciseState.active:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only active exercises can release injects",
         )
-    inject = get_inject_or_404(session, exercise_id, inject_id)
+    inject = await get_inject_or_404(session, exercise_id, inject_id)
     released = await release_inject(session, inject, released_by=current_user.id)
     audit_service.emit(
         "inject.release",
@@ -300,12 +306,12 @@ async def release(
         target_id=inject_id,
         reason=f"exercise={exercise_id}",
     )
-    return _inject_out(released, session)
+    return await _inject_out(released, session)
 
 
-def require_visible_bool(session: Session, inject: Inject, user: User) -> bool:
+async def require_visible_bool(session: AsyncSession, inject: Inject, user: User) -> bool:
     try:
-        require_inject_visible(session, inject, user)
+        await require_inject_visible(session, inject, user)
         return True
     except HTTPException:
         return False
