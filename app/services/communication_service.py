@@ -13,6 +13,8 @@ from app.models.exercise import Exercise, ExerciseMember
 from app.models.inject import Inject
 from app.models.scenario import Scenario
 from app.models.user import User
+from app.schemas.api import CommunicationPublic
+from app.services.background import spawn
 from app.services.scenario_service import export_definition
 
 logger = logging.getLogger(__name__)
@@ -135,8 +137,6 @@ async def visible_to_teams_for_payload(
 
 
 async def comm_payload(c: Communication, session: AsyncSession | None = None) -> dict:
-    from app.schemas.api import CommunicationPublic
-
     return CommunicationPublic(
         id=c.id,
         exercise_id=c.exercise_id,
@@ -181,8 +181,6 @@ def schedule_triggered_comms(
     trigger_comms: list,  # list[TriggerComm] from scenario definition
 ) -> None:
     """Fire asyncio tasks to create each triggered communication after its delay."""
-    from app.services.background import spawn
-
     assert inject.id is not None
     for tc in trigger_comms:
         spawn(

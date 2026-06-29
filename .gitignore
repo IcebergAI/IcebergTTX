@@ -47,3 +47,6 @@ Thumbs.db
 static/css/output.css
 node_modules/
 uploads/
+
+#Claude
+.claude/

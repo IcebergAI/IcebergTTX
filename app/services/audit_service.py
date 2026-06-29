@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.config import settings
+from app.services.background import spawn
 
 audit_logger = logging.getLogger("deep_thought.audit")
 
@@ -145,8 +146,6 @@ def _persist(event: dict[str, Any]) -> None:
         return  # no running loop; JSON log line already emitted
     except Exception:  # nosec B110 # pragma: no cover - persistence is best-effort
         return
-
-    from app.services.background import spawn
 
     spawn(_persist_async(row))
 

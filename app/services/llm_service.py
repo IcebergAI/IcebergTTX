@@ -6,6 +6,7 @@ import anthropic
 
 from app.config import settings
 from app.database import engine
+from app.schemas.api import AssessmentPublic, SuggestedInjectPublic
 
 logger = logging.getLogger(__name__)
 
@@ -219,8 +220,6 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
 
 
 def _assessment_payload(a) -> dict:
-    from app.schemas.api import AssessmentPublic
-
     return AssessmentPublic(
         id=a.id,
         response_id=a.response_id,
@@ -233,8 +232,6 @@ def _assessment_payload(a) -> dict:
 
 
 def _suggested_payload(s) -> dict:
-    from app.schemas.api import SuggestedInjectPublic
-
     return SuggestedInjectPublic(
         id=s.id,
         exercise_id=s.exercise_id,

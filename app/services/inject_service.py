@@ -6,6 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.inject import Inject, InjectState
 from app.models.scenario import Scenario
+from app.schemas.api import InjectPublic
 from app.services.scenario_service import export_definition
 
 
@@ -166,8 +167,6 @@ async def inject_payload(session: AsyncSession, inject: Inject) -> dict:
     Built via the ``InjectPublic`` schema so the HTTP and WebSocket payloads cannot
     drift (#21, #31).
     """
-    from app.schemas.api import InjectPublic
-
     node = await _inject_node(session, inject)
     return InjectPublic(
         id=inject.id,
