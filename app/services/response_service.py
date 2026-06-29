@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.inject import Inject, InjectState
 from app.models.response import Response
 from app.models.scenario import Scenario
+from app.schemas.api import ResponsePublic
 from app.services.scenario_service import export_definition, get_next_inject_ids, resolve_branch
 
 
@@ -136,8 +137,6 @@ async def broadcast_response_submitted(
 
 def response_payload(r: Response, next_injects: list[dict] | None = None) -> dict:
     """Canonical response serialization (HTTP + WS) via the ResponsePublic schema (#31)."""
-    from app.schemas.api import ResponsePublic
-
     model = ResponsePublic(
         id=r.id,
         inject_id=r.inject_id,

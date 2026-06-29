@@ -9,6 +9,9 @@ from fastapi import APIRouter, Cookie, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app.services.auth_service import decode_access_token
+from app.services.role_preview import effective_role
+
 router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="app/templates")
 
@@ -22,9 +25,6 @@ def _optional_user(
     if not access_token:
         return None
     try:
-        from app.services.auth_service import decode_access_token
-        from app.services.role_preview import effective_role
-
         payload = decode_access_token(access_token)
         actual_role = payload.get("role")
         role = effective_role(actual_role, view_role)
