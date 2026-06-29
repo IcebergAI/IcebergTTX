@@ -1,7 +1,6 @@
 import json
 import logging
 from datetime import UTC, datetime
-from typing import Any, cast
 
 import anthropic
 
@@ -68,7 +67,11 @@ async def _call(system: str, cached_context: str, user_prompt: str) -> str:
         ],
         extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
     )
-    return cast(Any, msg.content[0]).text
+    for block in msg.content:
+        text = getattr(block, "text", None)
+        if text is not None:
+            return text
+    return ""
 
 
 async def assess_response(session, response, inject, definition):
@@ -117,8 +120,6 @@ async def assess_response(session, response, inject, definition):
 
 
 async def suggest_inject(session, response, inject, exercise, definition):
-    import json as _json
-
     from app.models.suggested_inject import SuggestedInject
 
     node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
@@ -147,7 +148,7 @@ async def suggest_inject(session, response, inject, exercise, definition):
         triggered_by_response_id=response.id,
         title=data.get("title", "Follow-up inject"),
         content=data.get("content", text),
-        target_teams=_json.dumps(target_teams) if target_teams else None,
+        target_teams=json.dumps(target_teams) if target_teams else None,
         llm_model=_MODEL,
     )
     session.add(suggested)
@@ -218,30 +219,32 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
 
 
 def _assessment_payload(a) -> dict:
-    return {
-        "id": a.id,
-        "response_id": a.response_id,
-        "llm_model": a.llm_model,
-        "assessment_text": a.assessment_text,
-        "decision_quality": a.decision_quality,
-        "recommended_branch_option_id": a.recommended_branch_option_id,
-        "assessed_at": a.assessed_at.isoformat(),
-    }
+    from app.schemas.api import AssessmentPublic
+
+    return AssessmentPublic(
+        id=a.id,
+        response_id=a.response_id,
+        llm_model=a.llm_model,
+        assessment_text=a.assessment_text,
+        decision_quality=a.decision_quality,
+        recommended_branch_option_id=a.recommended_branch_option_id,
+        assessed_at=a.assessed_at.isoformat(),
+    ).model_dump(mode="json")
 
 
 def _suggested_payload(s) -> dict:
-    import json as _json
+    from app.schemas.api import SuggestedInjectPublic
 
-    return {
-        "id": s.id,
-        "exercise_id": s.exercise_id,
-        "triggered_by_response_id": s.triggered_by_response_id,
-        "title": s.title,
-        "content": s.content,
-        "target_teams": _json.loads(s.target_teams) if s.target_teams else None,
-        "llm_model": s.llm_model,
-        "status": s.status,
-        "reviewed_by": s.reviewed_by,
-        "reviewed_at": s.reviewed_at.isoformat() if s.reviewed_at else None,
-        "generated_at": s.generated_at.isoformat(),
-    }
+    return SuggestedInjectPublic(
+        id=s.id,
+        exercise_id=s.exercise_id,
+        triggered_by_response_id=s.triggered_by_response_id,
+        title=s.title,
+        content=s.content,
+        target_teams=json.loads(s.target_teams) if s.target_teams else None,
+        llm_model=s.llm_model,
+        status=s.status,
+        reviewed_by=s.reviewed_by,
+        reviewed_at=s.reviewed_at.isoformat() if s.reviewed_at else None,
+        generated_at=s.generated_at.isoformat(),
+    ).model_dump(mode="json")

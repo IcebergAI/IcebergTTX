@@ -26,7 +26,7 @@ from app.services.exercise_service import validate_group_id
 from app.services.inject_service import (
     create_inject,
     get_inject_or_404,
-    inject_attachment_payload,
+    inject_payload,
     release_inject,
 )
 
@@ -47,55 +47,6 @@ class CreateInjectRequest(BaseModel):
     target_teams: list[str] | None = None
     group_id: str | None = None
     sequence_order: int = 0
-
-
-async def _inject_node(session: AsyncSession, inject: Inject):
-    if not inject.scenario_node_id:
-        return None
-    from app.models.exercise import Exercise
-    from app.models.scenario import Scenario
-    from app.services.scenario_service import export_definition, get_inject_node
-
-    exercise = await session.get(Exercise, inject.exercise_id)
-    if not exercise:
-        return None
-    scenario = await session.get(Scenario, exercise.scenario_id)
-    if not scenario:
-        return None
-    return get_inject_node(export_definition(scenario), inject.scenario_node_id)
-
-
-async def _inject_options(session: AsyncSession, inject: Inject) -> list[dict]:
-    node = await _inject_node(session, inject)
-    if not node:
-        return []
-    return [
-        {"id": option.id, "label": option.label, "next_inject_id": option.next_inject_id}
-        for option in node.options
-    ]
-
-
-async def _inject_out(inject: Inject, session: AsyncSession | None = None) -> dict:
-    node = await _inject_node(session, inject) if session is not None else None
-    data = {
-        "id": inject.id,
-        "exercise_id": inject.exercise_id,
-        "scenario_node_id": inject.scenario_node_id,
-        "title": inject.title,
-        "content": inject.content,
-        "target_teams": json.loads(inject.target_teams) if inject.target_teams else None,
-        "group_id": inject.group_id,
-        "sequence_order": inject.sequence_order,
-        "state": inject.state,
-        "released_at": inject.released_at.isoformat() if inject.released_at else None,
-        "released_by": inject.released_by,
-        "attachment": inject_attachment_payload(inject),
-    }
-    if session is not None:
-        data["options"] = await _inject_options(session, inject)
-        data["next_inject_id"] = node.next_inject_id if node else None
-        data["free_text_response"] = node.free_text_response if node else True
-    return data
 
 
 def _safe_filename(filename: str | None) -> str:
@@ -199,7 +150,7 @@ async def list_injects(exercise_id: int, current_user: CurrentUserDep, session: 
         if current_user.role == UserRole.facilitator
         or await require_visible_bool(session, i, current_user)
     ]
-    return [await _inject_out(i, session) for i in visible]
+    return [await inject_payload(session, i) for i in visible]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=InjectPublic)
@@ -232,7 +183,7 @@ async def create(
         sequence_order=body.sequence_order,
         **attachment_fields,
     )
-    return await _inject_out(inject, session)
+    return await inject_payload(session, inject)
 
 
 @router.get("/{inject_id}", response_model=InjectPublic)
@@ -242,7 +193,7 @@ async def get_inject(
     await require_exercise_access(session, exercise_id, current_user)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
     await require_inject_visible(session, inject, current_user)
-    return await _inject_out(inject, session)
+    return await inject_payload(session, inject)
 
 
 @router.delete("/{inject_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -306,7 +257,7 @@ async def release(
         target_id=inject_id,
         reason=f"exercise={exercise_id}",
     )
-    return await _inject_out(released, session)
+    return await inject_payload(session, released)
 
 
 async def require_visible_bool(session: AsyncSession, inject: Inject, user: User) -> bool:

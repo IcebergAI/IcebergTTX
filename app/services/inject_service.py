@@ -108,7 +108,7 @@ async def _broadcast_inject_released(session: AsyncSession, inject: Inject) -> N
         "type": "inject_released",
         "exercise_id": inject.exercise_id,
         "timestamp": datetime.now(UTC).isoformat(),
-        "payload": await _inject_payload(session, inject),
+        "payload": await inject_payload(session, inject),
     }
 
     if target_groups:
@@ -160,25 +160,32 @@ async def _inject_options(session: AsyncSession, inject: Inject) -> list[dict]:
     ]
 
 
-async def _inject_payload(session: AsyncSession, inject: Inject) -> dict:
+async def inject_payload(session: AsyncSession, inject: Inject) -> dict:
+    """Canonical inject serialization shared by the API responses and WS broadcasts.
+
+    Built via the ``InjectPublic`` schema so the HTTP and WebSocket payloads cannot
+    drift (#21, #31).
+    """
+    from app.schemas.api import InjectPublic
+
     node = await _inject_node(session, inject)
-    return {
-        "id": inject.id,
-        "exercise_id": inject.exercise_id,
-        "scenario_node_id": inject.scenario_node_id,
-        "title": inject.title,
-        "content": inject.content,
-        "target_teams": json.loads(inject.target_teams) if inject.target_teams else None,
-        "group_id": inject.group_id,
-        "sequence_order": inject.sequence_order,
-        "state": inject.state,
-        "released_at": inject.released_at.isoformat() if inject.released_at else None,
-        "released_by": inject.released_by,
-        "options": await _inject_options(session, inject),
-        "next_inject_id": node.next_inject_id if node else None,
-        "free_text_response": node.free_text_response if node else True,
-        "attachment": inject_attachment_payload(inject),
-    }
+    return InjectPublic(
+        id=inject.id,
+        exercise_id=inject.exercise_id,
+        scenario_node_id=inject.scenario_node_id,
+        title=inject.title,
+        content=inject.content,
+        target_teams=json.loads(inject.target_teams) if inject.target_teams else None,
+        group_id=inject.group_id,
+        sequence_order=inject.sequence_order,
+        state=inject.state,
+        released_at=inject.released_at.isoformat() if inject.released_at else None,
+        released_by=inject.released_by,
+        options=await _inject_options(session, inject),
+        next_inject_id=node.next_inject_id if node else None,
+        free_text_response=node.free_text_response if node else True,
+        attachment=inject_attachment_payload(inject),
+    ).model_dump(mode="json")
 
 
 async def seed_injects_from_scenario(

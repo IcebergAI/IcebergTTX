@@ -135,20 +135,22 @@ async def visible_to_teams_for_payload(
 
 
 async def comm_payload(c: Communication, session: AsyncSession | None = None) -> dict:
-    return {
-        "id": c.id,
-        "exercise_id": c.exercise_id,
-        "sender_id": c.sender_id,
-        "sender_team": await sender_team_for_comm(session, c),
-        "direction": c.direction,
-        "external_entity": c.external_entity,
-        "subject": c.subject,
-        "body": c.body,
-        "triggered_by_inject_id": c.triggered_by_inject_id,
-        "visible_to_teams": await visible_to_teams_for_payload(c, session),
-        "sent_at": c.sent_at.isoformat(),
-        "read_by": json.loads(c.read_by) if c.read_by else [],
-    }
+    from app.schemas.api import CommunicationPublic
+
+    return CommunicationPublic(
+        id=c.id,
+        exercise_id=c.exercise_id,
+        sender_id=c.sender_id,
+        sender_team=await sender_team_for_comm(session, c),
+        direction=c.direction,
+        external_entity=c.external_entity,
+        subject=c.subject,
+        body=c.body,
+        triggered_by_inject_id=c.triggered_by_inject_id,
+        visible_to_teams=await visible_to_teams_for_payload(c, session),
+        sent_at=c.sent_at.isoformat(),
+        read_by=json.loads(c.read_by) if c.read_by else [],
+    ).model_dump(mode="json")
 
 
 async def broadcast_communication(comm: Communication) -> None:
@@ -179,9 +181,11 @@ def schedule_triggered_comms(
     trigger_comms: list,  # list[TriggerComm] from scenario definition
 ) -> None:
     """Fire asyncio tasks to create each triggered communication after its delay."""
+    from app.services.background import spawn
+
     assert inject.id is not None
     for tc in trigger_comms:
-        asyncio.create_task(
+        spawn(
             _delayed_comm(
                 exercise_id=inject.exercise_id,
                 inject_id=inject.id,

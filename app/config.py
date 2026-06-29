@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # logger regardless).
     audit_persist: bool = True
 
+    # Application logging (#17). log_level sets the root level; log_json emits
+    # structured JSON lines for application logs (the audit stream is always
+    # JSON regardless). Configured once at startup by configure_logging().
+    log_level: str = "INFO"
+    log_json: bool = False
+
     @property
     def secret_key_is_insecure(self) -> bool:
         return (

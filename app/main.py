@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import validate_settings
-from app.database import create_db_and_tables
+from app.database import run_migrations
+from app.logging_config import configure_logging
 from app.middleware import AuditContextMiddleware, CSRFOriginMiddleware
 from app.models import (  # noqa: F401
     assessment,
@@ -44,8 +45,9 @@ logger = logging.getLogger("deep_thought")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     validate_settings()
-    await create_db_and_tables()
+    await run_migrations()
     audit_service.emit("app.startup", severity="info")
     task = asyncio.create_task(heartbeat_task())
     yield

@@ -30,6 +30,11 @@ RUN pip install --no-cache-dir -e .
 # Copy application source
 COPY app/ app/
 
+# Alembic migrations are applied at startup (app.database.run_migrations); the
+# config and versions must be present in the image.
+COPY alembic.ini alembic.ini
+COPY alembic/ alembic/
+
 # Copy compiled static assets from builder stage
 COPY --from=tailwind-builder /app/static/ static/
 
