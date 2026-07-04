@@ -63,10 +63,16 @@ async def exercise_ws(
             group_id = group_id or user.team
         else:
             group_id = member.group_id if member else user.team
+    user_id = user.id
+    role = user.role.value
 
-    await manager.connect(
-        ws, exercise_id, user_id=user.id, role=user.role.value, group_id=group_id
-    )
+    # The receive loop below never touches the DB, but a WebSocket handler's
+    # dependency-injected session stays open until the socket disconnects (up to
+    # 24h). Release the pooled connection now so long-lived sockets can't exhaust
+    # the pool under normal concurrency (#35).
+    await session.close()
+
+    await manager.connect(ws, exercise_id, user_id=user_id, role=role, group_id=group_id)
     try:
         while True:
             data = await ws.receive_json()
