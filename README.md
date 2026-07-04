@@ -1,6 +1,6 @@
 # IcebergTTX
 
-[![CI](https://github.com/richardmhope/deep_thought/actions/workflows/ci.yml/badge.svg)](https://github.com/richardmhope/deep_thought/actions/workflows/ci.yml)
+[![CI](https://github.com/IcebergAI/IcebergTTX/actions/workflows/ci.yml/badge.svg)](https://github.com/IcebergAI/IcebergTTX/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.14%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)
 
