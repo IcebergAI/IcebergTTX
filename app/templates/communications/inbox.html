@@ -82,11 +82,11 @@
   <div class="page-head">
     <div>
       <h1 class="page-title">Communications</h1>
-      <p class="text-[13.5px] text-stone-500 mt-1">Messages that shape the exercise narrative.</p>
+      <p class="text-[13.5px] text-muted mt-1">Messages that shape the exercise narrative.</p>
     </div>
     <div class="flex items-center gap-2">
       <span class="flex items-center gap-1.5 smallcaps"
-            :class="wsConnected ? 'text-stone-400' : 'text-red-400'">
+            :class="wsConnected ? 'text-faint' : 'text-red-400'">
         <span x-text="wsConnected ? 'Live' : 'Disconnected'"></span>
       </span>
       <template x-if="!isF">
@@ -117,11 +117,11 @@
           <option value="inbound">Inbound</option>
           <option value="outbound">Outbound</option>
         </select>
-        <span class="smallcaps text-stone-400" x-text="filteredComms.length"></span>
+        <span class="smallcaps text-faint" x-text="filteredComms.length"></span>
       </div>
 
       <div x-show="filteredComms.length === 0"
-           class="px-4 py-8 text-center smallcaps text-stone-400">No messages.</div>
+           class="px-4 py-8 text-center smallcaps text-faint">No messages.</div>
 
       <template x-for="c in filteredComms" :key="c.id">
         <div @click="open(c)"
@@ -133,7 +133,7 @@
             <span class="comm-row-meta smallcaps truncate"
                   :style="c.direction === 'inbound' ? 'color: var(--ink-soft)' : 'color: var(--muted)'"
                   x-text="commListMeta(c)"></span>
-            <span class="comm-row-time mono text-[10.5px] text-stone-400 ml-auto shrink-0"
+            <span class="comm-row-time mono text-[10.5px] text-faint ml-auto shrink-0"
                   style="color: var(--muted);"
                   x-text="fmtAgo(c.sent_at)"></span>
           </div>
@@ -145,7 +145,7 @@
                style="color: var(--muted);"
                x-text="c.body"></div>
           <template x-if="c.triggered_by_inject_id">
-            <div class="mono text-[10.5px] text-stone-400 mt-1"
+            <div class="mono text-[10.5px] text-faint mt-1"
                  x-text="'triggered by inject #' + c.triggered_by_inject_id"></div>
           </template>
         </div>
@@ -156,7 +156,7 @@
     <div class="overflow-y-auto p-8">
       <template x-if="!selected">
         <div class="flex items-center justify-center h-full">
-          <p class="smallcaps text-stone-400">Select a message to read.</p>
+          <p class="smallcaps text-faint">Select a message to read.</p>
         </div>
       </template>
 
@@ -171,15 +171,15 @@
                     :style="selected.direction === 'inbound' ? 'background: var(--accent-d)' : 'background:#5b86b8'"></span>
               <span x-text="commBadgeLabel(selected)"></span>
             </span>
-            <span class="mono text-[11.5px] text-stone-500"
+            <span class="mono text-[11.5px] text-muted"
                   x-text="'MSG-' + String(selected.id).padStart(3,'0') + (selected.triggered_by_inject_id ? ' · triggered by inject #' + selected.triggered_by_inject_id : '')"></span>
-            <span class="mono text-[11.5px] text-stone-400 ml-auto" x-text="fmtTime(selected.sent_at)"></span>
+            <span class="mono text-[11.5px] text-faint ml-auto" x-text="fmtTime(selected.sent_at)"></span>
           </div>
 
           <!-- Metadata -->
           <div class="space-y-2 text-[13px] mb-6">
             <div class="flex items-center gap-2 min-w-0">
-              <div class="smallcaps text-stone-500 shrink-0"
+              <div class="smallcaps text-muted shrink-0"
                    style="width: 42px;"
                    x-text="selected.direction === 'inbound' ? 'From' : 'To'"></div>
               <template x-if="selected.direction !== 'outbound' || !hasTeamRecipients(selected)">
@@ -198,7 +198,7 @@
             </div>
             <template x-if="selected.direction === 'outbound' && selected.sender_team">
               <div class="flex items-center gap-2 min-w-0">
-                <div class="smallcaps text-stone-500 shrink-0"
+                <div class="smallcaps text-muted shrink-0"
                      style="width: 42px;">From</div>
                 <div class="min-w-0">
                   <span class="pill mono ring-1 ring-inset text-[10px]"
@@ -209,7 +209,7 @@
             </template>
             <template x-if="selected.direction === 'inbound' && hasTeamRecipients(selected)">
               <div class="flex items-center gap-2 min-w-0">
-                <div class="smallcaps text-stone-500 shrink-0"
+                <div class="smallcaps text-muted shrink-0"
                      style="width: 42px;">To</div>
                 <div class="flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5"
                      style="flex-wrap: nowrap;">
@@ -223,17 +223,17 @@
             </template>
           </div>
 
-          <div class="smallcaps text-stone-500 mb-1">Subject</div>
+          <div class="smallcaps text-muted mb-1">Subject</div>
           <h2 class="text-[20px] font-semibold tracking-tight mb-5" x-text="selected.subject"></h2>
 
-          <article class="text-[14.5px] leading-relaxed text-stone-800 whitespace-pre-wrap"
+          <article class="text-[14.5px] leading-relaxed text-ink whitespace-pre-wrap"
                    x-text="selected.body"></article>
 
           <!-- Participant reply (non-facilitators, inbound messages only) -->
           <template x-if="!isF && selected.direction === 'inbound'">
             <div class="mt-7 border-t rule pt-5">
-              <div class="smallcaps text-stone-500 mb-2">Send reply</div>
-              <p class="text-[12.5px] text-stone-500 mb-3">Send an outbound message in response.</p>
+              <div class="smallcaps text-muted mb-2">Send reply</div>
+              <p class="text-[12.5px] text-muted mb-3">Send an outbound message in response.</p>
               <button @click="openSendReply(selected)"
                       class="btn btn-ghost h-8 px-3 text-[13px]">Reply to <span x-text="selected.external_entity || 'sender'"></span></button>
             </div>
@@ -242,8 +242,8 @@
           <!-- Facilitator follow-up -->
           <template x-if="isF">
             <div class="mt-7 border-t rule pt-5">
-              <div class="smallcaps text-stone-500 mb-2">Inject follow-up</div>
-              <p class="text-[12.5px] text-stone-500 mb-3">Inject a new inbound message to participants.</p>
+              <div class="smallcaps text-muted mb-2">Inject follow-up</div>
+              <p class="text-[12.5px] text-muted mb-3">Inject a new inbound message to participants.</p>
               <button @click="openInjectInbound(selected)"
                       class="btn btn-ghost h-8 px-3 text-[13px]">Inject inbound message</button>
             </div>
@@ -261,7 +261,7 @@
       <h2 class="text-[18px] font-semibold mb-4">Send message</h2>
       <div class="space-y-3">
         <div>
-          <label class="block smallcaps text-stone-500 mb-1">To</label>
+          <label class="block smallcaps text-muted mb-1">To</label>
           <div class="flex gap-2 mb-2">
             <button type="button"
                     @click="send.recipient_type = 'external'"
@@ -279,11 +279,11 @@
           <template x-if="send.recipient_type === 'external'">
             <input type="text" x-model="send.external_entity"
                    placeholder="e.g. ICO, NCSC, CEO, Press office"
-                   class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+                   class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface" />
           </template>
           <template x-if="send.recipient_type === 'team'">
             <select x-model="send.recipient_team"
-                    class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white">
+                    class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface">
               <option value="">Select team…</option>
               <template x-for="team in teamOptions" :key="team.id">
                 <option :value="team.id" x-text="team.label || team.id"></option>
@@ -292,14 +292,14 @@
           </template>
         </div>
         <div>
-          <label class="block smallcaps text-stone-500 mb-1">Subject</label>
+          <label class="block smallcaps text-muted mb-1">Subject</label>
           <input type="text" x-model="send.subject"
-                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface" />
         </div>
         <div>
-          <label class="block smallcaps text-stone-500 mb-1">Body</label>
+          <label class="block smallcaps text-muted mb-1">Body</label>
           <textarea x-model="send.body" rows="5"
-                    class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] resize-none bg-white"></textarea>
+                    class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] resize-none bg-surface"></textarea>
         </div>
       </div>
       <div class="flex gap-3 mt-5">
@@ -319,41 +319,41 @@
       <h2 class="text-[18px] font-semibold mb-4">Inject inbound message</h2>
       <div class="space-y-3">
         <div>
-          <label class="block smallcaps text-stone-500 mb-1">From (external entity)</label>
+          <label class="block smallcaps text-muted mb-1">From (external entity)</label>
           <input type="text" x-model="compose.external_entity" placeholder="e.g. ICO, NCSC, CEO"
-                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface" />
         </div>
         <div>
-          <label class="block smallcaps text-stone-500 mb-1">Subject</label>
+          <label class="block smallcaps text-muted mb-1">Subject</label>
           <input type="text" x-model="compose.subject"
-                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface" />
         </div>
         <div>
-          <label class="block smallcaps text-stone-500 mb-1">Body</label>
+          <label class="block smallcaps text-muted mb-1">Body</label>
           <textarea x-model="compose.body" rows="4"
-                    class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] resize-none bg-white"></textarea>
+                    class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] resize-none bg-surface"></textarea>
         </div>
         <div>
           <div class="flex items-center justify-between mb-1">
-            <label class="block smallcaps text-stone-500">To teams</label>
-            <span class="smallcaps text-stone-400"
+            <label class="block smallcaps text-muted">To teams</label>
+            <span class="smallcaps text-faint"
                   x-text="compose.visible_to_teams.length ? compose.visible_to_teams.length + ' selected' : 'All teams'"></span>
           </div>
           <div x-show="teamOptions.length"
                class="flex flex-wrap gap-2">
             <template x-for="team in teamOptions" :key="team.id">
               <label class="inline-flex items-center gap-2 rounded-md ring-rule px-2.5 py-1.5 text-[12.5px] cursor-pointer paper-soft"
-                     :class="compose.visible_to_teams.includes(team.id) ? 'ring-stone-400 bg-stone-100/70' : ''">
+                     :class="compose.visible_to_teams.includes(team.id) ? 'ring-line-strong bg-surface-2/70' : ''">
                 <input type="checkbox"
                        :value="team.id"
                        x-model="compose.visible_to_teams"
-                       class="accent-stone-700" />
+                       class="accent-accent-ink" />
                 <span x-text="teamLabel(team)"></span>
               </label>
             </template>
           </div>
           <div x-show="!teamOptions.length"
-               class="rounded-md ring-rule px-3 py-2 text-[12.5px] text-stone-500 bg-white">
+               class="rounded-md ring-rule px-3 py-2 text-[12.5px] text-muted bg-surface">
             All teams
           </div>
         </div>

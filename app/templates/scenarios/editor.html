@@ -156,7 +156,7 @@
     <div>
       <h1 class="page-title"
           x-text="scenarioId ? 'Edit scenario' : 'New scenario'"></h1>
-      <p class="text-[13.5px] text-stone-500 mt-1">
+      <p class="text-[13.5px] text-muted mt-1">
         Build the exercise brief, route injects to teams, and check the flow before launch.
       </p>
     </div>
@@ -189,7 +189,7 @@
     <!-- Left outline -->
     <aside class="scenario-rail" data-testid="scenario-outline">
       <div class="scenario-panel p-3">
-        <div class="smallcaps text-stone-500 px-1 mb-2">Builder</div>
+        <div class="smallcaps text-muted px-1 mb-2">Builder</div>
         <div class="space-y-1">
           <button type="button"
                   @click="activePanel = 'scenario'"
@@ -198,9 +198,9 @@
                   data-testid="nav-scenario">
             <div class="flex items-center justify-between gap-3">
               <span class="text-[13.5px] font-medium">Scenario brief</span>
-              <span class="mono text-[11px] text-stone-400" x-text="form.title ? 'ready' : 'draft'"></span>
+              <span class="mono text-[11px] text-faint" x-text="form.title ? 'ready' : 'draft'"></span>
             </div>
-            <div class="text-[12px] text-stone-500 mt-0.5 truncate"
+            <div class="text-[12px] text-muted mt-0.5 truncate"
                  x-text="durationLabel"></div>
           </button>
 
@@ -211,18 +211,18 @@
                   data-testid="nav-teams">
             <div class="flex items-center justify-between gap-3">
               <span class="text-[13.5px] font-medium">Participant teams</span>
-              <span class="mono text-[11px] text-stone-400" x-text="form.participant_teams.length"></span>
+              <span class="mono text-[11px] text-faint" x-text="form.participant_teams.length"></span>
             </div>
-            <div class="text-[12px] text-stone-500 mt-0.5"
+            <div class="text-[12px] text-muted mt-0.5"
                  x-text="form.participant_teams.length ? 'Targeted inject routing enabled' : 'Shared exercise by default'"></div>
           </button>
         </div>
 
         <div class="border-t rule mt-3 pt-3">
           <div class="flex items-center justify-between px-1 mb-2">
-            <div class="smallcaps text-stone-500">Injects</div>
+            <div class="smallcaps text-muted">Injects</div>
             <button type="button" @click="addInject()"
-                    class="smallcaps text-stone-500 hover:text-stone-800">+ Add</button>
+                    class="smallcaps text-muted hover:text-ink">+ Add</button>
           </div>
           <div class="space-y-1.5">
             <template x-for="(inj, i) in form.injects" :key="inj._key">
@@ -233,12 +233,12 @@
                       data-testid="inject-outline-row">
                 <div class="flex items-start justify-between gap-2">
                   <div class="min-w-0">
-                    <div class="mono text-[11px] text-stone-400 truncate"
+                    <div class="mono text-[11px] text-faint truncate"
                          x-text="inj.id || 'inject_' + String(i + 1).padStart(2, '0')"></div>
                     <div class="text-[13px] font-medium truncate"
                          x-text="inj.title || 'Untitled inject'"></div>
                   </div>
-                  <span class="mono text-[10.5px] text-stone-400 shrink-0" x-text="'#' + (i + 1)"></span>
+                  <span class="mono text-[10.5px] text-faint shrink-0" x-text="'#' + (i + 1)"></span>
                 </div>
                 <div class="flex flex-wrap gap-1 mt-2">
                   <span x-show="inj.id && inj.id === form.start_inject_id"
@@ -267,9 +267,9 @@
       <section x-show="activePanel === 'scenario'" class="scenario-panel p-5" data-testid="scenario-details-panel">
         <div class="flex items-start justify-between gap-4 mb-5">
           <div>
-            <div class="smallcaps text-stone-500">Scenario brief</div>
+            <div class="smallcaps text-muted">Scenario brief</div>
             <h2 class="text-[20px] font-semibold tracking-tight mt-1">Define the operating context</h2>
-            <p class="text-[13px] text-stone-500 mt-1">
+            <p class="text-[13px] text-muted mt-1">
               Keep the brief concise, then use injects for the decision pressure.
             </p>
           </div>
@@ -277,14 +277,14 @@
 
         <div class="grid gap-4">
           <div>
-            <label class="block smallcaps text-stone-500 mb-1">Title <span class="text-red-400">*</span></label>
+            <label class="block smallcaps text-muted mb-1">Title <span class="text-red-400">*</span></label>
             <input type="text" x-model="form.title"
                    class="scenario-field"
                    data-testid="scenario-title" />
           </div>
 
           <div>
-            <label class="block smallcaps text-stone-500 mb-1">Description</label>
+            <label class="block smallcaps text-muted mb-1">Description</label>
             <textarea x-model="form.description" rows="3"
                       class="scenario-field resize-none"
                       data-testid="scenario-description"></textarea>
@@ -292,26 +292,26 @@
 
           <div class="grid gap-3" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
             <div>
-              <label class="block smallcaps text-stone-500 mb-1">Author</label>
+              <label class="block smallcaps text-muted mb-1">Author</label>
               <input type="text" x-model="form.metadata.author"
                      placeholder="IcebergTTX"
                      class="scenario-field"
                      data-testid="scenario-author" />
             </div>
             <div>
-              <label class="block smallcaps text-stone-500 mb-1">Estimated duration</label>
+              <label class="block smallcaps text-muted mb-1">Estimated duration</label>
               <div class="flex items-center gap-2">
                 <input type="number" min="1" step="1"
                        x-model="form.metadata.estimated_duration_minutes"
                        class="scenario-field"
                        data-testid="scenario-duration" />
-                <span class="text-[13px] text-stone-500 shrink-0">minutes</span>
+                <span class="text-[13px] text-muted shrink-0">minutes</span>
               </div>
             </div>
           </div>
 
           <div>
-            <label class="block smallcaps text-stone-500 mb-1">Tags</label>
+            <label class="block smallcaps text-muted mb-1">Tags</label>
             <input type="text" x-model="tagsInput" placeholder="cyber, ransomware, GDPR"
                    class="scenario-field"
                    data-testid="scenario-tags" />
@@ -319,12 +319,12 @@
               <template x-for="tag in tagsList" :key="tag">
                 <span class="pill text-[10.5px]" x-text="tag"></span>
               </template>
-              <span x-show="tagsList.length === 0" class="text-[12.5px] text-stone-400">No tags yet.</span>
+              <span x-show="tagsList.length === 0" class="text-[12.5px] text-faint">No tags yet.</span>
             </div>
           </div>
 
           <div>
-            <label class="block smallcaps text-stone-500 mb-1">Start inject</label>
+            <label class="block smallcaps text-muted mb-1">Start inject</label>
             <select x-model="form.start_inject_id"
                     class="scenario-field"
                     data-testid="scenario-start-inject">
@@ -335,7 +335,7 @@
           </div>
 
           <div>
-            <label class="block smallcaps text-stone-500 mb-1">Debrief notes</label>
+            <label class="block smallcaps text-muted mb-1">Debrief notes</label>
             <textarea x-model="form.debrief_notes" rows="3"
                       class="scenario-field resize-none"
                       data-testid="scenario-debrief"></textarea>
@@ -347,9 +347,9 @@
       <section x-show="activePanel === 'teams'" class="scenario-panel p-5" data-testid="scenario-teams-panel">
         <div class="flex items-start justify-between gap-4 mb-5">
           <div>
-            <div class="smallcaps text-stone-500">Participant teams</div>
+            <div class="smallcaps text-muted">Participant teams</div>
             <h2 class="text-[20px] font-semibold tracking-tight mt-1">Create routing groups</h2>
-            <p class="text-[13px] text-stone-500 mt-1">
+            <p class="text-[13px] text-muted mt-1">
               Teams become the targeting controls on each inject.
             </p>
           </div>
@@ -375,7 +375,7 @@
             </div>
           </template>
           <div x-show="form.participant_teams.length === 0"
-               class="validation-card text-[13px] text-stone-500">
+               class="validation-card text-[13px] text-muted">
             No teams defined. All participants will receive all injects unless you add routing groups.
           </div>
         </div>
@@ -386,10 +386,10 @@
         <section class="scenario-panel p-5" data-testid="scenario-inject-panel">
           <div class="flex items-start justify-between gap-4 mb-5">
             <div class="min-w-0">
-              <div class="smallcaps text-stone-500">Inject editor</div>
+              <div class="smallcaps text-muted">Inject editor</div>
               <h2 class="text-[20px] font-semibold tracking-tight mt-1 truncate"
                   x-text="activeInject.title || activeInject.id || 'Untitled inject'"></h2>
-              <p class="text-[13px] text-stone-500 mt-1">
+              <p class="text-[13px] text-muted mt-1">
                 Define the participant prompt, routing, choices, and evaluator expectations.
               </p>
             </div>
@@ -407,7 +407,7 @@
           <div class="space-y-5">
             <div class="grid gap-3" style="grid-template-columns: minmax(130px, .7fr) minmax(0, 1.5fr);">
               <div>
-                <label class="block smallcaps text-stone-500 mb-1">ID <span class="text-red-400">*</span></label>
+                <label class="block smallcaps text-muted mb-1">ID <span class="text-red-400">*</span></label>
                 <input type="text" x-model="activeInject.id"
                        @focus="activeInject._editingId = activeInject.id"
                        @change="commitInjectId(activeInject)"
@@ -415,7 +415,7 @@
                        data-testid="inject-id" />
               </div>
               <div>
-                <label class="block smallcaps text-stone-500 mb-1">Title</label>
+                <label class="block smallcaps text-muted mb-1">Title</label>
                 <input type="text" x-model="activeInject.title"
                        class="scenario-field"
                        data-testid="inject-title" />
@@ -423,7 +423,7 @@
             </div>
 
             <div>
-              <label class="block smallcaps text-stone-500 mb-1">Content</label>
+              <label class="block smallcaps text-muted mb-1">Content</label>
               <textarea x-model="activeInject.content" rows="5"
                         class="scenario-field resize-none"
                         data-testid="inject-content"></textarea>
@@ -432,12 +432,12 @@
             <div class="validation-card">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div class="smallcaps text-stone-500">Response mode</div>
-                  <div class="text-[13px] text-stone-500 mt-0.5">Participants can explain reasoning in free text.</div>
+                  <div class="smallcaps text-muted">Response mode</div>
+                  <div class="text-[13px] text-muted mt-0.5">Participants can explain reasoning in free text.</div>
                 </div>
-                <label class="inline-flex items-center gap-2 text-[13px] text-stone-600">
+                <label class="inline-flex items-center gap-2 text-[13px] text-ink-soft">
                   <input type="checkbox" x-model="activeInject.free_text_response"
-                         class="rounded accent-stone-700"
+                         class="rounded accent-accent-ink"
                          data-testid="inject-free-text" />
                   Allow free-text response
                 </label>
@@ -447,12 +447,12 @@
             <div>
               <div class="flex items-center justify-between gap-3 mb-2">
                 <div>
-                  <div class="smallcaps text-stone-500">Target teams</div>
-                  <div class="text-[12.5px] text-stone-500 mt-0.5">Leave all unchecked for a shared inject.</div>
+                  <div class="smallcaps text-muted">Target teams</div>
+                  <div class="text-[12.5px] text-muted mt-0.5">Leave all unchecked for a shared inject.</div>
                 </div>
                 <button type="button" x-show="form.participant_teams.length"
                         @click="activeInject.target_teams = []"
-                        class="smallcaps text-stone-500 hover:text-stone-800">Clear</button>
+                        class="smallcaps text-muted hover:text-ink">Clear</button>
               </div>
               <div x-show="form.participant_teams.length" class="flex flex-wrap gap-2">
                 <template x-for="team in form.participant_teams" :key="team._key">
@@ -461,13 +461,13 @@
                     <input type="checkbox"
                            :checked="injectTargetsTeam(activeInject, team.id)"
                            @change="toggleInjectTeam(activeInject, team.id, $event.target.checked)"
-                           class="accent-stone-700"
+                           class="accent-accent-ink"
                            data-testid="inject-target-team" />
                     <span x-text="team.label || team.id"></span>
                   </label>
                 </template>
               </div>
-              <div x-show="!form.participant_teams.length" class="validation-card text-[13px] text-stone-500">
+              <div x-show="!form.participant_teams.length" class="validation-card text-[13px] text-muted">
                 Add participant teams to enable targeted routing.
               </div>
             </div>
@@ -475,8 +475,8 @@
             <div class="border-t rule pt-5">
               <div class="flex items-center justify-between gap-3 mb-3">
                 <div>
-                  <div class="smallcaps text-stone-500">Progression</div>
-                  <div class="text-[12.5px] text-stone-500 mt-0.5">Use choices for branching, or a linear next inject for free-text-only steps.</div>
+                  <div class="smallcaps text-muted">Progression</div>
+                  <div class="text-[12.5px] text-muted mt-0.5">Use choices for branching, or a linear next inject for free-text-only steps.</div>
                 </div>
                 <button @click="addOption(activeInject)" type="button"
                         class="btn btn-ghost h-8 px-3 text-[13px]"
@@ -510,7 +510,7 @@
                 <div x-show="activeInject.options.length === 0"
                      class="validation-card">
                   <div class="grid gap-2" style="grid-template-columns: minmax(120px, .55fr) minmax(0, 1fr); align-items: center;">
-                    <label class="smallcaps text-stone-500">Linear next</label>
+                    <label class="smallcaps text-muted">Linear next</label>
                     <select x-model="activeInject.next_inject_id"
                             class="scenario-field compact mono"
                             data-testid="inject-linear-next">
@@ -527,8 +527,8 @@
             <div class="border-t rule pt-5">
               <div class="flex items-center justify-between gap-3 mb-3">
                 <div>
-                  <div class="smallcaps text-stone-500">Expected actions</div>
-                  <div class="text-[12.5px] text-stone-500 mt-0.5">Evaluator cues shown in the facilitator console.</div>
+                  <div class="smallcaps text-muted">Expected actions</div>
+                  <div class="text-[12.5px] text-muted mt-0.5">Evaluator cues shown in the facilitator console.</div>
                 </div>
                 <button @click="addExpectedAction(activeInject)" type="button"
                         class="btn btn-ghost h-8 px-3 text-[13px]"
@@ -546,7 +546,7 @@
                   </div>
                 </template>
                 <div x-show="activeInject.expected_actions.length === 0"
-                     class="validation-card text-[13px] text-stone-500">No expected actions defined.</div>
+                     class="validation-card text-[13px] text-muted">No expected actions defined.</div>
               </div>
             </div>
           </div>
@@ -559,8 +559,8 @@
       <div class="scenario-panel p-4">
         <div class="flex items-center justify-between gap-3 mb-3">
           <div>
-            <div class="smallcaps text-stone-500">Readiness</div>
-            <div class="text-[13px] text-stone-500 mt-0.5" x-text="readinessLabel"></div>
+            <div class="smallcaps text-muted">Readiness</div>
+            <div class="text-[13px] text-muted mt-0.5" x-text="readinessLabel"></div>
           </div>
           <span class="pill text-[10.5px]" :style="readinessPillStyle" x-text="readinessState"></span>
         </div>
@@ -568,15 +568,15 @@
         <div class="grid gap-2 mb-4" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
           <div class="validation-card">
             <div class="mono text-[18px] font-semibold" x-text="form.injects.length"></div>
-            <div class="smallcaps text-stone-500">Injects</div>
+            <div class="smallcaps text-muted">Injects</div>
           </div>
           <div class="validation-card">
             <div class="mono text-[18px] font-semibold" x-text="branchCount"></div>
-            <div class="smallcaps text-stone-500">Branches</div>
+            <div class="smallcaps text-muted">Branches</div>
           </div>
           <div class="validation-card">
             <div class="mono text-[18px] font-semibold" x-text="targetedInjectCount"></div>
-            <div class="smallcaps text-stone-500">Targeted</div>
+            <div class="smallcaps text-muted">Targeted</div>
           </div>
         </div>
 
@@ -605,8 +605,8 @@
       <div class="scenario-panel p-4">
         <div class="flex items-center justify-between gap-3 mb-3">
           <div>
-            <div class="smallcaps text-stone-500">Flow preview</div>
-            <div class="text-[13px] text-stone-500 mt-0.5">Start path plus disconnected nodes.</div>
+            <div class="smallcaps text-muted">Flow preview</div>
+            <div class="text-[13px] text-muted mt-0.5">Start path plus disconnected nodes.</div>
           </div>
         </div>
 
@@ -614,15 +614,15 @@
           <template x-for="row in flowRows" :key="row.key">
             <div class="flow-row" :style="'margin-left:' + Math.min(row.depth * 14, 42) + 'px'">
               <div class="flex items-center gap-2">
-                <span class="mono text-[11px] text-stone-400" x-text="row.id"></span>
+                <span class="mono text-[11px] text-faint" x-text="row.id"></span>
                 <span x-show="row.kind === 'missing'" class="pill text-[10px]" style="background:#fee2e2; color:#b91c1c; box-shadow: inset 0 0 0 1px #fecaca;">missing</span>
                 <span x-show="row.disconnected" class="pill text-[10px]">unlinked</span>
               </div>
               <div class="text-[12.5px] font-medium mt-0.5 truncate" x-text="row.title"></div>
-              <div class="text-[11.5px] text-stone-500 mt-0.5" x-text="row.meta"></div>
+              <div class="text-[11.5px] text-muted mt-0.5" x-text="row.meta"></div>
             </div>
           </template>
-          <div x-show="flowRows.length === 0" class="validation-card text-[13px] text-stone-500">
+          <div x-show="flowRows.length === 0" class="validation-card text-[13px] text-muted">
             Add an inject to preview the flow.
           </div>
         </div>

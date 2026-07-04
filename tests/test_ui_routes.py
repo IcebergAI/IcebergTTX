@@ -42,7 +42,7 @@ async def test_dark_theme_cookie_prerenders_dark_document(
     assert r.status_code == 200
     assert (
         '<html lang="en" data-theme="dark" '
-        'style="background-color: #151512; color-scheme: dark;">'
+        'style="background-color: oklch(0.185 0.02 256); color-scheme: dark;">'
     ) in r.text
     assert '<meta name="color-scheme" content="dark" />' in r.text
 

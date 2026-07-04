@@ -11,15 +11,15 @@
 
     <div class="flex items-center gap-2 min-w-0">
       <span class="text-[13.5px] font-medium truncate" x-text="exercise?.title || '…'"></span>
-      <span class="mono text-[11.5px] text-stone-400"
+      <span class="mono text-[11.5px] text-faint"
             x-text="exercise ? 'EX-' + String(exercise.id).padStart(3,'0') : ''"></span>
     </div>
 
     <span class="pill mono" x-text="exercise?.state || 'loading'"></span>
-    <span x-show="exercise?.state === 'active'" class="mono text-[12px] text-stone-500" x-text="elapsedStr"></span>
+    <span x-show="exercise?.state === 'active'" class="mono text-[12px] text-muted" x-text="elapsedStr"></span>
 
     <div class="ml-auto flex items-center gap-2">
-      <span class="smallcaps" :class="wsConnected ? 'text-stone-400' : 'text-red-400'"
+      <span class="smallcaps" :class="wsConnected ? 'text-faint' : 'text-red-400'"
             x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
       <div class="w-px h-5 border-l rule-2 mx-1"></div>
       <button @click="showOpsPanel = !showOpsPanel"
@@ -49,10 +49,10 @@
     <div class="border-r rule overflow-y-auto" style="background: var(--paper);">
       <div class="px-4 pt-4 pb-2 flex items-center justify-between">
         <div>
-          <div class="smallcaps text-stone-500">Injects</div>
-          <div class="text-[12px] text-stone-400 mt-0.5">Release one item at a time.</div>
+          <div class="smallcaps text-muted">Injects</div>
+          <div class="text-[12px] text-faint mt-0.5">Release one item at a time.</div>
         </div>
-        <span class="mono text-[11px] text-stone-400"
+        <span class="mono text-[11px] text-faint"
               x-text="injects.filter(i => i.state !== 'pending').length + '/' + injects.length + ' live'"></span>
       </div>
 
@@ -60,8 +60,8 @@
         <template x-for="section in injectSections" :key="section.id || 'shared'">
           <div>
             <div class="flex items-center gap-2 px-1 mb-1.5">
-              <div class="smallcaps text-stone-500" x-text="section.label"></div>
-              <span class="ml-auto mono text-[10.5px] text-stone-400"
+              <div class="smallcaps text-muted" x-text="section.label"></div>
+              <span class="ml-auto mono text-[10.5px] text-faint"
                     x-text="section.injects.length + ' queued'"></span>
             </div>
             <div class="space-y-1.5">
@@ -77,21 +77,21 @@
                       </div>
                       <div class="flex flex-wrap items-center gap-1.5 mt-1">
                         <span class="pill mono ring-1 ring-inset text-[10px]"
-                              :class="inj.group_id ? teamColor(inj.group_id) : 'bg-stone-100 text-stone-600 ring-stone-200'"
+                              :class="inj.group_id ? teamColor(inj.group_id) : 'bg-surface-2 text-ink-soft ring-line'"
                               x-text="groupLabel(inj.group_id)"></span>
                         <template x-if="inj.attachment">
                           <a :href="inj.attachment.url"
                              download
-                             class="pill mono ring-1 ring-inset text-[10px] bg-stone-100 text-stone-600 ring-stone-200"
+                             class="pill mono ring-1 ring-inset text-[10px] bg-surface-2 text-ink-soft ring-line"
                              style="max-width: 100%;">
                             <span class="truncate" x-text="inj.attachment.filename"></span>
                           </a>
                         </template>
                         <span x-show="inj.state === 'released'"
-                              class="mono text-[10.5px] text-stone-500"
+                              class="mono text-[10.5px] text-muted"
                               x-text="'live ' + fmtTime(inj.released_at)"></span>
                         <span x-show="inj.state === 'resolved'"
-                              class="mono text-[10.5px] text-stone-400">resolved</span>
+                              class="mono text-[10.5px] text-faint">resolved</span>
                       </div>
                     </div>
                     <button x-show="inj.state === 'pending'"
@@ -104,10 +104,10 @@
                   <!-- Expected actions (from scenario definition) -->
                   <template x-if="inj.state === 'released' && nodeMap[inj.scenario_node_id] && nodeMap[inj.scenario_node_id].expected_actions && nodeMap[inj.scenario_node_id].expected_actions.length">
                     <details class="mt-2 pt-2 border-t" style="border-color: var(--rule);">
-                      <summary class="smallcaps text-stone-400 cursor-pointer">Expected actions</summary>
+                      <summary class="smallcaps text-faint cursor-pointer">Expected actions</summary>
                       <ul class="space-y-0.5">
                         <template x-for="act in nodeMap[inj.scenario_node_id].expected_actions" :key="act">
-                          <li class="flex items-start gap-1.5 text-[11.5px] text-stone-600">
+                          <li class="flex items-start gap-1.5 text-[11.5px] text-ink-soft">
                             <span class="dot mt-1 shrink-0" style="background: var(--accent-d); width:5px; height:5px;"></span>
                             <span x-text="act"></span>
                           </li>
@@ -122,7 +122,7 @@
         </template>
 
         <div x-show="injects.length === 0 && !loading"
-             class="text-center py-4 smallcaps text-stone-400">No injects yet.</div>
+             class="text-center py-4 smallcaps text-faint">No injects yet.</div>
 
         <!-- Ad-hoc inject -->
         <div x-show="exercise?.state === 'active' || exercise?.state === 'paused'"
@@ -134,9 +134,9 @@
           <div x-show="showAddInject"
                class="mt-2 p-3 rounded-lg stripe border border-dashed rule-2">
             <input type="text" x-model="newTitle" placeholder="Title…"
-                   class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] mb-1.5 bg-white" />
+                   class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] mb-1.5 bg-surface" />
             <textarea rows="2" x-model="newContent" placeholder="Content…"
-                      class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] resize-none bg-white mb-1.5"></textarea>
+                      class="w-full rounded-md ring-rule px-2 py-1 text-[12.5px] resize-none bg-surface mb-1.5"></textarea>
             <div class="mb-1.5">
               <label class="btn btn-ghost h-7 px-2.5 text-[11.5px] cursor-pointer">
                 <span x-text="newAttachment ? 'Change file' : 'Attach file'"></span>
@@ -146,16 +146,16 @@
                        @change="newAttachment = $event.target.files[0] || null" />
               </label>
               <div x-show="newAttachment"
-                   class="mt-1.5 flex items-center gap-2 min-w-0 text-[11.5px] text-stone-500">
+                   class="mt-1.5 flex items-center gap-2 min-w-0 text-[11.5px] text-muted">
                 <span class="truncate" x-text="newAttachment?.name"></span>
                 <button type="button"
                         @click="newAttachment = null; $refs.injectAttachment.value = ''"
-                        class="ml-auto text-stone-400 hover:text-stone-800">Remove</button>
+                        class="ml-auto text-faint hover:text-ink">Remove</button>
               </div>
             </div>
             <div class="flex items-center gap-2">
               <select x-model="newGroup"
-                      class="flex-1 rounded-md ring-rule px-2 py-1 text-[12px] bg-white">
+                      class="flex-1 rounded-md ring-rule px-2 py-1 text-[12px] bg-surface">
                 <option value="">Shared</option>
                 <template x-for="group in groupDefs" :key="group.id">
                   <option :value="group.id" x-text="group.label || group.id"></option>
@@ -173,21 +173,21 @@
     <div class="overflow-y-auto">
       <div class="px-6 pt-5 pb-3 flex items-baseline gap-3">
         <h2 class="text-[18px] font-semibold tracking-tight">Responses</h2>
-        <span class="mono text-[12px] text-stone-500"
+        <span class="mono text-[12px] text-muted"
               x-text="responses.length + ' total'"></span>
-        <span class="mono text-[12px] text-stone-400"
+        <span class="mono text-[12px] text-faint"
               x-text="comments.length + ' comments'"></span>
         <div class="ml-auto flex items-center gap-2">
-          <button class="smallcaps hover:text-stone-800"
-                  :class="responseFilter === 'all' ? 'text-stone-800' : 'text-stone-400'"
+          <button class="smallcaps hover:text-ink"
+                  :class="responseFilter === 'all' ? 'text-ink' : 'text-faint'"
                   @click="responseFilter = 'all'">All</button>
-          <span class="text-stone-300">/</span>
-          <button class="smallcaps hover:text-stone-800"
-                  :class="responseFilter === 'node' ? 'text-stone-800' : 'text-stone-400'"
+          <span class="text-faint">/</span>
+          <button class="smallcaps hover:text-ink"
+                  :class="responseFilter === 'node' ? 'text-ink' : 'text-faint'"
                   @click="responseFilter = 'node'">Current node</button>
-          <span class="text-stone-300">/</span>
-          <button class="smallcaps hover:text-stone-800"
-                  :class="responseFilter === 'flagged' ? 'text-stone-800' : 'text-stone-400'"
+          <span class="text-faint">/</span>
+          <button class="smallcaps hover:text-ink"
+                  :class="responseFilter === 'flagged' ? 'text-ink' : 'text-faint'"
                   @click="responseFilter = 'flagged'">Flagged</button>
         </div>
       </div>
@@ -195,8 +195,8 @@
       <div class="px-6 pb-6 space-y-3">
         <div x-show="comments.length" class="surface overflow-hidden mb-4">
           <div class="px-4 py-2.5 flex items-center gap-2 border-b rule">
-            <span class="smallcaps text-stone-500">Team comments</span>
-            <span class="mono text-[11px] text-stone-400"
+            <span class="smallcaps text-muted">Team comments</span>
+            <span class="mono text-[11px] text-faint"
                   x-text="comments.length + ' total'"></span>
           </div>
           <div class="divide-y" style="border-color: var(--rule);">
@@ -205,13 +205,13 @@
                 <div class="flex items-center gap-2 mb-1">
                   <span class="text-[12.5px] font-medium"
                         x-text="comment.author_name || userDisplayName(comment.user_id)"></span>
-                  <span class="mono text-[10.5px] text-stone-500"
+                  <span class="mono text-[10.5px] text-muted"
                         x-text="responseInjectLabel(comment) + ' · ' + fmtAgo(comment.created_at)"></span>
                   <span class="pill mono ml-auto"
-                        :class="comment.group_id ? teamColor(comment.group_id) : 'bg-stone-100 text-stone-600 ring-stone-200'"
+                        :class="comment.group_id ? teamColor(comment.group_id) : 'bg-surface-2 text-ink-soft ring-line'"
                         x-text="groupLabel(comment.group_id)"></span>
                 </div>
-                <p class="text-[13px] text-stone-700 whitespace-pre-wrap"
+                <p class="text-[13px] text-ink-soft whitespace-pre-wrap"
                    x-text="comment.content"></p>
               </div>
             </template>
@@ -219,7 +219,7 @@
         </div>
 
         <div x-show="filteredResponses.length === 0"
-             class="text-center py-8 smallcaps text-stone-400">No responses.</div>
+             class="text-center py-8 smallcaps text-faint">No responses.</div>
 
         <template x-for="resp in filteredResponses" :key="resp.id">
           <div class="surface overflow-hidden">
@@ -229,22 +229,22 @@
               <div class="min-w-0">
                 <div class="text-[13.5px] font-medium leading-tight"
                      x-text="userDisplayName(resp.user_id)"></div>
-                <div class="mono text-[11px] text-stone-500 leading-tight"
+                <div class="mono text-[11px] text-muted leading-tight"
                      x-text="'#' + resp.id + ' · ' + responseInjectLabel(resp) + ' · ' + fmtAgo(resp.submitted_at)"></div>
               </div>
               <template x-if="resp.selected_option">
                 <span class="pill mono ml-1" x-text="resp.selected_option"></span>
               </template>
               <span class="pill mono ml-auto"
-                    :class="resp.group_id ? teamColor(resp.group_id) : 'bg-stone-100 text-stone-600 ring-stone-200'"
+                    :class="resp.group_id ? teamColor(resp.group_id) : 'bg-surface-2 text-ink-soft ring-line'"
                     x-text="groupLabel(resp.group_id)"></span>
             </div>
             <div class="grid" :style="assessments[resp.id] ? 'grid-template-columns: 1fr 240px' : 'grid-template-columns: 1fr'">
-              <div class="px-4 py-3 text-[13.5px] text-stone-800" x-text="resp.content"></div>
+              <div class="px-4 py-3 text-[13.5px] text-ink" x-text="resp.content"></div>
               <template x-if="assessments[resp.id]">
                 <div class="px-4 py-3 border-l rule paper-soft">
                   <div class="flex items-center gap-2 mb-1.5">
-                    <span class="smallcaps text-stone-500">AI assessment</span>
+                    <span class="smallcaps text-muted">AI assessment</span>
                     <span x-show="assessments[resp.id].decision_quality"
                           class="pill mono"
                           :style="{
@@ -254,13 +254,13 @@
                           }"
                           x-text="assessments[resp.id].decision_quality"></span>
                   </div>
-                  <p class="text-[12.5px] text-stone-700" x-text="assessments[resp.id].assessment_text"></p>
+                  <p class="text-[12.5px] text-ink-soft" x-text="assessments[resp.id].assessment_text"></p>
                 </div>
               </template>
             </div>
             <template x-if="resp._next_injects && resp._next_injects.length">
               <div class="px-4 py-2 border-t rule flex items-center gap-2 flex-wrap">
-                <span class="smallcaps text-stone-500">Suggested next</span>
+                <span class="smallcaps text-muted">Suggested next</span>
                 <template x-for="next in resp._next_injects" :key="next.id">
                   <button @click="releaseInjectById(next.id)"
                           :disabled="!injectById(next.id) || injectById(next.id).state !== 'pending'"
@@ -284,13 +284,13 @@
              style="background: oklch(0.74 0.14 70 / .08); box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .35);">
           <div class="flex items-center gap-2 mb-1.5">
             <span class="smallcaps" style="color: var(--accent-d);">AI suggestions</span>
-            <span class="ml-auto mono text-[10.5px] text-stone-500"
+            <span class="ml-auto mono text-[10.5px] text-muted"
                   x-text="suggestedInjects.filter(s => s.status === 'pending_review').length + ' pending'"></span>
           </div>
           <template x-for="s in suggestedInjects.filter(sg => sg.status === 'pending_review')" :key="s.id">
             <div class="mb-3 last:mb-0 paper-soft ring-rule rounded-md p-2.5">
               <div class="text-[13px] font-medium mb-1" x-text="s.title"></div>
-              <p class="text-[12px] text-stone-600 mb-2" x-text="s.content"></p>
+              <p class="text-[12px] text-ink-soft mb-2" x-text="s.content"></p>
               <div class="flex flex-wrap gap-1 mb-2" x-show="s.target_teams && s.target_teams.length">
                 <template x-for="t in (s.target_teams || [])" :key="t">
                   <span class="pill mono ring-1 ring-inset text-[10px]"
@@ -301,7 +301,7 @@
                 <button @click="approveSuggestion(s)"
                         class="btn btn-accent h-6 px-2.5 text-[11.5px]">Approve &amp; queue</button>
                 <button @click="rejectSuggestion(s)"
-                        class="text-[11.5px] text-stone-500 hover:text-stone-800 ml-auto">Dismiss</button>
+                        class="text-[11.5px] text-muted hover:text-ink ml-auto">Dismiss</button>
               </div>
             </div>
           </template>
@@ -311,14 +311,14 @@
       <!-- Participants -->
       <div class="px-4 pt-4 pb-3">
         <div class="flex items-center justify-between mb-2">
-          <div class="smallcaps text-stone-500">Participants</div>
-          <span class="mono text-[11px] text-stone-400" x-text="members.length + ' enrolled'"></span>
+          <div class="smallcaps text-muted">Participants</div>
+          <span class="mono text-[11px] text-faint" x-text="members.length + ' enrolled'"></span>
         </div>
 
         <ul class="space-y-3 mb-3">
           <template x-for="section in memberSections" :key="section.id || 'unassigned'">
             <li>
-              <div class="smallcaps text-stone-400 mb-1" x-text="section.label"></div>
+              <div class="smallcaps text-faint mb-1" x-text="section.label"></div>
               <ul class="space-y-1.5">
                 <template x-for="m in section.members" :key="m.user_id">
                   <li class="flex items-center gap-2 text-[13px]">
@@ -337,26 +337,26 @@
                         <span class="truncate" x-text="userFor(m.user_id).display_name"></span>
                       </template>
                       <template x-if="!userFor(m.user_id)">
-                        <span class="text-stone-500" x-text="'User #' + m.user_id"></span>
+                        <span class="text-muted" x-text="'User #' + m.user_id"></span>
                       </template>
                     </div>
                     <select :value="m.group_id || ''"
                             x-effect="$nextTick(() => { $el.value = m.group_id || '' })"
                             @change="m.group_id = $event.target.value || null; setMemberGroup(m, m.group_id)"
-                            class="w-24 rounded-md ring-rule px-1.5 py-1 text-[11px] bg-white shrink-0">
+                            class="w-24 rounded-md ring-rule px-1.5 py-1 text-[11px] bg-surface shrink-0">
                       <option value="">None</option>
                       <template x-for="group in groupDefs" :key="group.id">
                         <option :value="group.id" x-text="group.label || group.id"></option>
                       </template>
                     </select>
                     <button @click="removeMember(m.user_id)"
-                            class="text-[11px] text-stone-400 hover:text-red-500 shrink-0">✕</button>
+                            class="text-[11px] text-faint hover:text-red-500 shrink-0">✕</button>
                   </li>
                 </template>
               </ul>
             </li>
           </template>
-          <li x-show="members.length === 0" class="text-[13px] text-stone-400">No members yet.</li>
+          <li x-show="members.length === 0" class="text-[13px] text-faint">No members yet.</li>
         </ul>
 
         <!-- Member search -->
@@ -367,21 +367,21 @@
           </button>
           <div x-show="showAddMember" class="mt-2">
             <input type="text" x-model="memberSearch" placeholder="Name or email…"
-                   class="w-full rounded-md ring-rule px-2 py-1 text-[12px] bg-white" />
+                   class="w-full rounded-md ring-rule px-2 py-1 text-[12px] bg-surface" />
             <div x-show="memberSearch.length > 0"
                  class="mt-1 border rule rounded-md paper overflow-hidden max-h-40 overflow-y-auto">
               <template x-for="u in filteredUsers" :key="u.id">
                 <div class="quiet-row flex items-center gap-2 px-2 py-1.5 text-[12.5px]">
                   <div class="min-w-0 flex-1">
                     <span class="font-medium" x-text="u.display_name"></span>
-                    <span class="ml-1 text-stone-400 text-[11px]" x-text="u.role"></span>
+                    <span class="ml-1 text-faint text-[11px]" x-text="u.role"></span>
                   </div>
                   <button @click="addMember(u.id)"
                           class="btn btn-primary text-[11px] h-5 px-2 shrink-0">Add</button>
                 </div>
               </template>
               <p x-show="filteredUsers.length === 0"
-                 class="text-[12px] text-stone-400 text-center py-2">No matching users.</p>
+                 class="text-[12px] text-faint text-center py-2">No matching users.</p>
             </div>
           </div>
         </div>
@@ -390,18 +390,18 @@
       <!-- Export -->
       <div class="px-4 pb-5 border-t rule pt-4">
         <button @click="showExport = !showExport"
-                class="smallcaps text-stone-500 hover:text-stone-800 flex items-center justify-between w-full">
+                class="smallcaps text-muted hover:text-ink flex items-center justify-between w-full">
           <span>Export</span>
           <span x-text="showExport ? '−' : '+'"></span>
         </button>
         <div x-show="showExport" class="flex flex-col gap-1.5 text-[13px] mt-2">
           <a :href="'/api/exercises/' + (exercise?.id || 0) + '/export'" target="_blank"
-             class="text-stone-700 hover:text-stone-900 inline-flex items-center gap-2">
-            <span class="mono text-stone-400">↓</span>Transcript (JSON)
+             class="text-ink-soft hover:text-ink inline-flex items-center gap-2">
+            <span class="mono text-faint">↓</span>Transcript (JSON)
           </a>
           <a :href="'/api/exercises/' + (exercise?.id || 0) + '/export.csv'" target="_blank"
-             class="text-stone-700 hover:text-stone-900 inline-flex items-center gap-2">
-            <span class="mono text-stone-400">↓</span>Responses (CSV)
+             class="text-ink-soft hover:text-ink inline-flex items-center gap-2">
+            <span class="mono text-faint">↓</span>Responses (CSV)
           </a>
         </div>
       </div>

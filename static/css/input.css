@@ -1,1 +1,29 @@
 @import "tailwindcss";
+@import "./iceberg.css";
+
+/* Map Tailwind's colour/font utilities onto the shared Iceberg tokens defined
+   in iceberg.css. `inline` makes utilities reference the CSS variables directly
+   (e.g. `bg-surface` -> var(--surface)) so light/dark switch with the tokens. */
+@theme inline {
+  --color-paper:        var(--paper);
+  --color-surface:      var(--surface);
+  --color-surface-2:    var(--surface-2);
+  --color-surface-ink:  var(--surface-ink);
+  --color-ink:          var(--ink);
+  --color-ink-soft:     var(--ink-soft);
+  --color-muted:        var(--muted);
+  --color-faint:        var(--faint);
+  --color-line:         var(--line);
+  --color-line-strong:  var(--line-strong);
+  --color-accent:       var(--accent);
+  --color-accent-ink:   var(--accent-ink);
+  --color-accent-deep:  var(--accent-deep);
+  --color-accent-soft:  var(--accent-soft);
+  --color-accent-line:  var(--accent-line);
+  --color-rail:         var(--rail);
+  --color-rail-2:       var(--rail-2);
+
+  --font-sans:  var(--fs-sans);
+  --font-mono:  var(--fs-mono);
+  --font-serif: var(--fs-serif);
+}

@@ -7,7 +7,7 @@
   <div class="page-head">
     <div>
       <h1 class="page-title">Home</h1>
-      <p class="text-[13.5px] text-stone-500 mt-1">Start from the one exercise that needs attention.</p>
+      <p class="text-[13.5px] text-muted mt-1">Start from the one exercise that needs attention.</p>
     </div>
     <div class="flex items-center gap-2" x-show="canManageScenarios">
       <a href="/scenarios/new" class="btn btn-ghost h-8 px-3 text-[13px]">Scenario</a>
@@ -22,11 +22,11 @@
         <div class="min-w-0 flex-1">
           <div class="smallcaps" style="color: var(--accent-d);">Live exercise</div>
           <h2 class="text-[21px] font-semibold mt-1 tracking-tight" x-text="liveExercise.title"></h2>
-          <p class="text-stone-500 text-[13.5px] mt-0.5"
+          <p class="text-muted text-[13.5px] mt-0.5"
              x-text="(liveExercise.scenario_title || '') + (liveExercise.started_at ? ' · started ' + fmtTime(liveExercise.started_at) : '')"></p>
-          <div class="flex items-center gap-4 mt-4 text-[12.5px] text-stone-500">
-            <span><span class="mono text-stone-800" x-text="liveElapsed"></span> elapsed</span>
-            <span x-show="liveExercise.current_node_id">Current node <span class="mono text-stone-800" x-text="liveExercise.current_node_id"></span></span>
+          <div class="flex items-center gap-4 mt-4 text-[12.5px] text-muted">
+            <span><span class="mono text-ink" x-text="liveElapsed"></span> elapsed</span>
+            <span x-show="liveExercise.current_node_id">Current node <span class="mono text-ink" x-text="liveExercise.current_node_id"></span></span>
           </div>
         </div>
         <a :href="isF ? '/exercises/' + liveExercise.id + '/facilitate' : '/exercises/' + liveExercise.id + '/participate'"
@@ -38,7 +38,7 @@
   <!-- No live exercise placeholder -->
   <template x-if="!liveExercise && !loading">
     <div class="surface p-5 mb-8">
-      <p class="text-stone-500 text-[13.5px]">No active exercise. <a href="/exercises" class="underline hover:text-stone-700">Create or open an exercise.</a></p>
+      <p class="text-muted text-[13.5px]">No active exercise. <a href="/exercises" class="underline hover:text-ink-soft">Create or open an exercise.</a></p>
     </div>
   </template>
 
@@ -46,16 +46,16 @@
   <div class="grid grid-cols-5 gap-6">
     <div :class="canManageScenarios ? 'col-span-3' : 'col-span-5'">
       <div class="section-title mb-3">
-        <h3 class="smallcaps text-stone-500">Exercises</h3>
-        <a href="/exercises" class="smallcaps text-stone-400 hover:text-stone-700">View all</a>
+        <h3 class="smallcaps text-muted">Exercises</h3>
+        <a href="/exercises" class="smallcaps text-faint hover:text-ink-soft">View all</a>
       </div>
       <div class="surface divide-y rule overflow-hidden">
         <template x-if="loading">
-          <div class="px-5 py-4 text-sm text-stone-400">Loading…</div>
+          <div class="px-5 py-4 text-sm text-faint">Loading…</div>
         </template>
         <template x-if="!loading && exercises.length === 0">
-          <div class="px-5 py-6 text-center text-stone-400 text-[13px]">
-            No exercises yet. <a href="/exercises" class="underline hover:text-stone-700">Create one.</a>
+          <div class="px-5 py-6 text-center text-faint text-[13px]">
+            No exercises yet. <a href="/exercises" class="underline hover:text-ink-soft">Create one.</a>
           </div>
         </template>
         <template x-for="ex in exercises.slice(0, 5)" :key="ex.id">
@@ -65,11 +65,11 @@
                 <span class="text-[14px] font-medium truncate" x-text="ex.title"></span>
                 <span x-html="stateBadge(ex.state)"></span>
               </div>
-              <div class="mono text-[11.5px] text-stone-500 mt-0.5"
+              <div class="mono text-[11.5px] text-muted mt-0.5"
                    x-text="'EX-' + String(ex.id).padStart(3,'0')"></div>
             </div>
             <div class="text-right shrink-0">
-              <div class="mono text-[12px] text-stone-700" x-text="ex.started_at ? fmtElapsed(ex.started_at) : '—'"></div>
+              <div class="mono text-[12px] text-ink-soft" x-text="ex.started_at ? fmtElapsed(ex.started_at) : '—'"></div>
             </div>
             <a :href="isF ? '/exercises/' + ex.id + '/facilitate' : '/exercises/' + ex.id + '/participate'"
                class="btn btn-ghost h-7 px-2.5 text-[12px]">Open</a>
@@ -80,22 +80,22 @@
 
     <div class="col-span-2" x-show="canManageScenarios">
       <div class="section-title mb-3">
-        <h3 class="smallcaps text-stone-500">Scenario library</h3>
-        <a href="/scenarios" class="smallcaps text-stone-400 hover:text-stone-700">View all</a>
+        <h3 class="smallcaps text-muted">Scenario library</h3>
+        <a href="/scenarios" class="smallcaps text-faint hover:text-ink-soft">View all</a>
       </div>
       <div class="surface divide-y rule overflow-hidden">
         <template x-if="!loading && scenarios.length === 0">
-          <div class="px-5 py-6 text-center text-stone-400 text-[13px]">
-            No scenarios. <a href="/scenarios/new" class="underline hover:text-stone-700">Create one.</a>
+          <div class="px-5 py-6 text-center text-faint text-[13px]">
+            No scenarios. <a href="/scenarios/new" class="underline hover:text-ink-soft">Create one.</a>
           </div>
         </template>
         <template x-for="s in scenarios.slice(0, 5)" :key="s.id">
           <a :href="'/scenarios/' + s.id" class="block px-4 py-3 quiet-row">
             <div class="text-[13.5px] font-medium truncate" x-text="s.title"></div>
             <div class="flex items-center gap-2 mt-1">
-              <span class="mono text-[11px] text-stone-500"
+              <span class="mono text-[11px] text-muted"
                     x-text="(s.inject_count || 0) + ' injects'"></span>
-              <span class="mono text-[11px] text-stone-400" x-text="'· ' + fmtAgo(s.updated_at)"></span>
+              <span class="mono text-[11px] text-faint" x-text="'· ' + fmtAgo(s.updated_at)"></span>
             </div>
           </a>
         </template>
