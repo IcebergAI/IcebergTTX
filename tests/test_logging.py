@@ -18,7 +18,7 @@ def restore_logging():
     once audit propagation is disabled).
     """
     root = logging.getLogger()
-    audit = logging.getLogger("deep_thought.audit")
+    audit = logging.getLogger("iceberg_ttx.audit")
     snapshot = {
         "configured": logging_config._configured,
         "root_handlers": list(root.handlers),
@@ -50,7 +50,7 @@ def test_configure_logging_installs_root_handler(restore_logging):
 
 def test_audit_logger_is_isolated_and_unwrapped(restore_logging):
     configure_logging()
-    audit = logging.getLogger("deep_thought.audit")
+    audit = logging.getLogger("iceberg_ttx.audit")
     # Audit stream stays pure JSON: its own handler, not propagated to root.
     assert audit.propagate is False
     assert audit.handlers

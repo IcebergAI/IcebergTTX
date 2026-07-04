@@ -1,4 +1,4 @@
-// Deep Thought — Revised Interface, screen bodies.
+// IcebergTTX — Revised Interface, screen bodies.
 // Each screen is rendered as a static HTML string injected on first view,
 // then Alpine takes over for any interactive bits.
 

@@ -2,10 +2,10 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: postgres
-  namespace: deep-thought
+  namespace: iceberg-ttx
   labels:
     app.kubernetes.io/name: postgres
-    app.kubernetes.io/part-of: deep-thought
+    app.kubernetes.io/part-of: iceberg-ttx
 spec:
   serviceName: postgres
   replicas: 1
@@ -16,7 +16,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: postgres
-        app.kubernetes.io/part-of: deep-thought
+        app.kubernetes.io/part-of: iceberg-ttx
     spec:
       containers:
         - name: postgres
@@ -26,27 +26,27 @@ spec:
               name: postgres
           env:
             - name: POSTGRES_USER
-              value: deep_thought
+              value: iceberg_ttx
             - name: POSTGRES_DB
-              value: deep_thought
+              value: iceberg_ttx
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: deep-thought-secrets
+                  name: iceberg-ttx-secrets
                   key: POSTGRES_PASSWORD
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
           readinessProbe:
             exec:
-              command: [pg_isready, -U, deep_thought, -d, deep_thought]
+              command: [pg_isready, -U, iceberg_ttx, -d, iceberg_ttx]
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6
           livenessProbe:
             exec:
-              command: [pg_isready, -U, deep_thought, -d, deep_thought]
+              command: [pg_isready, -U, iceberg_ttx, -d, iceberg_ttx]
             initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 5

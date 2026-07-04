@@ -2,10 +2,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nginx
-  namespace: deep-thought
+  namespace: iceberg-ttx
   labels:
     app.kubernetes.io/name: nginx
-    app.kubernetes.io/part-of: deep-thought
+    app.kubernetes.io/part-of: iceberg-ttx
 spec:
   replicas: 1
   selector:
@@ -15,7 +15,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: nginx
-        app.kubernetes.io/part-of: deep-thought
+        app.kubernetes.io/part-of: iceberg-ttx
     spec:
       initContainers:
         # Copy compiled static assets from the app image into the local emptyDir.
@@ -23,7 +23,7 @@ spec:
         # Uses the same image as the app so static files always match the
         # deployed version.
         - name: copy-static
-          image: your-registry/deep-thought:latest  # REPLACE — same tag as app
+          image: your-registry/iceberg-ttx:latest  # REPLACE — same tag as app
           command: ["/bin/sh", "-c", "cp -a /app/static_src/. /app/static/"]
           volumeMounts:
             - name: static-files

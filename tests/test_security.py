@@ -102,7 +102,7 @@ async def test_csrf_exempts_bearer_authenticated_mutation(
 def _audit_events(caplog) -> list[dict]:
     events = []
     for rec in caplog.records:
-        if rec.name == "deep_thought.audit":
+        if rec.name == "iceberg_ttx.audit":
             try:
                 events.append(json.loads(rec.getMessage()))
             except ValueError:
@@ -111,7 +111,7 @@ def _audit_events(caplog) -> list[dict]:
 
 
 async def test_audit_logs_login_failure(client: AsyncClient, facilitator: User, caplog):
-    with caplog.at_level(logging.INFO, logger="deep_thought.audit"):
+    with caplog.at_level(logging.INFO, logger="iceberg_ttx.audit"):
         await client.post(
             "/api/auth/login", json={"email": facilitator.email, "password": "wrong"}
         )
@@ -120,7 +120,7 @@ async def test_audit_logs_login_failure(client: AsyncClient, facilitator: User, 
 
 
 async def test_audit_logs_authorization_denial(client: AsyncClient, participant_token: str, caplog):
-    with caplog.at_level(logging.INFO, logger="deep_thought.audit"):
+    with caplog.at_level(logging.INFO, logger="iceberg_ttx.audit"):
         resp = await client.get(
             "/api/users", headers={"Authorization": f"Bearer {participant_token}"}
         )
@@ -133,7 +133,7 @@ async def test_audit_attributes_real_identity_under_role_preview(
     client: AsyncClient, facilitator_token: str, facilitator: User, caplog
 ):
     client.cookies.set("dt_view_role", "participant")
-    with caplog.at_level(logging.INFO, logger="deep_thought.audit"):
+    with caplog.at_level(logging.INFO, logger="iceberg_ttx.audit"):
         await client.get("/api/users", headers={"Authorization": f"Bearer {facilitator_token}"})
     # Previewing participant, a facilitator hitting users is allowed (real role used),
     # so no denial is logged for them.
@@ -149,7 +149,7 @@ async def test_audit_logs_inject_release(
         json={"title": "T", "content": "C", "sequence_order": 0},
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )).json()
-    with caplog.at_level(logging.INFO, logger="deep_thought.audit"):
+    with caplog.at_level(logging.INFO, logger="iceberg_ttx.audit"):
         resp = await client.post(
             f"/api/exercises/{active_exercise.id}/injects/{created['id']}/release",
             headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -165,7 +165,7 @@ async def test_audit_logs_inject_release(
 async def test_audit_logs_export(
     client: AsyncClient, facilitator_token: str, draft_exercise, caplog
 ):
-    with caplog.at_level(logging.INFO, logger="deep_thought.audit"):
+    with caplog.at_level(logging.INFO, logger="iceberg_ttx.audit"):
         resp = await client.get(
             f"/api/exercises/{draft_exercise.id}/export",
             headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -178,7 +178,7 @@ async def test_audit_logs_export(
 async def test_audit_sanitizes_log_injection(caplog):
     from app.services import audit_service
 
-    with caplog.at_level(logging.INFO, logger="deep_thought.audit"):
+    with caplog.at_level(logging.INFO, logger="iceberg_ttx.audit"):
         audit_service.emit(
             "auth.login",
             result="fail",

@@ -8,7 +8,7 @@ MIN_SECRET_KEY_LENGTH = 32
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
-    database_url: str = "postgresql+asyncpg://deep_thought:deep_thought@localhost:5432/deep_thought"
+    database_url: str = "postgresql+asyncpg://iceberg_ttx:iceberg_ttx@localhost:5432/iceberg_ttx"
     secret_key: str = DEFAULT_SECRET_KEY
     access_token_expire_minutes: int = 480
     algorithm: str = "HS256"
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     login_lockout_seconds: int = 300
 
     # Audit logging (#23). When True, audit events are also persisted to the
-    # AuditEvent table (they are always emitted to the `deep_thought.audit`
+    # AuditEvent table (they are always emitted to the `iceberg_ttx.audit`
     # logger regardless).
     audit_persist: bool = True
 

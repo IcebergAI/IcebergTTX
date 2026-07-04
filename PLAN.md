@@ -1,4 +1,4 @@
-# Deep Thought — Implementation Plan
+# IcebergTTX — Implementation Plan
 
 ## Context
 
@@ -16,7 +16,7 @@ Building a tabletop exercise (TTX) platform from scratch. API-first: FastAPI bac
 ## Directory Structure
 
 ```
-deep_thought/
+iceberg_ttx/
 ├── CLAUDE.md
 ├── PLAN.md
 ├── README.md

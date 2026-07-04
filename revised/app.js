@@ -1,4 +1,4 @@
-// Deep Thought — Revised Interface, shared Alpine state + seed data.
+// IcebergTTX — Revised Interface, shared Alpine state + seed data.
 // Built to mirror the real backend shape (scenarios, exercises, injects, responses,
 // communications, suggested injects) so screens look truthful.
 

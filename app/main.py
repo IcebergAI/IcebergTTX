@@ -40,7 +40,7 @@ from app.routers import (
 from app.services import audit_service
 from app.services.ws_manager import heartbeat_task
 
-logger = logging.getLogger("deep_thought")
+logger = logging.getLogger("iceberg_ttx")
 
 
 @asynccontextmanager
@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
     audit_service.emit("app.shutdown", severity="info")
 
 
-app = FastAPI(title="Deep Thought", lifespan=lifespan)
+app = FastAPI(title="IcebergTTX", lifespan=lifespan)
 
 # Outermost first: audit context must be set before CSRF (and everything else)
 # runs so blocked requests are still attributable.
