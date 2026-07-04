@@ -63,7 +63,7 @@ def seed_playwright_users():
         ]:
             httpx.post(
                 f"{base}/api/auth/register",
-                json={"email": email, "display_name": name, "password": "password123",
+                json={"email": email, "display_name": name, "password": "password1234",
                       "role": role, **({"team": team} if team else {})},
                 timeout=2.0,
             )
@@ -154,7 +154,7 @@ async def facilitator_fixture(session: AsyncSession) -> User:
     user = User(
         email="facilitator@example.com",
         display_name="Facilitator",
-        hashed_password=hash_password("password123"),
+        hashed_password=hash_password("password1234"),
         role=UserRole.facilitator,
     )
     session.add(user)
@@ -168,7 +168,7 @@ async def participant_fixture(session: AsyncSession) -> User:
     user = User(
         email="participant@example.com",
         display_name="Participant",
-        hashed_password=hash_password("password123"),
+        hashed_password=hash_password("password1234"),
         role=UserRole.participant,
         team="it_ops",
     )

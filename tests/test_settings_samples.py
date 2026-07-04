@@ -1,3 +1,4 @@
+import pytest
 from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -5,6 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.exercise import Exercise, ExerciseMember, ExerciseState
 from app.models.inject import Inject, InjectState
 from app.models.scenario import Scenario
+from app.services.sample_service import get_sample_definition
 
 
 def _headers(token: str) -> dict:
@@ -30,6 +32,30 @@ async def test_list_sample_scenarios(client: AsyncClient, facilitator_token: str
     data = resp.json()
     assert {sample["id"] for sample in data} >= {"ransomware_response", "vendor_outage"}
     assert all(sample["inject_count"] > 0 for sample in data)
+
+
+# ── #15: path traversal in the sample loader ─────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "sample_id",
+    ["../../etc/passwd", "..", "foo/bar", "evil.json", "with space", ""],
+)
+def test_get_sample_definition_rejects_untrusted_ids(sample_id: str):
+    assert get_sample_definition(sample_id) is None
+
+
+def test_get_sample_definition_loads_legit_id():
+    assert get_sample_definition("ransomware_response") is not None
+
+
+async def test_load_sample_rejects_traversal_id(client: AsyncClient, facilitator_token: str):
+    # A single path segment with a disallowed char never resolves to a file → 404.
+    resp = await client.post(
+        "/api/settings/samples/scenarios/evil.json/load",
+        headers=_headers(facilitator_token),
+    )
+    assert resp.status_code == 404
 
 
 async def test_load_sample_scenario_is_idempotent(

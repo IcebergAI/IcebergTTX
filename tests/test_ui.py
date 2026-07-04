@@ -28,7 +28,7 @@ BASE = "http://localhost:8765"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def login(page: Page, email: str, password: str = "password123") -> None:
+def login(page: Page, email: str, password: str = "password1234") -> None:
     try:
         page.evaluate(
             "() => { localStorage.removeItem('dt_token');"

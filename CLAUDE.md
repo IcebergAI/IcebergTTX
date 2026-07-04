@@ -31,6 +31,10 @@ API-first architecture.
 
 **Password hashing**: Uses `bcrypt` directly (not `passlib`). `passlib[bcrypt]` is incompatible with Python 3.14 due to a `bcrypt.__about__` removal in bcrypt 4.x.
 
+**Password policy (#13)**: A shared length-only validator (`validate_password_strength` in `app/schemas/auth.py`, `MIN_PASSWORD_LENGTH = 12`) rejects blank/whitespace-only and too-short passwords. Applied via `@field_validator("password")` on both `RegisterRequest` and `UpdateMeRequest` (the latter skips when `password is None`), so `register`/`update_me` return `422` automatically. NIST-aligned: length over character-class complexity. Login does **not** re-validate (it only compares hashes), so legacy short passwords still authenticate until changed.
+
+**Token revocation (#14)**: JWTs carry an `iat` claim (`auth_service.create_access_token`) and `User.token_valid_after` (nullable `timestamptz`) is a per-user revocation cutoff. `get_current_user` rejects any token whose `iat` predates `token_valid_after` (a missing `iat` is treated as revoked when a cutoff is set). `update_me` bumps `token_valid_after = now(UTC)` (truncated to whole seconds, so a freshly-minted token is not self-revoked) on password change and re-issues a fresh cookie so the caller's own session survives; all previously-issued tokens are revoked ("change password to kick out an attacker"). Deactivation (`is_active=False`) is already enforced per-request by `get_current_user`. The 8h token lifetime is unchanged (no refresh-token flow yet).
+
 **Scenario storage**: The full scenario definition (inject tree, branching options, team targets, triggered communications) is stored as a single JSON blob in `Scenario.definition`. Validated against the `ScenarioDefinition` Pydantic model on every write. Not normalised into rows — the tree is always read and written as a unit.
 
 **Scenario branching**: "Pull not push" — when a participant responds, the service resolves which inject IDs are valid next steps, but the facilitator manually reviews and releases the chosen branch. This keeps human control in the loop.
@@ -67,13 +71,13 @@ API-first architecture.
 
 **Group-scoped injects**: `Inject.group_id` and `ExerciseMember.group_id` allow injects to be targeted at specific exercise groups (teams). When `group_id` is `None` the inject is visible to all groups. The inject router resolves group membership via `exercise_group_for_user()` at query time.
 
-**File attachments on injects**: Injects support a single file attachment (`attachment_filename`, `attachment_path`, `attachment_content_type`, `attachment_size` on the `Inject` model). Files are stored under `uploads/inject_attachments/{exercise_id}/`. The inject router accepts `multipart/form-data`; `inject_attachment_payload()` builds the download URL returned in the inject payload.
+**File attachments on injects**: Injects support a single file attachment (`attachment_filename`, `attachment_path`, `attachment_content_type`, `attachment_size` on the `Inject` model). Files are stored under `uploads/inject_attachments/{exercise_id}/`. The inject router accepts `multipart/form-data`; `inject_attachment_payload()` builds the download URL returned in the inject payload. Uploads stream to disk in chunks and abort once `MAX_ATTACHMENT_BYTES` (25 MB) is exceeded, so an oversized upload is never fully buffered (#39). Content-type is confined to `ALLOWED_ATTACHMENT_TYPES` (`_normalize_content_type` — anything else, e.g. `text/html`/`image/svg+xml`, is stored and served as `application/octet-stream`), applied on both upload and download; downloads set `X-Content-Type-Options: nosniff` alongside the `Content-Disposition: attachment` implied by `filename` (#16).
 
 **Role preview**: Facilitators can view the app as a participant or observer via `dt_view_role` and `dt_view_team` cookies (set from `/settings`). `_optional_user()` in `ui.py` reads these cookies and overrides the Jinja2 template role/team — but only when the JWT already contains the `facilitator` role, so API calls are never downgraded.
 
 **Dark mode**: `data-theme="dark"` on `<html>` re-declares the oklch token set (dark surfaces) in `iceberg.css`. A short inline `<script>` at the top of `<head>` resolves the saved theme (`system`→OS via `prefers-color-scheme`) and stamps `data-theme` before first paint (prevents FOUC). Preference stored in `dt_theme`/`dt_resolved_theme` cookies + `localStorage`, toggled (light/dark/system) from `/settings`. The per-user **accent picker was removed** during the Iceberg alignment — the cyan accent is fixed to match the sibling apps (`dt_accent` is no longer read or written).
 
-**Sample scenarios**: `app/samples/` contains bundled JSON scenario definitions (`ransomware_response.json`, `vendor_outage.json`). `app/services/sample_service.py` lists, validates, and loads them. The settings page exposes a sample loader UI for facilitators.
+**Sample scenarios**: `app/samples/` contains bundled JSON scenario definitions (`ransomware_response.json`, `vendor_outage.json`). `app/services/sample_service.py` lists, validates, and loads them. The settings page exposes a sample loader UI for facilitators. `get_sample_definition` validates `sample_id` against `SAMPLE_ID_RE` (`^[A-Za-z0-9_-]+$`) and asserts the resolved path stays within `SAMPLES_DIR` before reading, preventing directory traversal via the `sample_id` path param (#15); a rejected id returns `None` → the settings routes surface `404`.
 
 **Containerized deployment**: `Dockerfile` is a two-stage build — stage 1 compiles Tailwind CSS (`pytailwindcss`), stage 2 is the Python runtime. The compiled `static/` directory is also copied to `static_src/` in the image; this path is never overridden by a volume mount and is used by entrypoint scripts (Docker Compose) and init containers (k8s) to populate shared static volumes so nginx always serves the version matching the running image. `docker-compose.yml` runs `app` + `postgres:17` + `nginx:alpine` on a private bridge network with named volumes for DB data, uploads, and static files. `k8s/` contains namespace, secrets, configmap, postgres StatefulSet, app Deployment, and nginx Deployment manifests. **Replica constraint**: `ws_manager.py` is in-memory only — app must run as a single replica until Redis pub/sub is added. k8s manifests enforce `replicas: 1` and `strategy: Recreate`. The async `asyncpg` driver is a core dependency (no separate extra; the `DATABASE_URL` may be a plain `postgresql://` URL — it is upgraded to `asyncpg` at runtime). A minimal `GET /api/health` endpoint (`app/routers/health.py`) is used by k8s liveness/readiness probes.
 
@@ -86,14 +90,14 @@ app/
 ├── main.py          # App factory + lifespan (configure_logging, validate_settings, run_migrations, middleware)
 ├── config.py        # Settings via pydantic-settings (.env) + validate_settings() startup guard
 ├── middleware.py    # AuditContextMiddleware + CSRFOriginMiddleware (ASGI)
-├── database.py      # SQLite engine, get_session dependency
+├── database.py      # async Postgres engine (create_async_engine) + get_session
 ├── dependencies.py  # get_current_user, require_role()
 ├── models/          # SQLModel table definitions (incl. audit.AuditEvent)
 ├── schemas/         # Pydantic schemas (auth, scenario_json)
 ├── routers/         # One router per resource + ui.py for Jinja2 pages
 ├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control, audit_service, rate_limit)
 └── templates/       # Jinja2 HTML
-    │   base.html            # CSS vars, sidebar layout, sidebarNav() Alpine component, shared JS helpers
+    │   base.html            # App shell (brandbar/rail/topbar) + sidebarNav() Alpine + shared JS; design tokens in static/css/iceberg.css
     │   dashboard.html       # Command center (live exercise hero card + exercises/scenarios lists)
     │   help.html            # In-app help & scenario JSON documentation
     │   auth/login.html      # Centered card, no sidebar
@@ -109,7 +113,7 @@ app/
     │   settings.html              # Dark mode toggle, role preview, sample scenario loader
 tests/               # Pytest suite (conftest.py + one file per resource)
 alembic/             # Migration env.py + versions/ (baseline schema); alembic.ini at repo root
-static/css/          # output.css (Tailwind compiled, Phase 7+)
+static/css/          # input.css + iceberg.css (design system) → output.css; fonts.css + self-hosted woff2
 app/samples/         # Bundled scenario JSON definitions (ransomware_response, vendor_outage)
 Dockerfile           # Multi-stage: Tailwind build → Python runtime (non-root, static_src/ trick)
 docker-compose.yml   # app + postgres:17 + nginx:alpine; named volumes for DB, uploads, static
@@ -142,8 +146,9 @@ revised/             # Claude Design prototype (static reference, not served)
 | 16 — Security hardening (P0/P1: #8 reg roles, #9 secret validation, #10 cookie/CSRF, #11 login rate limit, #23 audit logging) | ✅ Complete |
 | 17 — Async migration (asyncpg/AsyncSession, Postgres-only, response models, FastAPI-skill alignment) | ✅ Complete |
 | 18 — Tech-debt cleanup (#17 logging config, #18 iterative cycle detection, #19 Alembic, #20 task lifecycle, #21/#31 payload/role-preview DRY, #30 WS team-spoof fix, #32 nits) | ✅ Complete |
+| 19 — Security hardening (P2: #13 password policy, #14 token revocation, #15 sample-loader path traversal, #16 attachment content-type allowlist + nosniff) | ✅ Complete |
 
-Current test count: **214 passing**.
+Current test count: **234 passing** (1 skipped).
 
 ---
 

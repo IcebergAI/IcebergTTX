@@ -168,7 +168,7 @@ async def test_participant_does_not_see_other_participant_outbound(
     legal = User(
         email="legal-participant@example.com",
         display_name="Legal Participant",
-        hashed_password=hash_password("password123"),
+        hashed_password=hash_password("password1234"),
         role=UserRole.participant,
         team="legal",
     )
@@ -212,7 +212,7 @@ async def test_participant_can_send_outbound_to_team(
     legal = User(
         email="legal-recipient@example.com",
         display_name="Legal Recipient",
-        hashed_password=hash_password("password123"),
+        hashed_password=hash_password("password1234"),
         role=UserRole.participant,
         team="legal",
     )
@@ -358,7 +358,7 @@ async def test_ws_team_outbound_reaches_recipient_team(
     legal = User(
         email="legal-ws-recipient@example.com",
         display_name="Legal WS Recipient",
-        hashed_password=hash_password("password123"),
+        hashed_password=hash_password("password1234"),
         role=UserRole.participant,
         team="legal",
     )

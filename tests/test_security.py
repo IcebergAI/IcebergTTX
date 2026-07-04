@@ -41,7 +41,7 @@ async def test_login_rate_limited_after_repeated_failures(client: AsyncClient, f
         assert (await client.post("/api/auth/login", json=creds)).status_code == 401
     # Sixth attempt is locked out, even with the correct password.
     resp = await client.post(
-        "/api/auth/login", json={"email": facilitator.email, "password": "password123"}
+        "/api/auth/login", json={"email": facilitator.email, "password": "password1234"}
     )
     assert resp.status_code == 429
     assert "Retry-After" in resp.headers
@@ -51,7 +51,7 @@ async def test_login_success_resets_rate_counter(client: AsyncClient, facilitato
     for _ in range(3):
         await client.post("/api/auth/login", json={"email": facilitator.email, "password": "nope"})
     ok = await client.post(
-        "/api/auth/login", json={"email": facilitator.email, "password": "password123"}
+        "/api/auth/login", json={"email": facilitator.email, "password": "password1234"}
     )
     assert ok.status_code == 200
     # Counter reset → further failures start fresh and are not immediately locked.
@@ -64,7 +64,7 @@ async def test_login_success_resets_rate_counter(client: AsyncClient, facilitato
 
 async def test_csrf_blocks_cookie_mutation_without_origin(client: AsyncClient, facilitator: User):
     login = await client.post(
-        "/api/auth/login", json={"email": facilitator.email, "password": "password123"}
+        "/api/auth/login", json={"email": facilitator.email, "password": "password1234"}
     )
     assert login.status_code == 200  # cookie now stored on the client
     # Cookie-authenticated mutation with no Authorization header and no Origin.
@@ -75,7 +75,7 @@ async def test_csrf_blocks_cookie_mutation_without_origin(client: AsyncClient, f
 
 async def test_csrf_allows_same_origin_cookie_mutation(client: AsyncClient, facilitator: User):
     await client.post(
-        "/api/auth/login", json={"email": facilitator.email, "password": "password123"}
+        "/api/auth/login", json={"email": facilitator.email, "password": "password1234"}
     )
     resp = await client.post(
         "/api/exercises",

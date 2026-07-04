@@ -15,8 +15,11 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(subject: str, role: str) -> str:
-    expire = datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {"sub": subject, "role": role, "exp": expire}
+    now = datetime.now(UTC)
+    expire = now + timedelta(minutes=settings.access_token_expire_minutes)
+    # `iat` (issued-at) is required for token revocation (#14): get_current_user
+    # rejects tokens whose iat predates the user's token_valid_after cutoff.
+    payload = {"sub": subject, "role": role, "iat": now, "exp": expire}
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 

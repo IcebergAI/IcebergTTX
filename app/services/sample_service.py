@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from sqlmodel import select
@@ -13,6 +14,10 @@ from app.services.scenario_service import create_scenario
 
 SAMPLES_DIR = Path(__file__).resolve().parents[1] / "samples"
 
+# Sample ids are bare filename stems; anything else (path separators, "..",
+# NUL, etc.) is rejected to prevent directory traversal (#15).
+SAMPLE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
 
 def sample_id_from_path(path: Path) -> str:
     return path.stem
@@ -27,7 +32,13 @@ def list_sample_definitions() -> list[tuple[str, ScenarioDefinition]]:
 
 
 def get_sample_definition(sample_id: str) -> ScenarioDefinition | None:
+    if not SAMPLE_ID_RE.match(sample_id):
+        return None
     path = SAMPLES_DIR / f"{sample_id}.json"
+    # Belt-and-braces: confine the resolved path within SAMPLES_DIR even if the
+    # allowlist above is ever relaxed.
+    if not path.resolve().is_relative_to(SAMPLES_DIR.resolve()):
+        return None
     if not path.is_file():
         return None
     return ScenarioDefinition.model_validate_json(path.read_text())
