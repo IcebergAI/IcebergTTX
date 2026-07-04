@@ -8,6 +8,18 @@ A tabletop exercise (TTX) platform for running cyber incident and business resil
 
 ![IcebergTTX facilitator console](docs/screenshot.png)
 
+## About
+
+IcebergTTX helps teams rehearse their response to cyber incidents and other
+disruptions through facilitated, scenario-driven tabletop exercises. A
+**facilitator** builds or imports a branching scenario, then releases injects to
+**participants** in real time; participants record decisions and free-text
+responses that drive the scenario down different branches, while **observers**
+follow along read-only. The platform simulates incident communications (regulators,
+press, executives) and can use the Claude API to assess participant decisions and
+suggest follow-up injects. It is API-first (FastAPI) with a server-rendered UI, and
+ships with Docker Compose and Kubernetes deployment manifests.
+
 ## Features
 
 - **Scenario library** — build or import JSON scenario files with branching inject trees (or linear chained flows)
@@ -24,7 +36,7 @@ A tabletop exercise (TTX) platform for running cyber incident and business resil
 
 ## Tech Stack
 
-- **Backend**: Python 3.14+, FastAPI, SQLModel, SQLite (dev) / PostgreSQL (containers)
+- **Backend**: Python 3.14+, FastAPI (fully async), SQLModel + async SQLAlchemy, PostgreSQL (asyncpg)
 - **Frontend**: Jinja2 templates, Tailwind CSS v4 (CLI-compiled), Alpine.js
 - **Real-time**: WebSockets (FastAPI native)
 - **Auth**: JWT tokens (httpOnly cookie + localStorage)
@@ -170,3 +182,8 @@ k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, 
 6. **Complete and export** — Complete button, then export transcript/responses from the right pane
 
 See [/help](/help) for full documentation including the scenario JSON schema.
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full
+text. Copyright 2026 IcebergAI.
