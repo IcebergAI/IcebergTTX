@@ -8,6 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.database import get_session
 from app.dependencies import get_current_user, require_role
 from app.models.communication import CommDirection, Communication
+from app.models.exercise import ExerciseState
 from app.models.user import User, UserRole
 from app.schemas.api import CommunicationPublic
 from app.services.access_control import exercise_group_for_user, require_exercise_access
@@ -106,6 +107,13 @@ async def send_comm(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only participants can send outbound communications",
         )
+    # Participant writes are gated on an active exercise, consistent with responses
+    # and inject comments (#40).
+    if exercise.state != ExerciseState.active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Communications can only be sent while the exercise is active",
+        )
     if body.direction != CommDirection.outbound:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -142,7 +150,11 @@ async def inject_comm(
     _: FacilitatorDep,
     session: SessionDep,
 ):
-    """Facilitator injects a simulated inbound message (e.g. from ICO, press)."""
+    """Facilitator injects a simulated inbound message (e.g. from ICO, press).
+
+    Intentionally has no exercise-state guard (unlike participant send_comm, #40):
+    facilitators may seed simulated inbound comms during draft/paused setup.
+    """
     await require_exercise_access(session, exercise_id, _)
     visible_to_teams = (
         body.visible_to_teams

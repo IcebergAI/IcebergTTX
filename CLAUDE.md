@@ -41,7 +41,7 @@ API-first architecture.
 
 **JWT auth**: Stored in both an `httpOnly` cookie (for page navigation/Jinja2 routes) and `localStorage` (for Alpine/fetch calls). The `get_current_user` FastAPI dependency checks both; the `Authorization` header takes precedence.
 
-**WebSocket auth**: JWT passed as `?token=<jwt>` query parameter. Browsers cannot set the `Authorization` header on WebSocket upgrade requests.
+**WebSocket auth**: JWT passed as `?token=<jwt>` query parameter. Browsers cannot set the `Authorization` header on WebSocket upgrade requests. The `exercise_ws` handshake authenticates/authorises against its injected session, then `await session.close()`s it **before** entering the receive loop (the loop is DB-free) — otherwise the dependency-scoped session would hold a pooled connection idle-in-transaction for the whole socket lifetime and ~15 concurrent sockets would exhaust the pool (#35). `broadcast_to_groups` delivers to matching-group connections **plus facilitators and observers** (both have global read-visibility), so observers get live `inject_released`/comment pushes for group-scoped items, matching `is_inject_visible_to_user` (#38).
 
 **Startup secret validation**: `validate_settings()` (`config.py`) is called from the lifespan startup and aborts the app if `secret_key` is unset, equal to the well-known default, or shorter than 32 chars — unless `DEV_MODE=true`. This prevents silently signing JWTs with a publicly-known key (#9). `dev_mode` also relaxes the Secure-cookie requirement for local HTTP. Tests set `DEV_MODE=true` in `conftest.py` before app import.
 
@@ -62,6 +62,8 @@ API-first architecture.
 **Frontend design system**: Warm stone palette with CSS custom properties (`--bg`, `--paper`, `--ink`, `--accent`, etc.) defined in `base.html`. IBM Plex Sans + IBM Plex Mono via Google Fonts. Custom utility classes (`.smallcaps`, `.mono`, `.pill`, `.btn-*`, `.node`, `.briefing`, `.live-dot`) live in the `<style>` block of `base.html` — not Tailwind utilities. Persistent dark sidebar (`w-56`, `position: sticky`) replaces the old top nav bar. Sidebar hides itself on auth pages via `x-show="!!user"` (no token → `user: null`).
 
 **Communications delay**: `triggers_communications` in the scenario JSON fire via `asyncio.create_task(asyncio.sleep(...))` — sufficient for single-process. Would need a task queue (e.g. Celery, ARQ) for multi-process deployment.
+
+**Communications state guards**: participant outbound `send_comm` requires the exercise to be `active` (409 otherwise), consistent with response `submit` and inject-comment `create_comment` (#40). Facilitator `inject_comm` (simulated inbound) is **intentionally** unrestricted so facilitators can seed comms during `draft`/`paused` setup.
 
 **Group-scoped injects**: `Inject.group_id` and `ExerciseMember.group_id` allow injects to be targeted at specific exercise groups (teams). When `group_id` is `None` the inject is visible to all groups. The inject router resolves group membership via `exercise_group_for_user()` at query time.
 
@@ -141,7 +143,7 @@ revised/             # Claude Design prototype (static reference, not served)
 | 17 — Async migration (asyncpg/AsyncSession, Postgres-only, response models, FastAPI-skill alignment) | ✅ Complete |
 | 18 — Tech-debt cleanup (#17 logging config, #18 iterative cycle detection, #19 Alembic, #20 task lifecycle, #21/#31 payload/role-preview DRY, #30 WS team-spoof fix, #32 nits) | ✅ Complete |
 
-Current test count: **207 passing**.
+Current test count: **214 passing**.
 
 ---
 
