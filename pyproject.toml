@@ -1,11 +1,25 @@
 [build-system]
-requires = ["setuptools>=72"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "iceberg-ttx"
 version = "0.1.0"
+description = "A tabletop exercise (TTX) platform for running cyber incident and business resilience scenarios."
+readme = "README.md"
 requires-python = ">=3.14"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "IcebergAI" }]
+keywords = ["tabletop-exercise", "ttx", "cybersecurity", "incident-response", "fastapi"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Information Technology",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -37,6 +51,11 @@ dev = [
     "playwright>=1.52",
     "pytest-playwright>=0.7",
 ]
+
+[project.urls]
+Homepage = "https://github.com/IcebergAI/IcebergTTX"
+Repository = "https://github.com/IcebergAI/IcebergTTX"
+Issues = "https://github.com/IcebergAI/IcebergTTX/issues"
 
 [tool.fastapi]
 entrypoint = "app.main:app"
