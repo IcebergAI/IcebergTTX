@@ -44,10 +44,14 @@ class ConnectionManager:
     async def broadcast_to_groups(
         self, exercise_id: int, group_ids: list[str], message: dict
     ) -> None:
+        # Facilitators and observers have global read-visibility of injects/comments
+        # (see is_inject_visible_to_user), so they receive group-scoped pushes too —
+        # otherwise observers see a group-targeted inject on load but miss its live
+        # inject_released frame (#38).
         conns = [
             c
             for c in self._rooms.get(exercise_id, [])
-            if c["group_id"] in group_ids or c["role"] == "facilitator"
+            if c["group_id"] in group_ids or c["role"] in ("facilitator", "observer")
         ]
         await self._send_to_many(conns, message)
 

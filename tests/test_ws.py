@@ -171,6 +171,68 @@ async def test_ws_facilitator_always_receives_team_targeted(
     assert msg["type"] == "inject_released"
 
 
+async def test_ws_observer_receives_group_scoped_inject(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator_token: str,
+    active_exercise: Exercise,
+):
+    """An observer (global read-visibility, no team) receives the live
+    inject_released frame for a group-scoped inject, matching HTTP visibility (#38)."""
+    from app.services.exercise_service import enrol_member
+
+    observer = User(
+        email="ws-observer@example.com",
+        display_name="Observer",
+        hashed_password=hash_password("pw"),
+        role=UserRole.observer,
+    )
+    session.add(observer)
+    await session.commit()
+    await session.refresh(observer)
+    await enrol_member(session, exercise=active_exercise, user_id=observer.id)
+    token = create_access_token(subject=observer.email, role=observer.role.value)
+
+    create_r = await client.post(
+        f"/api/exercises/{active_exercise.id}/injects",
+        json={"title": "Legal Only", "content": "For legal", "target_teams": ["legal"]},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    inject_id = create_r.json()["id"]
+
+    async with aconnect_ws(_ws_url(active_exercise.id, token), client) as ws:
+        await client.post(
+            f"/api/exercises/{active_exercise.id}/injects/{inject_id}/release",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+        msg = await ws.receive_json()
+
+    assert msg["type"] == "inject_released"
+    assert msg["payload"]["id"] == inject_id
+
+
+async def test_ws_handshake_releases_db_session(
+    client: AsyncClient,
+    facilitator_token: str,
+    active_exercise: Exercise,
+):
+    """Several concurrent sockets plus a concurrent HTTP request all succeed — the
+    handshake no longer holds a pooled connection for the socket lifetime (#35).
+    (Cannot reproduce true pool exhaustion here: the test engine uses NullPool.)"""
+    import contextlib
+
+    async with contextlib.AsyncExitStack() as stack:
+        for _ in range(3):
+            ws = await stack.enter_async_context(
+                aconnect_ws(_ws_url(active_exercise.id, facilitator_token), client)
+            )
+            await ws.send_json({"type": "ping"})
+            assert (await ws.receive_json())["type"] == "pong"
+        # With sockets open, a normal HTTP request still obtains a DB connection.
+        r = await client.get("/api/health")
+        assert r.status_code == 200
+
+
 async def test_ws_inactive_user_rejected(
     client: AsyncClient,
     session: AsyncSession,
