@@ -4,7 +4,7 @@
 {% block content %}
 <div x-data="scenarioDetail({{ scenario_id }})" x-init="init()" class="workspace">
 
-  <div x-show="loading" class="smallcaps text-stone-400 py-8 text-center">Loading…</div>
+  <div x-show="loading" class="smallcaps text-faint py-8 text-center">Loading…</div>
 
   <template x-if="!loading && scenario">
     <div class="grid gap-7" style="grid-template-columns: 1fr 280px;">
@@ -14,13 +14,13 @@
         <!-- Header -->
         <div class="flex items-start justify-between mb-6">
           <div>
-            <div class="smallcaps text-stone-500 mb-1"
+            <div class="smallcaps text-muted mb-1"
                  x-text="'SC-' + String(scenario.id).padStart(3,'0')"></div>
             <h1 class="text-[26px] font-semibold tracking-tight" x-text="scenario.title"></h1>
-            <p class="text-stone-500 text-[14px] mt-1" x-text="scenario.description || ''"></p>
+            <p class="text-muted text-[14px] mt-1" x-text="scenario.description || ''"></p>
             <div class="flex flex-wrap gap-1 mt-2">
               <template x-for="tag in (scenario.tags || [])" :key="tag">
-                <span class="pill text-[10px] bg-stone-100 text-stone-600" x-text="tag"></span>
+                <span class="pill text-[10px] bg-surface-2 text-ink-soft" x-text="tag"></span>
               </template>
             </div>
           </div>
@@ -34,7 +34,7 @@
 
         <!-- Inject tree -->
         <div class="section-title mb-4">
-          <h2 class="smallcaps text-stone-500">Inject tree</h2>
+          <h2 class="smallcaps text-muted">Inject tree</h2>
         </div>
 
         <div class="space-y-1.5">
@@ -42,7 +42,7 @@
             <div :style="'padding-left: ' + (row.depth * 22) + 'px'">
               <div class="node">
                 <div class="flex items-center gap-2 mb-1">
-                  <span class="mono text-[11px] text-stone-400" x-text="row.node.id"></span>
+                  <span class="mono text-[11px] text-faint" x-text="row.node.id"></span>
                   <template x-if="row.node.id === scenario.definition.start_inject_id">
                     <span class="pill text-[10px]" style="background:#dcfce7; color:#166534; box-shadow: inset 0 0 0 1px #bbf7d0;">start</span>
                   </template>
@@ -65,16 +65,16 @@
                   </div>
                 </div>
                 <div class="text-[13.5px] font-medium" x-text="row.node.title"></div>
-                <p class="text-[12.5px] text-stone-500 mt-0.5 line-clamp-2" x-text="row.node.content"></p>
+                <p class="text-[12.5px] text-muted mt-0.5 line-clamp-2" x-text="row.node.content"></p>
 
                 <!-- Options -->
                 <template x-if="row.node.options && row.node.options.length">
                   <div class="mt-2 space-y-1">
                     <template x-for="opt in row.node.options" :key="opt.id">
-                      <div class="flex items-center gap-2 text-[12px] text-stone-500">
-                        <span class="text-stone-300 mono">→</span>
+                      <div class="flex items-center gap-2 text-[12px] text-muted">
+                        <span class="text-faint mono">→</span>
                         <span x-text="opt.label"></span>
-                        <span class="mono text-[10.5px] text-stone-400 ml-auto"
+                        <span class="mono text-[10.5px] text-faint ml-auto"
                               x-text="opt.next_inject_id ? opt.next_inject_id : '(end)'"></span>
                       </div>
                     </template>
@@ -82,10 +82,10 @@
                 </template>
 
                 <template x-if="(!row.node.options || row.node.options.length === 0) && row.node.next_inject_id">
-                  <div class="mt-2 flex items-center gap-2 text-[12px] text-stone-500">
-                    <span class="text-stone-300 mono">→</span>
+                  <div class="mt-2 flex items-center gap-2 text-[12px] text-muted">
+                    <span class="text-faint mono">→</span>
                     <span>Linear next</span>
-                    <span class="mono text-[10.5px] text-stone-400 ml-auto"
+                    <span class="mono text-[10.5px] text-faint ml-auto"
                           x-text="row.node.next_inject_id"></span>
                   </div>
                 </template>
@@ -93,10 +93,10 @@
                 <!-- Expected actions -->
                 <template x-if="row.node.expected_actions && row.node.expected_actions.length">
                   <div class="mt-2 pt-2 border-t rule">
-                    <div class="smallcaps text-stone-400 mb-1">Expected actions</div>
+                    <div class="smallcaps text-faint mb-1">Expected actions</div>
                     <ul class="space-y-0.5">
                       <template x-for="act in row.node.expected_actions" :key="act">
-                        <li class="flex items-start gap-1.5 text-[12px] text-stone-600">
+                        <li class="flex items-start gap-1.5 text-[12px] text-ink-soft">
                           <span class="dot mt-1 shrink-0" style="background: var(--accent-d);"></span>
                           <span x-text="act"></span>
                         </li>
@@ -109,7 +109,7 @@
           </template>
 
           <div x-show="treeRows.length === 0"
-               class="smallcaps text-stone-400 text-center py-8">
+               class="smallcaps text-faint text-center py-8">
             No injects defined.
           </div>
         </div>
@@ -120,39 +120,39 @@
 
         <!-- Stats -->
         <div class="paper ring-rule rounded-lg p-4 space-y-3">
-          <div class="smallcaps text-stone-500 mb-2">Summary</div>
+          <div class="smallcaps text-muted mb-2">Summary</div>
           <div class="flex justify-between text-[13px]">
-            <span class="text-stone-500">Injects</span>
+            <span class="text-muted">Injects</span>
             <span class="mono font-medium" x-text="scenario.definition?.injects?.length || 0"></span>
           </div>
           <div class="flex justify-between text-[13px]">
-            <span class="text-stone-500">Branch points</span>
+            <span class="text-muted">Branch points</span>
             <span class="mono font-medium" x-text="branchCount"></span>
           </div>
           <div class="flex justify-between text-[13px]">
-            <span class="text-stone-500">Linear steps</span>
+            <span class="text-muted">Linear steps</span>
             <span class="mono font-medium" x-text="linearCount"></span>
           </div>
           <div class="flex justify-between text-[13px]">
-            <span class="text-stone-500">End nodes</span>
+            <span class="text-muted">End nodes</span>
             <span class="mono font-medium" x-text="endCount"></span>
           </div>
         </div>
 
         <!-- Teams involved -->
         <div class="paper ring-rule rounded-lg p-4">
-          <div class="smallcaps text-stone-500 mb-3">Teams involved</div>
+          <div class="smallcaps text-muted mb-3">Teams involved</div>
           <div class="flex flex-wrap gap-1.5">
             <template x-for="t in teamsInvolved" :key="t">
               <span class="pill mono text-[10.5px]" :class="teamColor(t)" x-text="t"></span>
             </template>
-            <span x-show="teamsInvolved.length === 0" class="text-[12.5px] text-stone-400">None specified</span>
+            <span x-show="teamsInvolved.length === 0" class="text-[12.5px] text-faint">None specified</span>
           </div>
         </div>
 
         <!-- Validation -->
         <div class="paper ring-rule rounded-lg p-4">
-          <div class="smallcaps text-stone-500 mb-3">Validation</div>
+          <div class="smallcaps text-muted mb-3">Validation</div>
           <template x-if="validationIssues.length === 0">
             <div class="flex items-center gap-2 text-[13px]" style="color:#166534;">
               <span class="dot" style="background:#22c55e;"></span>

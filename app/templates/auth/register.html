@@ -6,11 +6,10 @@
   <div x-data="registerForm()" class="paper ring-rule rounded-xl p-8 w-full max-w-sm shadow-sm">
 
     <div class="flex items-center gap-2.5 mb-7">
-      <div class="h-8 w-8 rounded-md flex items-center justify-center mono text-[13px] font-semibold"
-           style="background: var(--accent); color: #1a1814;">42</div>
+      <img src="/static/img/icebergai-mark.svg" class="h-8 w-8 rounded-md" width="32" height="32" alt="Iceberg" />
       <div>
         <div class="text-[15px] font-semibold leading-tight" style="color: var(--ink);">IcebergTTX</div>
-        <div class="smallcaps text-stone-500 leading-tight">TTX control</div>
+        <div class="smallcaps text-muted leading-tight">TTX control</div>
       </div>
     </div>
 
@@ -23,27 +22,27 @@
 
     <form @submit.prevent="submit()" class="space-y-3.5">
       <div>
-        <label class="block smallcaps text-stone-500 mb-1">Email</label>
+        <label class="block smallcaps text-muted mb-1">Email</label>
         <input type="email" x-model="email" required autocomplete="email"
-               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300" />
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface outline-none focus:ring-2 focus:ring-line-strong" />
       </div>
       <div>
-        <label class="block smallcaps text-stone-500 mb-1">Display name</label>
+        <label class="block smallcaps text-muted mb-1">Display name</label>
         <input type="text" x-model="display_name" required autocomplete="name"
-               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300" />
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface outline-none focus:ring-2 focus:ring-line-strong" />
       </div>
       <div>
-        <label class="block smallcaps text-stone-500 mb-1">Password</label>
+        <label class="block smallcaps text-muted mb-1">Password</label>
         <input type="password" x-model="password" required autocomplete="new-password"
-               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300" />
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface outline-none focus:ring-2 focus:ring-line-strong" />
       </div>
       <div>
-        <label class="block smallcaps text-stone-500 mb-1">
+        <label class="block smallcaps text-muted mb-1">
           Team / department
-          <span class="text-stone-400 normal-case font-normal">(optional)</span>
+          <span class="text-faint normal-case font-normal">(optional)</span>
         </label>
         <input type="text" x-model="team" placeholder="e.g. IT Operations"
-               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white outline-none focus:ring-2 focus:ring-stone-300" />
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface outline-none focus:ring-2 focus:ring-line-strong" />
       </div>
       <button type="submit" :disabled="loading"
               class="btn btn-primary w-full h-9 text-[13.5px] justify-center disabled:opacity-50 mt-1">
@@ -51,9 +50,9 @@
       </button>
     </form>
 
-    <p class="mt-5 text-[13px] text-center text-stone-500">
+    <p class="mt-5 text-[13px] text-center text-muted">
       Already have an account?
-      <a href="/login" class="text-stone-700 font-medium hover:underline">Sign in</a>
+      <a href="/login" class="text-ink-soft font-medium hover:underline">Sign in</a>
     </p>
   </div>
 </div>

@@ -34,6 +34,20 @@ ships with Docker Compose and Kubernetes deployment manifests.
 - **Sample templates** — optional bundled scenarios can be loaded from Settings; the database stays empty by default
 - **Export** — transcript (JSON), responses (CSV), and AI assessments (JSON)
 
+## Screenshots
+
+The hero above is the **facilitator console** — a live exercise with a team-grouped inject tree, one-at-a-time release, and participant responses.
+
+| Command center | Scenario inject tree |
+|---|---|
+| ![Dashboard with the live-exercise hero](docs/dashboard.png) | ![Scenario detail with branching injects and validation](docs/scenario-detail.png) |
+| **Simulated communications** | **Participant view** |
+| ![Communications inbox with an inbound regulator message](docs/communications.png) | ![Participant briefing and responses](docs/participant.png) |
+
+The UI ships with a light/dark theme toggle (system-aware):
+
+![Facilitator console in dark mode](docs/facilitator-dark.png)
+
 ## Tech Stack
 
 - **Backend**: Python 3.14+, FastAPI (fully async), SQLModel + async SQLAlchemy, PostgreSQL (asyncpg)
@@ -144,7 +158,10 @@ pytest tests/ --ignore=tests/test_ui.py   # skip live Playwright tests
 
 ## Rebuilding CSS
 
-After editing templates, rebuild the Tailwind output:
+The shared Iceberg design system (cool-grey oklch tokens, cyan accent, and the
+`.rail`/`.workspace` component vocabulary) lives in `static/css/iceberg.css`,
+which `input.css` imports alongside Tailwind. After editing templates or the
+design system, rebuild the Tailwind output:
 
 ```bash
 tailwindcss -i static/css/input.css -o static/css/output.css
@@ -165,7 +182,7 @@ app/
 ├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control, audit_service, rate_limit)
 ├── samples/         # Bundled quick-start scenario templates (loaded only on demand)
 └── templates/       # Jinja2 HTML templates
-    ├── base.html            # Persistent dark sidebar, CSS vars, shared JS helpers
+    ├── base.html            # App shell (dark rail + breadcrumb topbar), shared JS helpers
     ├── dashboard.html       # Command center
     ├── help.html            # In-app help & documentation
     ├── settings.html        # Profile, theme, role preview, and sample loader
@@ -174,7 +191,10 @@ app/
     ├── exercises/           # list, facilitator console, participant view
     └── communications/      # inbox
 tests/               # Pytest test suite (conftest.py + one file per resource)
-static/css/          # output.css (Tailwind CLI compiled)
+static/css/          # input.css + iceberg.css (shared design system) → output.css (Tailwind CLI compiled)
+static/fonts/        # Self-hosted Archivo · JetBrains Mono · Spectral (woff2) + fonts.css
+static/img/          # Iceberg brand marks (SVG)
+docs/                # README screenshots
 Dockerfile           # Multi-stage build (Tailwind compile + Python runtime)
 docker-compose.yml   # app + postgres:17 + nginx:alpine
 docker/nginx.conf    # Reverse proxy config with WebSocket upgrade support

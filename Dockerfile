@@ -5,7 +5,10 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir "pytailwindcss>=0.3"
 
-COPY static/css/input.css static/css/input.css
+# Copy the full static/ tree: input.css @imports iceberg.css, and the
+# self-hosted fonts (static/fonts/ + fonts.css) must be carried to the runtime
+# image via the builder's static/ dir (see the COPY --from below).
+COPY static/ static/
 COPY app/templates/ app/templates/
 
 RUN tailwindcss -i static/css/input.css -o static/css/output.css --minify

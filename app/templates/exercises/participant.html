@@ -4,7 +4,7 @@
 {% block content %}
 <div x-data="participantView({{ exercise_id }})" x-init="init()">
   <div x-show="loading" class="flex items-center justify-center py-16">
-    <span class="smallcaps text-stone-400">Loading…</span>
+    <span class="smallcaps text-faint">Loading…</span>
   </div>
 
   <template x-if="!loading && exercise">
@@ -25,24 +25,24 @@
           <span class="pill bg-st-completed"><span class="dot" style="background:#5b86b8"></span>Completed</span>
         </template>
 
-        <span class="mono text-[11.5px] text-stone-500">EX-<span x-text="String(exercise.id).padStart(3,'0')"></span></span>
+        <span class="mono text-[11.5px] text-muted">EX-<span x-text="String(exercise.id).padStart(3,'0')"></span></span>
 
         <template x-if="isObserver">
-          <span class="pill bg-stone-100 text-stone-500">Observer — read only</span>
+          <span class="pill bg-surface-2 text-muted">Observer — read only</span>
         </template>
 
         <div class="ml-auto flex items-center gap-3">
           <a :href="'/exercises/' + exercise.id + '/communications'"
-             class="text-[12.5px] text-stone-500 hover:text-stone-800">Communications</a>
+             class="text-[12.5px] text-muted hover:text-ink">Communications</a>
           <span class="flex items-center gap-1.5 smallcaps"
-                :class="wsConnected ? 'text-stone-400' : 'text-red-400'">
+                :class="wsConnected ? 'text-faint' : 'text-red-400'">
             <span x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
           </span>
         </div>
       </div>
 
       <h1 class="text-[24px] font-semibold tracking-tight" x-text="exercise.title"></h1>
-      <p class="text-stone-500 text-[14px] mt-1">Respond to each released brief when your team is ready.</p>
+      <p class="text-muted text-[14px] mt-1">Respond to each released brief when your team is ready.</p>
 
       <!-- State banners -->
       <div x-show="exercise.state === 'draft'"
@@ -68,32 +68,32 @@
             <div class="p-5">
               <div class="flex items-center gap-2 mb-1.5">
                 <span class="smallcaps"
-                      :class="isCurrentBrief(inj) ? '' : 'text-stone-500'"
+                      :class="isCurrentBrief(inj) ? '' : 'text-muted'"
                       :style="isCurrentBrief(inj) ? 'color: var(--accent-d);' : ''"
                       x-text="briefLabel(inj)"></span>
-                <span class="mono text-[11px] text-stone-400"
+                <span class="mono text-[11px] text-faint"
                       x-text="(inj.scenario_node_id || '') + ' · ' + fmtTime(inj.released_at)"></span>
               </div>
 
               <h2 class="font-semibold tracking-tight"
                   :class="isCurrentBrief(inj) ? 'text-[18px] mt-1' : 'text-[16px]'"
                   x-text="inj.title"></h2>
-              <p class="text-stone-800 mt-2 leading-relaxed"
-                 :class="isCurrentBrief(inj) ? 'text-[14.5px]' : 'text-[13.5px] text-stone-700'"
+              <p class="text-ink mt-2 leading-relaxed"
+                 :class="isCurrentBrief(inj) ? 'text-[14.5px]' : 'text-[13.5px] text-ink-soft'"
                  x-text="inj.content"></p>
               <template x-if="inj.attachment">
                 <a :href="inj.attachment.url"
                    download
-                   class="mt-3 inline-flex items-center gap-2 rounded-md ring-rule px-2.5 py-1.5 text-[12.5px] text-stone-700 hover:text-stone-900 paper-soft"
+                   class="mt-3 inline-flex items-center gap-2 rounded-md ring-rule px-2.5 py-1.5 text-[12.5px] text-ink-soft hover:text-ink paper-soft"
                    style="max-width: 100%;">
-                  <span class="mono text-stone-400">↓</span>
+                  <span class="mono text-faint">↓</span>
                   <span class="truncate" x-text="inj.attachment.filename"></span>
                 </a>
               </template>
 
               <!-- Submitted confirmation for resolved injects -->
               <template x-if="!isCurrentBrief(inj) && submitted[inj.id]">
-                <div class="mt-3 flex items-center gap-2 text-[12.5px] text-stone-500">
+                <div class="mt-3 flex items-center gap-2 text-[12.5px] text-muted">
                   <span class="dot" style="background:#3b8e5a"></span>
                   You submitted a response
                 </div>
@@ -101,7 +101,7 @@
 
               <!-- Observer read-only notice -->
               <template x-if="isObserver && isCurrentBrief(inj)">
-                <p class="mt-3 text-[13px] text-stone-400 italic">Viewing as observer — responses disabled.</p>
+                <p class="mt-3 text-[13px] text-faint italic">Viewing as observer — responses disabled.</p>
               </template>
 
               <!-- Response form for active inject, non-observer, not yet submitted -->
@@ -111,14 +111,14 @@
                   <!-- Branch options -->
                   <template x-if="inj._options && inj._options.length">
                     <div class="mb-4">
-                      <div class="smallcaps text-stone-500 mb-2">Decision</div>
+                      <div class="smallcaps text-muted mb-2">Decision</div>
                       <div class="space-y-1.5">
                         <template x-for="opt in inj._options" :key="opt.id">
                           <label class="flex items-center gap-2.5 text-[13.5px] cursor-pointer">
                             <input type="radio" :name="'opt_' + inj.id" :value="opt.id"
                                    x-model="selectedOption[inj.id]"
                                    :disabled="exercise.state === 'paused'"
-                                   class="accent-stone-700" />
+                                   class="accent-accent-ink" />
                             <span x-text="opt.label"></span>
                           </label>
                         </template>
@@ -126,13 +126,13 @@
                     </div>
                   </template>
 
-                  <div class="smallcaps text-stone-500 mb-1.5"
+                  <div class="smallcaps text-muted mb-1.5"
                        x-text="inj._options && inj._options.length ? 'Reasoning' : 'Response'"></div>
                   <textarea :id="'resp_' + inj.id" x-model="freeText[inj.id]"
                             placeholder="What will your team do next?"
                             rows="4"
                             :disabled="exercise.state === 'paused'"
-                            class="w-full rounded-md ring-rule px-3 py-2 text-[13.5px] resize-none bg-white disabled:opacity-50"></textarea>
+                            class="w-full rounded-md ring-rule px-3 py-2 text-[13.5px] resize-none bg-surface disabled:opacity-50"></textarea>
 
                   <div class="flex items-center gap-3 mt-3">
                     <button @click="submitResponse(inj)"
@@ -159,8 +159,8 @@
               <div x-show="isCurrentBrief(inj) || commentsFor(inj.id).length"
                    class="mt-4 pt-4 border-t rule">
                 <div class="flex items-center gap-2 mb-2">
-                  <span class="smallcaps text-stone-500">Team comments</span>
-                  <span class="mono text-[11px] text-stone-400"
+                  <span class="smallcaps text-muted">Team comments</span>
+                  <span class="mono text-[11px] text-faint"
                         x-text="commentsFor(inj.id).length"></span>
                 </div>
                 <div x-show="commentsFor(inj.id).length"
@@ -170,10 +170,10 @@
                       <div class="flex items-center gap-2 mb-1">
                         <span class="text-[12.5px] font-medium"
                               x-text="comment.author_name || ('User #' + comment.user_id)"></span>
-                        <span class="mono text-[10.5px] text-stone-400"
+                        <span class="mono text-[10.5px] text-faint"
                               x-text="fmtAgo(comment.created_at)"></span>
                       </div>
-                      <p class="text-[13px] text-stone-700 whitespace-pre-wrap"
+                      <p class="text-[13px] text-ink-soft whitespace-pre-wrap"
                          x-text="comment.content"></p>
                     </div>
                   </template>
@@ -183,7 +183,7 @@
                     <textarea x-model="commentDraft[inj.id]"
                               placeholder="Add a team comment…"
                               rows="2"
-                              class="w-full rounded-md ring-rule px-3 py-2 text-[13px] resize-none bg-white"></textarea>
+                              class="w-full rounded-md ring-rule px-3 py-2 text-[13px] resize-none bg-surface"></textarea>
                     <div class="flex items-center gap-3 mt-2">
                       <button @click="submitComment(inj)"
                               :disabled="!canComment(inj)"
@@ -203,12 +203,12 @@
 
         <!-- Waiting placeholder -->
         <div x-show="injects.length === 0"
-             class="rounded-md py-6 text-center smallcaps text-stone-400 ring-rule"
+             class="rounded-md py-6 text-center smallcaps text-faint ring-rule"
              style="background: var(--paper);">
           Waiting for the facilitator…
         </div>
         <div x-show="injects.length > 0 && !currentBriefId"
-             class="rounded-md py-6 text-center smallcaps text-stone-400 ring-rule"
+             class="rounded-md py-6 text-center smallcaps text-faint ring-rule"
              style="background: var(--paper);">
           All released briefs have responses.
         </div>

@@ -7,7 +7,7 @@
   <div class="page-head">
     <div>
       <h1 class="page-title">Exercises</h1>
-      <p class="text-[13.5px] text-stone-500 mt-1">Prepare, run, and review tabletop sessions.</p>
+      <p class="text-[13.5px] text-muted mt-1">Prepare, run, and review tabletop sessions.</p>
     </div>
     <template x-if="isF">
       <button @click="showCreate = true"
@@ -29,14 +29,14 @@
 
       <div class="space-y-3">
         <div>
-          <label class="block smallcaps text-stone-500 mb-1">Title <span class="text-red-400">*</span></label>
+          <label class="block smallcaps text-muted mb-1">Title <span class="text-red-400">*</span></label>
           <input type="text" x-model="newTitle"
-                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white" />
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface" />
         </div>
         <div>
-          <label class="block smallcaps text-stone-500 mb-1">Scenario <span class="text-red-400">*</span></label>
+          <label class="block smallcaps text-muted mb-1">Scenario <span class="text-red-400">*</span></label>
           <select x-model="newScenarioId"
-                  class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white">
+                  class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface">
             <option value="">— select a scenario —</option>
             <template x-for="s in scenarios" :key="s.id">
               <option :value="s.id" x-text="s.title"></option>
@@ -45,8 +45,8 @@
         </div>
         <div class="flex items-center gap-2.5">
           <input type="checkbox" id="llm_enabled" x-model="newLlmEnabled"
-                 class="rounded accent-stone-700" />
-          <label for="llm_enabled" class="text-[13px] text-stone-600">Enable LLM assessment</label>
+                 class="rounded accent-accent-ink" />
+          <label for="llm_enabled" class="text-[13px] text-ink-soft">Enable LLM assessment</label>
         </div>
       </div>
 
@@ -62,14 +62,14 @@
   </div>
 
   <!-- Exercise list -->
-  <div x-show="loading" class="smallcaps text-stone-400 py-8 text-center">Loading…</div>
+  <div x-show="loading" class="smallcaps text-faint py-8 text-center">Loading…</div>
 
   <div x-show="!loading" class="surface overflow-hidden">
     <template x-if="!loading && exercises.length === 0">
-      <div class="px-5 py-10 text-center smallcaps text-stone-400">
+      <div class="px-5 py-10 text-center smallcaps text-faint">
         No exercises yet.
         <template x-if="isF">
-          <button @click="showCreate = true" class="underline hover:text-stone-700 ml-1">Create one.</button>
+          <button @click="showCreate = true" class="underline hover:text-ink-soft ml-1">Create one.</button>
         </template>
       </div>
     </template>
@@ -81,7 +81,7 @@
             <span class="text-[14px] font-medium" x-text="ex.title"></span>
             <span x-html="stateBadge(ex.state)"></span>
           </div>
-          <div class="mono text-[11.5px] text-stone-500 mt-0.5"
+          <div class="mono text-[11.5px] text-muted mt-0.5"
                x-text="'EX-' + String(ex.id).padStart(3,'0') + (ex.started_at ? ' · started ' + fmtTime(ex.started_at) : '')"></div>
         </div>
 

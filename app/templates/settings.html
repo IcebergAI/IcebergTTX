@@ -7,30 +7,30 @@
   <div class="page-head">
     <div>
       <h1 class="page-title">Settings</h1>
-      <p class="text-[13.5px] text-stone-500 mt-1">Local preferences, role preview, and quick-start data.</p>
+      <p class="text-[13.5px] text-muted mt-1">Local preferences, role preview, and quick-start data.</p>
     </div>
   </div>
 
   <div class="space-y-5">
     <section class="surface p-5">
       <div class="section-title mb-4">
-        <h2 class="smallcaps text-stone-500">Profile</h2>
+        <h2 class="smallcaps text-muted">Profile</h2>
       </div>
       <div class="grid gap-3" style="grid-template-columns: minmax(180px, 1fr) 140px;">
         <input type="text" x-model="displayName"
-               class="ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white"
+               class="ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
                placeholder="Display name" />
         <button @click="saveProfile()" :disabled="savingProfile"
                 class="btn btn-primary h-9 px-4 text-[13px] justify-center disabled:opacity-50">
           <span x-text="savingProfile ? 'Saving…' : 'Save name'"></span>
         </button>
       </div>
-      <p class="text-[12.5px] text-stone-500 mt-2" x-text="profileMessage"></p>
+      <p class="text-[12.5px] text-muted mt-2" x-text="profileMessage"></p>
     </section>
 
     <section class="surface p-5">
       <div class="section-title mb-4">
-        <h2 class="smallcaps text-stone-500">Appearance</h2>
+        <h2 class="smallcaps text-muted">Appearance</h2>
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <template x-for="option in ['system', 'light', 'dark']" :key="option">
@@ -40,26 +40,12 @@
                   x-text="option"></button>
         </template>
       </div>
-      <div class="flex flex-wrap items-center gap-2 mt-4">
-        <template x-for="swatch in accents" :key="swatch.value">
-          <button type="button"
-                  @click="setAccent(swatch.value)"
-                  class="h-10 w-10 rounded-full border-2 border-white shadow-sm ring-2 ring-offset-2 cursor-pointer transition"
-                  :class="accent === swatch.value ? 'ring-stone-800 scale-105' : 'ring-stone-200 hover:ring-stone-400'"
-                  :aria-label="'Use ' + swatch.label + ' accent'"
-                  :aria-pressed="accent === swatch.value"
-                  :title="swatch.label"
-                  :style="'background:' + swatch.value + '; width: 40px; height: 40px;'">
-            <span class="sr-only" x-text="swatch.label"></span>
-          </button>
-        </template>
-      </div>
-      <p class="text-[12.5px] text-stone-500 mt-3">Appearance is stored in this browser only.</p>
+      <p class="text-[12.5px] text-muted mt-3">Theme is stored in this browser only.</p>
     </section>
 
     <section class="surface p-5" x-show="canSwitch">
       <div class="section-title mb-4">
-        <h2 class="smallcaps text-stone-500">Role preview</h2>
+        <h2 class="smallcaps text-muted">Role preview</h2>
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <template x-for="role in ['facilitator', 'participant', 'observer']" :key="role">
@@ -70,33 +56,33 @@
         </template>
       </div>
       <div class="mt-4 max-w-xs">
-        <label class="block smallcaps text-stone-500 mb-1">Preview team</label>
+        <label class="block smallcaps text-muted mb-1">Preview team</label>
         <select x-model="viewTeam" @change="setPreviewTeam()"
-                class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-white">
+                class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface">
           <template x-for="team in previewTeamOptions" :key="team.id">
             <option :value="team.id" x-text="teamLabel(team)"></option>
           </template>
         </select>
       </div>
-      <p class="text-[12.5px] text-stone-500 mt-3">
+      <p class="text-[12.5px] text-muted mt-3">
         Preview mode changes normal navigation and API access. It does not change your account role.
       </p>
     </section>
 
     <section class="surface p-5" x-show="canSwitch">
       <div class="section-title mb-4">
-        <h2 class="smallcaps text-stone-500">Sample data</h2>
+        <h2 class="smallcaps text-muted">Sample data</h2>
       </div>
       <template x-if="samples.length === 0 && !loadingSamples">
-        <p class="text-[13px] text-stone-500">No bundled samples were found.</p>
+        <p class="text-[13px] text-muted">No bundled samples were found.</p>
       </template>
       <div class="divide-y rule">
         <template x-for="sample in samples" :key="sample.id">
           <div class="py-4 first:pt-0 last:pb-0 flex items-start gap-4">
             <div class="min-w-0 flex-1">
               <h3 class="text-[14px] font-medium" x-text="sample.title"></h3>
-              <p class="text-[13px] text-stone-500 mt-1" x-text="sample.description"></p>
-              <div class="mono text-[11.5px] text-stone-400 mt-2"
+              <p class="text-[13px] text-muted mt-1" x-text="sample.description"></p>
+              <div class="mono text-[11.5px] text-faint mt-2"
                    x-text="sample.inject_count + ' injects · ' + sample.team_count + ' teams'"></div>
             </div>
             <div class="flex shrink-0 gap-2">
@@ -108,7 +94,7 @@
           </div>
         </template>
       </div>
-      <p class="text-[12.5px] text-stone-500 mt-3" x-text="sampleMessage"></p>
+      <p class="text-[12.5px] text-muted mt-3" x-text="sampleMessage"></p>
     </section>
   </div>
 
@@ -124,13 +110,6 @@ function settingsPage() {
     savingProfile: false,
     profileMessage: '',
     theme: localStorage.getItem('dt_theme') || 'system',
-    accent: localStorage.getItem('dt_accent') || 'oklch(0.74 0.14 70)',
-    accents: [
-      { label: 'Amber', value: 'oklch(0.74 0.14 70)' },
-      { label: 'Blue', value: 'oklch(0.68 0.14 245)' },
-      { label: 'Green', value: 'oklch(0.66 0.13 150)' },
-      { label: 'Rose', value: 'oklch(0.67 0.16 20)' },
-    ],
     viewRole: localStorage.getItem('dt_view_role') || 'facilitator',
     viewTeam: localStorage.getItem('dt_view_team') || 'it_ops',
     previewTeams: [],
@@ -187,12 +166,7 @@ function settingsPage() {
 
     setTheme(value) {
       this.theme = value;
-      applyTheme(this.theme, this.accent);
-    },
-
-    setAccent(value) {
-      this.accent = value;
-      applyTheme(this.theme, this.accent);
+      applyTheme(this.theme);
     },
 
     setCookie(name, value) {
