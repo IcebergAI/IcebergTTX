@@ -3,15 +3,15 @@ services:
     image: postgres:17
     restart: unless-stopped
     environment:
-      POSTGRES_USER: deep_thought
+      POSTGRES_USER: iceberg_ttx
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: deep_thought
+      POSTGRES_DB: iceberg_ttx
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - deep_thought_net
+      - iceberg_ttx_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U deep_thought -d deep_thought"]
+      test: ["CMD-SHELL", "pg_isready -U iceberg_ttx -d iceberg_ttx"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,7 +25,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://deep_thought:${POSTGRES_PASSWORD}@db:5432/deep_thought
+      DATABASE_URL: postgresql://iceberg_ttx:${POSTGRES_PASSWORD}@db:5432/iceberg_ttx
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -33,7 +33,7 @@ services:
       - uploads:/app/uploads
       - static_files:/app/static
     networks:
-      - deep_thought_net
+      - iceberg_ttx_net
     # Copy static assets from the image-baked static_src/ into the shared
     # volume on every start so nginx always serves the current image version.
     entrypoint:
@@ -56,7 +56,7 @@ services:
       - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - static_files:/app/static:ro
     networks:
-      - deep_thought_net
+      - iceberg_ttx_net
 
 volumes:
   postgres_data:
@@ -64,5 +64,5 @@ volumes:
   static_files:
 
 networks:
-  deep_thought_net:
+  iceberg_ttx_net:
     driver: bridge

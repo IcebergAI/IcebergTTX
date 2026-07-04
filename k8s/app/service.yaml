@@ -1,15 +1,15 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: deep-thought-app
-  namespace: deep-thought
+  name: iceberg-ttx-app
+  namespace: iceberg-ttx
   labels:
-    app.kubernetes.io/name: deep-thought-app
-    app.kubernetes.io/part-of: deep-thought
+    app.kubernetes.io/name: iceberg-ttx-app
+    app.kubernetes.io/part-of: iceberg-ttx
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: deep-thought-app
+    app.kubernetes.io/name: iceberg-ttx-app
   ports:
     - port: 8000
       targetPort: 8000

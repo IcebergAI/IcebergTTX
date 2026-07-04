@@ -5,10 +5,10 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: app-uploads
-  namespace: deep-thought
+  namespace: iceberg-ttx
   labels:
-    app.kubernetes.io/name: deep-thought-app
-    app.kubernetes.io/part-of: deep-thought
+    app.kubernetes.io/name: iceberg-ttx-app
+    app.kubernetes.io/part-of: iceberg-ttx
 spec:
   accessModes:
     - ReadWriteOnce

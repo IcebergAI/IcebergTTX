@@ -4,7 +4,7 @@ Initialised once from the app lifespan. Without this, Python's logging defaults
 to the WARNING-level "handler of last resort", so INFO-level application logs and
 ``logger.exception`` calls from background tasks (LLM pipeline, delayed comms) may
 never surface. This installs a single root handler at the configured level and
-gives the ``deep_thought.audit`` stream its own handler so audit events stay pure
+gives the ``iceberg_ttx.audit`` stream its own handler so audit events stay pure
 JSON lines (OWASP Logging Cheat Sheet) instead of being wrapped by the app
 formatter.
 """
@@ -55,7 +55,7 @@ def configure_logging() -> None:
 
     # The audit logger emits pre-formatted JSON lines; keep them unwrapped and
     # off the root handler so the audit stream is cleanly machine-parseable.
-    audit_logger = logging.getLogger("deep_thought.audit")
+    audit_logger = logging.getLogger("iceberg_ttx.audit")
     audit_logger.setLevel(logging.INFO)
     audit_logger.propagate = False
     for handler in list(audit_logger.handlers):

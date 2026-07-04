@@ -1,6 +1,6 @@
 """Structured audit logging of security-relevant actions (#23).
 
-Events are always emitted as JSON lines to the ``deep_thought.audit`` logger so
+Events are always emitted as JSON lines to the ``iceberg_ttx.audit`` logger so
 they survive even if the database write fails (per the OWASP Logging Cheat
 Sheet). When ``settings.audit_persist`` is enabled they are also written to the
 append-only ``AuditEvent`` table.
@@ -21,9 +21,9 @@ from typing import Any
 from app.config import settings
 from app.services.background import spawn
 
-audit_logger = logging.getLogger("deep_thought.audit")
+audit_logger = logging.getLogger("iceberg_ttx.audit")
 
-APP_NAME = "deep-thought"
+APP_NAME = "iceberg-ttx"
 APP_VERSION = "0.1.0"
 
 # Per-request "where" metadata, populated by AuditContextMiddleware.

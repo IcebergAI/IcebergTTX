@@ -1,4 +1,4 @@
-# Deep Thought
+# IcebergTTX
 
 [![CI](https://github.com/richardmhope/deep_thought/actions/workflows/ci.yml/badge.svg)](https://github.com/richardmhope/deep_thought/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.14%2B-blue)
@@ -6,7 +6,7 @@
 
 A tabletop exercise (TTX) platform for running cyber incident and business resilience scenarios.
 
-![Deep Thought facilitator console](docs/screenshot.png)
+![IcebergTTX facilitator console](docs/screenshot.png)
 
 ## Features
 
@@ -98,18 +98,18 @@ kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/secrets.yaml k8s/configmap.yaml
 
 # Before applying, replace placeholder values in k8s/secrets.yaml
-# and replace 'your-registry/deep-thought:latest' in:
+# and replace 'your-registry/iceberg-ttx:latest' in:
 #   k8s/app/deployment.yaml
 #   k8s/nginx/deployment.yaml
 
 kubectl apply -f k8s/postgres/
-kubectl rollout status statefulset/postgres -n deep-thought
+kubectl rollout status statefulset/postgres -n iceberg-ttx
 
 kubectl apply -f k8s/app/
-kubectl rollout status deployment/deep-thought-app -n deep-thought
+kubectl rollout status deployment/iceberg-ttx-app -n iceberg-ttx
 
 kubectl apply -f k8s/nginx/
-kubectl rollout status deployment/nginx -n deep-thought
+kubectl rollout status deployment/nginx -n iceberg-ttx
 ```
 
 > **Note**: The app must run as a single replica (`replicas: 1`) until the in-memory WebSocket manager is replaced with a distributed backend (e.g. Redis pub/sub). The manifests enforce this with `strategy: Recreate`.

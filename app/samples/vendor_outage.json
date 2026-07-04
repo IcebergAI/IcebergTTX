@@ -4,7 +4,7 @@
   "description": "A short operational resilience scenario about a third-party SaaS outage during peak demand.",
   "tags": ["sample", "resilience", "vendor"],
   "metadata": {
-    "author": "Deep Thought",
+    "author": "IcebergTTX",
     "estimated_duration_minutes": 35
   },
   "participant_teams": [

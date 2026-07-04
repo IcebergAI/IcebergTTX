@@ -8,36 +8,36 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: deep-thought-app
-  namespace: deep-thought
+  name: iceberg-ttx-app
+  namespace: iceberg-ttx
   labels:
-    app.kubernetes.io/name: deep-thought-app
-    app.kubernetes.io/part-of: deep-thought
+    app.kubernetes.io/name: iceberg-ttx-app
+    app.kubernetes.io/part-of: iceberg-ttx
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: deep-thought-app
+      app.kubernetes.io/name: iceberg-ttx-app
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: deep-thought-app
-        app.kubernetes.io/part-of: deep-thought
+        app.kubernetes.io/name: iceberg-ttx-app
+        app.kubernetes.io/part-of: iceberg-ttx
     spec:
       initContainers:
         # Populate the shared emptyDir with compiled static assets from the
         # image so nginx (which has its own copy) can serve them directly.
         - name: copy-static
-          image: your-registry/deep-thought:latest  # REPLACE with actual image
+          image: your-registry/iceberg-ttx:latest  # REPLACE with actual image
           command: ["/bin/sh", "-c", "cp -a /app/static_src/. /app/static/"]
           volumeMounts:
             - name: static-files
               mountPath: /app/static
       containers:
         - name: app
-          image: your-registry/deep-thought:latest  # REPLACE with actual image
+          image: your-registry/iceberg-ttx:latest  # REPLACE with actual image
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
@@ -46,22 +46,22 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: deep-thought-secrets
+                  name: iceberg-ttx-secrets
                   key: DATABASE_URL
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: deep-thought-secrets
+                  name: iceberg-ttx-secrets
                   key: SECRET_KEY
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: deep-thought-secrets
+                  name: iceberg-ttx-secrets
                   key: ANTHROPIC_API_KEY
             - name: ACCESS_TOKEN_EXPIRE_MINUTES
               valueFrom:
                 configMapKeyRef:
-                  name: deep-thought-config
+                  name: iceberg-ttx-config
                   key: ACCESS_TOKEN_EXPIRE_MINUTES
           volumeMounts:
             - name: uploads

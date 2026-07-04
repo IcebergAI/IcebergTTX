@@ -2,10 +2,10 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nginx
-  namespace: deep-thought
+  namespace: iceberg-ttx
   labels:
     app.kubernetes.io/name: nginx
-    app.kubernetes.io/part-of: deep-thought
+    app.kubernetes.io/part-of: iceberg-ttx
 spec:
   # Use LoadBalancer for cloud providers that provision one automatically.
   # Use ClusterIP + Ingress if your cluster has an Ingress controller.

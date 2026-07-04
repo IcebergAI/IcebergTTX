@@ -4,7 +4,7 @@
   "description": "A compact tabletop scenario for practising first-hour ransomware decisions.",
   "tags": ["sample", "cyber", "ransomware"],
   "metadata": {
-    "author": "Deep Thought",
+    "author": "IcebergTTX",
     "estimated_duration_minutes": 45
   },
   "participant_teams": [
