@@ -1,13 +1,18 @@
+from datetime import UTC, datetime, timedelta
+
+import pytest
 from httpx import AsyncClient
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.user import User
+from app.services.auth_service import create_access_token
 
 
 async def test_register_success(client: AsyncClient):
     resp = await client.post("/api/auth/register", json={
         "email": "new@example.com",
         "display_name": "New User",
-        "password": "secret123",
+        "password": "secret123456",
     })
     assert resp.status_code == 201
     data = resp.json()
@@ -21,7 +26,7 @@ async def test_register_duplicate_email(client: AsyncClient, facilitator: User):
     resp = await client.post("/api/auth/register", json={
         "email": facilitator.email,
         "display_name": "Dup",
-        "password": "secret123",
+        "password": "secret123456",
     })
     assert resp.status_code == 409
 
@@ -31,7 +36,7 @@ async def test_register_ignores_elevated_role(client: AsyncClient):
     resp = await client.post("/api/auth/register", json={
         "email": "fac2@example.com",
         "display_name": "Fac 2",
-        "password": "secret123",
+        "password": "secret123456",
         "role": "facilitator",
     })
     assert resp.status_code == 201
@@ -42,7 +47,7 @@ async def test_register_ignores_observer_role(client: AsyncClient):
     resp = await client.post("/api/auth/register", json={
         "email": "obs@example.com",
         "display_name": "Obs",
-        "password": "secret123",
+        "password": "secret123456",
         "role": "observer",
     })
     assert resp.status_code == 201
@@ -52,7 +57,7 @@ async def test_register_ignores_observer_role(client: AsyncClient):
 async def test_login_success(client: AsyncClient, facilitator: User):
     resp = await client.post("/api/auth/login", json={
         "email": facilitator.email,
-        "password": "password123",
+        "password": "password1234",
     })
     assert resp.status_code == 200
     data = resp.json()
@@ -63,7 +68,7 @@ async def test_login_success(client: AsyncClient, facilitator: User):
 async def test_logout_clears_cookie_backed_session(client: AsyncClient, facilitator: User):
     login_resp = await client.post("/api/auth/login", json={
         "email": facilitator.email,
-        "password": "password123",
+        "password": "password1234",
     })
     assert login_resp.status_code == 200
     assert (await client.get("/api/auth/me")).status_code == 200
@@ -86,7 +91,7 @@ async def test_login_wrong_password(client: AsyncClient, facilitator: User):
 async def test_login_unknown_email(client: AsyncClient):
     resp = await client.post("/api/auth/login", json={
         "email": "nobody@example.com",
-        "password": "password123",
+        "password": "password1234",
     })
     assert resp.status_code == 401
 
@@ -187,3 +192,76 @@ async def test_role_in_token(client: AsyncClient, facilitator_token: str, partic
 
     par_payload = decode_access_token(participant_token)
     assert par_payload["role"] == "participant"
+
+
+# ── #13: password strength validation ─────────────────────────────────────────
+
+
+@pytest.mark.parametrize("password", ["", "   ", "short", "elevenchars", "x" * 129])
+async def test_register_rejects_weak_password(client: AsyncClient, password: str):
+    resp = await client.post("/api/auth/register", json={
+        "email": "weak@example.com",
+        "display_name": "Weak",
+        "password": password,
+    })
+    assert resp.status_code == 422
+
+
+async def test_register_accepts_minimum_length_password(client: AsyncClient):
+    resp = await client.post("/api/auth/register", json={
+        "email": "twelvechars@example.com",
+        "display_name": "Twelve",
+        "password": "a" * 12,
+    })
+    assert resp.status_code == 201
+
+
+@pytest.mark.parametrize("password", ["", "   ", "elevenchars"])
+async def test_update_me_rejects_weak_password(
+    client: AsyncClient, facilitator_token: str, password: str
+):
+    resp = await client.put(
+        "/api/auth/me",
+        json={"password": password},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert resp.status_code == 422
+
+
+# ── #14: token revocation via token_valid_after ───────────────────────────────
+
+
+async def test_token_valid_after_revokes_earlier_token(
+    client: AsyncClient, session: AsyncSession, facilitator: User, facilitator_token: str
+):
+    auth = {"Authorization": f"Bearer {facilitator_token}"}
+    assert (await client.get("/api/auth/me", headers=auth)).status_code == 200
+    # Cutoff strictly after the token's issue time → the existing token is revoked.
+    facilitator.token_valid_after = datetime.now(UTC) + timedelta(seconds=2)
+    session.add(facilitator)
+    await session.commit()
+    assert (await client.get("/api/auth/me", headers=auth)).status_code == 401
+
+
+async def test_token_issued_after_cutoff_is_accepted(
+    client: AsyncClient, session: AsyncSession, facilitator: User
+):
+    facilitator.token_valid_after = datetime.now(UTC) - timedelta(seconds=2)
+    session.add(facilitator)
+    await session.commit()
+    token = create_access_token(subject=facilitator.email, role=facilitator.role.value)
+    resp = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+
+
+async def test_password_change_sets_token_valid_after(
+    client: AsyncClient, session: AsyncSession, facilitator: User, facilitator_token: str
+):
+    resp = await client.put(
+        "/api/auth/me",
+        json={"password": "brandnewpass1234"},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert resp.status_code == 200
+    await session.refresh(facilitator)
+    assert facilitator.token_valid_after is not None

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -135,6 +136,7 @@ def get_me(current_user: Annotated[User, Depends(get_current_user)]):
 @router.put("/me", response_model=UserResponse)
 async def update_me(
     body: UpdateMeRequest,
+    response: Response,
     current_user: Annotated[User, Depends(get_current_actual_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ):
@@ -142,11 +144,18 @@ async def update_me(
     new_password = update_data.pop("password", None)
     if new_password is not None:
         current_user.hashed_password = hash_password(new_password)
+        # Revoke all previously-issued tokens (#14). Truncated to whole seconds so
+        # a freshly-minted token (iat is second-precision) is not itself rejected.
+        current_user.token_valid_after = datetime.now(UTC).replace(microsecond=0)
     current_user.sqlmodel_update(update_data)
     session.add(current_user)
     await session.commit()
     await session.refresh(current_user)
     if new_password is not None:
+        # Re-issue so the caller's own session survives its own password change;
+        # every earlier token is now revoked by the token_valid_after bump.
+        token = create_access_token(subject=current_user.email, role=current_user.role.value)
+        _set_session_cookie(response, token)
         audit_service.emit(
             "auth.password_change",
             actor=current_user,

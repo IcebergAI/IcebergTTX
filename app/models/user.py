@@ -22,3 +22,9 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )
+    # Token revocation cutoff (#14): tokens issued (iat) before this instant are
+    # rejected in get_current_user. Bumped on password change to invalidate all
+    # previously-issued tokens ("change password to kick out an attacker").
+    token_valid_after: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )

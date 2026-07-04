@@ -87,6 +87,37 @@ async def test_create_inject_with_attachment(
     assert "brief.txt" in download.headers["content-disposition"]
 
 
+async def test_disallowed_attachment_type_normalized_and_nosniff(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+):
+    """A disallowed content-type is stored/served as octet-stream with nosniff (#16)."""
+    content = b"<script>alert(1)</script>"
+    r = await client.post(
+        f"/api/exercises/{active_exercise.id}/injects",
+        data={"title": "Evil", "content": "x", "sequence_order": "6"},
+        files={"attachment": ("evil.html", content, "text/html")},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert r.status_code == 201
+    data = r.json()
+    assert data["attachment"]["content_type"] == "application/octet-stream"
+
+    await client.post(
+        f"/api/exercises/{active_exercise.id}/injects/{data['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    download = await client.get(
+        data["attachment"]["url"],
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith("application/octet-stream")
+    assert download.headers["x-content-type-options"] == "nosniff"
+
+
 async def test_create_inject_attachment_too_large(
     client: AsyncClient,
     facilitator_token: str,

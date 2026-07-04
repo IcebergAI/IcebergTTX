@@ -36,6 +36,33 @@ ATTACHMENT_ROOT = Path("uploads/inject_attachments")
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 ATTACHMENT_CHUNK_BYTES = 1024 * 1024
 
+# Content-type allowlist for inject attachments (#16). An uploaded type outside
+# this set is stored/served as the safe default so the download response can
+# never carry an attacker-chosen renderable type (e.g. text/html, image/svg+xml).
+DEFAULT_ATTACHMENT_TYPE = "application/octet-stream"
+ALLOWED_ATTACHMENT_TYPES = frozenset({
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "text/plain",
+    "text/csv",
+    "application/json",
+    "application/zip",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+})
+
+
+def _normalize_content_type(content_type: str | None) -> str:
+    """Confine a stored attachment type to the allowlist (#16)."""
+    base = content_type.split(";", 1)[0].strip().lower() if content_type else ""
+    return base if base in ALLOWED_ATTACHMENT_TYPES else DEFAULT_ATTACHMENT_TYPE
+
 FacilitatorDep = Annotated[User, Depends(require_role(UserRole.facilitator))]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -130,7 +157,7 @@ async def _save_attachment(
         await file.close()
     return {
         "attachment_filename": original_filename,
-        "attachment_content_type": file.content_type or "application/octet-stream",
+        "attachment_content_type": _normalize_content_type(file.content_type),
         "attachment_path": str(storage_path),
         "attachment_size": size,
     }
@@ -240,8 +267,11 @@ async def download_attachment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     return FileResponse(
         path,
-        media_type=inject.attachment_content_type or "application/octet-stream",
+        media_type=_normalize_content_type(inject.attachment_content_type),
         filename=inject.attachment_filename,
+        # Prevent content sniffing / inline rendering of the served type (#16).
+        # Content-Disposition: attachment is already implied by `filename`.
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Cookie, Depends, Header, HTTPException, status
@@ -55,6 +56,24 @@ async def get_current_user(
             severity="warning",
         )
         raise credentials_exc
+
+    # Token revocation (#14): reject tokens issued before the user's cutoff. A
+    # missing `iat` on a token is treated as revoked when a cutoff is set.
+    if user.token_valid_after is not None:
+        iat = payload.get("iat")
+        # A non-numeric/out-of-range iat falls through to the revoked branch (401)
+        # rather than raising from fromtimestamp() and surfacing as a 500.
+        issued_at = datetime.fromtimestamp(iat, UTC) if isinstance(iat, int | float) else None
+        if issued_at is None or issued_at < user.token_valid_after:
+            audit_service.emit(
+                "auth.token_invalid",
+                result="fail",
+                actor_email=email,
+                reason="revoked",
+                severity="warning",
+            )
+            raise credentials_exc
+
     return apply_role_preview(user, view_role, view_team)
 
 
