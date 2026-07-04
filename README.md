@@ -67,13 +67,22 @@ uvicorn app.main:app --reload
 Open [http://localhost:8000](http://localhost:8000). Register an account (self-registration always creates a **participant**), then promote it to facilitator out-of-band — e.g. in a Python shell:
 
 ```python
-from sqlmodel import Session, select
+import asyncio
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 from app.database import engine
 from app.models.user import User, UserRole
-with Session(engine) as s:
-    u = s.exec(select(User).where(User.email == "you@example.com")).one()
-    u.role = UserRole.facilitator
-    s.add(u); s.commit()
+
+
+async def promote(email: str) -> None:
+    async with AsyncSession(engine) as s:
+        u = (await s.exec(select(User).where(User.email == email))).one()
+        u.role = UserRole.facilitator
+        s.add(u)
+        await s.commit()
+
+
+asyncio.run(promote("you@example.com"))
 ```
 
 As a facilitator, create a scenario and exercise. To try the app quickly, open Settings and load a sample scenario or demo exercise. In-app help is available at [/help](http://localhost:8000/help).
@@ -148,7 +157,7 @@ app/
 ├── main.py          # App factory + lifespan (settings validation, middleware)
 ├── config.py        # Settings (pydantic-settings, reads .env) + startup validation
 ├── middleware.py    # Audit request context + CSRF origin checks
-├── database.py      # SQLite / Postgres engine + get_session dependency
+├── database.py      # Async Postgres engine + get_session dependency
 ├── dependencies.py  # FastAPI dependencies (auth, role guards)
 ├── models/          # SQLModel table definitions (incl. AuditEvent)
 ├── schemas/         # Pydantic request/response schemas
