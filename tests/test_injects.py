@@ -87,6 +87,32 @@ async def test_create_inject_with_attachment(
     assert "brief.txt" in download.headers["content-disposition"]
 
 
+async def test_create_inject_attachment_too_large(
+    client: AsyncClient,
+    facilitator_token: str,
+    active_exercise: Exercise,
+    monkeypatch,
+):
+    """An oversized upload is rejected mid-stream (413) and leaves no residual file (#39)."""
+    from app.routers import injects as injects_router
+
+    monkeypatch.setattr(injects_router, "MAX_ATTACHMENT_BYTES", 16)
+    monkeypatch.setattr(injects_router, "ATTACHMENT_CHUNK_BYTES", 8)
+    storage_dir = injects_router.ATTACHMENT_ROOT / str(active_exercise.id)
+    before = set(storage_dir.glob("*")) if storage_dir.exists() else set()
+
+    r = await client.post(
+        f"/api/exercises/{active_exercise.id}/injects",
+        data={"title": "Big", "content": "too big"},
+        files={"attachment": ("big.bin", b"x" * 64, "application/octet-stream")},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert r.status_code == 413
+
+    after = set(storage_dir.glob("*")) if storage_dir.exists() else set()
+    assert after == before, "partial oversized upload should be cleaned up"
+
+
 async def test_create_inject_participant_forbidden(
     client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):

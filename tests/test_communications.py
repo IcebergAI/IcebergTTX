@@ -63,6 +63,31 @@ async def test_send_outbound(
     assert data["sender_team"] == "it_ops"
 
 
+async def test_participant_send_blocked_when_not_active(
+    client: AsyncClient,
+    session: AsyncSession,
+    participant_token: str,
+    active_exercise: Exercise,
+):
+    """Participant outbound comms require an active exercise, like responses (#40)."""
+    from app.models.exercise import ExerciseState
+    from app.services.exercise_service import transition_state
+
+    await transition_state(session, active_exercise, ExerciseState.paused)
+
+    r = await _send(client, participant_token, active_exercise.id)
+    assert r.status_code == 409
+
+
+async def test_facilitator_inject_comm_allowed_in_draft(
+    client: AsyncClient, facilitator_token: str, draft_exercise: Exercise
+):
+    """Facilitators may seed simulated inbound comms before the exercise starts (#40)."""
+    r = await _inject_comm(client, facilitator_token, draft_exercise.id)
+    assert r.status_code == 201
+    assert r.json()["direction"] == "inbound"
+
+
 async def test_inject_inbound_facilitator(
     client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):

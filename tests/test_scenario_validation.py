@@ -60,3 +60,31 @@ def test_option_cycle_is_detected():
 def test_too_many_injects_is_rejected():
     with pytest.raises(ValidationError, match="max"):
         ScenarioDefinition.model_validate(_linear_chain(MAX_INJECTS + 1))
+
+
+def test_duplicate_inject_id_is_rejected():
+    data = {
+        "title": "Duplicates",
+        "injects": [
+            {"id": "a", "title": "A", "content": "x", "options": []},
+            {"id": "a", "title": "A again", "content": "y", "options": []},
+        ],
+        "start_inject_id": "a",
+    }
+    with pytest.raises(ValidationError, match="duplicate inject id"):
+        ScenarioDefinition.model_validate(data)
+
+
+def test_cycle_in_unreachable_island_is_detected():
+    # b <-> c form a cycle but are not reachable from the start inject 'a'.
+    data = {
+        "title": "Unreachable cycle",
+        "injects": [
+            {"id": "a", "title": "A", "content": "x", "options": []},
+            {"id": "b", "title": "B", "content": "x", "next_inject_id": "c", "options": []},
+            {"id": "c", "title": "C", "content": "x", "next_inject_id": "b", "options": []},
+        ],
+        "start_inject_id": "a",
+    }
+    with pytest.raises(ValidationError, match="Cycle detected"):
+        ScenarioDefinition.model_validate(data)

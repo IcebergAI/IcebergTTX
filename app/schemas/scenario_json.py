@@ -70,7 +70,13 @@ class ScenarioDefinition(BaseModel):
                 f"scenario has {len(self.injects)} injects (max {MAX_INJECTS})"
             )
 
-        inject_ids = {inj.id for inj in self.injects}
+        ids = [inj.id for inj in self.injects]
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        if dupes:
+            # Downstream code (get_inject_node, seed_injects_from_scenario, branch
+            # resolution) assumes inject ids are unique; a set would hide collisions.
+            raise ValueError(f"duplicate inject id(s): {', '.join(dupes)}")
+        inject_ids = set(ids)
         team_ids = {t.id for t in self.participant_teams}
 
         # start_inject_id must exist
@@ -97,16 +103,18 @@ class ScenarioDefinition(BaseModel):
                     )
 
         # Detect cycles using DFS
-        _check_no_cycles(self.injects, self.start_inject_id)
+        _check_no_cycles(self.injects)
 
         return self
 
 
-def _check_no_cycles(injects: list[InjectNode], start_id: str) -> None:
-    """Raises ValueError if there is a cycle reachable from start_id.
+def _check_no_cycles(injects: list[InjectNode]) -> None:
+    """Raises ValueError if the scenario graph contains a cycle.
 
-    Iterative DFS (explicit stack) so deep linear ``next_inject_id`` chains cannot
-    overflow the recursion limit and surface as an opaque 500 (#18).
+    Every node is seeded as a DFS root (not just start_inject_id) so a cycle in an
+    island unreachable from the start still fails validation (#37). Iterative DFS
+    (explicit stack) so deep linear ``next_inject_id`` chains cannot overflow the
+    recursion limit and surface as an opaque 500 (#18).
     """
     adjacency: dict[str, list[str]] = {}
     for inj in injects:
@@ -118,20 +126,23 @@ def _check_no_cycles(injects: list[InjectNode], start_id: str) -> None:
     WHITE, GREY, BLACK = 0, 1, 2
     colour: dict[str, int] = dict.fromkeys(adjacency, WHITE)
 
-    colour[start_id] = GREY
-    stack: list[tuple[str, object]] = [(start_id, iter(adjacency.get(start_id, [])))]
-    while stack:
-        node, neighbours = stack[-1]
-        descended = False
-        for neighbour in neighbours:  # type: ignore[attr-defined]
-            state = colour.get(neighbour, WHITE)
-            if state == GREY:
-                raise ValueError(f"Cycle detected in scenario graph at inject '{neighbour}'")
-            if state == WHITE:
-                colour[neighbour] = GREY
-                stack.append((neighbour, iter(adjacency.get(neighbour, []))))
-                descended = True
-                break
-        if not descended:
-            colour[node] = BLACK
-            stack.pop()
+    for root in adjacency:
+        if colour[root] != WHITE:
+            continue
+        colour[root] = GREY
+        stack: list[tuple[str, object]] = [(root, iter(adjacency[root]))]
+        while stack:
+            node, neighbours = stack[-1]
+            descended = False
+            for neighbour in neighbours:  # type: ignore[attr-defined]
+                state = colour.get(neighbour, WHITE)
+                if state == GREY:
+                    raise ValueError(f"Cycle detected in scenario graph at inject '{neighbour}'")
+                if state == WHITE:
+                    colour[neighbour] = GREY
+                    stack.append((neighbour, iter(adjacency.get(neighbour, []))))
+                    descended = True
+                    break
+            if not descended:
+                colour[node] = BLACK
+                stack.pop()

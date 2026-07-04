@@ -34,6 +34,7 @@ router = APIRouter(prefix="/exercises/{exercise_id}/injects", tags=["injects"])
 
 ATTACHMENT_ROOT = Path("uploads/inject_attachments")
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+ATTACHMENT_CHUNK_BYTES = 1024 * 1024
 
 FacilitatorDep = Annotated[User, Depends(require_role(UserRole.facilitator))]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
@@ -109,19 +110,29 @@ async def _save_attachment(
     storage_dir = ATTACHMENT_ROOT / str(exercise_id)
     storage_dir.mkdir(parents=True, exist_ok=True)
     storage_path = storage_dir / f"{uuid4().hex}_{safe_filename}"
-    data = await file.read()
-    if len(data) > MAX_ATTACHMENT_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Attachment is too large",
-        )
-    storage_path.write_bytes(data)
-    await file.close()
+    # Stream to disk in chunks and abort as soon as the running total exceeds the
+    # cap, so an oversized upload is never fully buffered in memory (#39).
+    size = 0
+    try:
+        with storage_path.open("wb") as out:
+            while chunk := await file.read(ATTACHMENT_CHUNK_BYTES):
+                size += len(chunk)
+                if size > MAX_ATTACHMENT_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Attachment is too large",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        storage_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
     return {
         "attachment_filename": original_filename,
         "attachment_content_type": file.content_type or "application/octet-stream",
         "attachment_path": str(storage_path),
-        "attachment_size": len(data),
+        "attachment_size": size,
     }
 
 
