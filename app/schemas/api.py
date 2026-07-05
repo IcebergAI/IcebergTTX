@@ -8,7 +8,9 @@ available) are optional so the same model serves every variant. Timestamp fields
 are strings because the helpers emit ``.isoformat()``.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
@@ -17,6 +19,9 @@ from app.models.exercise import ExerciseState
 from app.models.inject import InjectState
 from app.models.suggested_inject import SuggestedInjectStatus
 from app.models.user import UserRole
+
+if TYPE_CHECKING:
+    from app.models.exercise import Exercise, ExerciseMember
 
 
 class UserPublic(BaseModel):
@@ -40,6 +45,21 @@ class ExercisePublic(BaseModel):
     created_by: int
     created_at: str
 
+    @classmethod
+    def from_model(cls, ex: Exercise) -> ExercisePublic:
+        return cls(
+            id=ex.id,
+            scenario_id=ex.scenario_id,
+            title=ex.title,
+            state=ex.state,
+            current_node_id=ex.current_node_id,
+            llm_enabled=ex.llm_enabled,
+            started_at=ex.started_at.isoformat() if ex.started_at else None,
+            ended_at=ex.ended_at.isoformat() if ex.ended_at else None,
+            created_by=ex.created_by,
+            created_at=ex.created_at.isoformat(),
+        )
+
 
 class MemberPublic(BaseModel):
     id: int
@@ -47,6 +67,16 @@ class MemberPublic(BaseModel):
     user_id: int
     group_id: str | None = None
     joined_at: str
+
+    @classmethod
+    def from_model(cls, m: ExerciseMember) -> MemberPublic:
+        return cls(
+            id=m.id,
+            exercise_id=m.exercise_id,
+            user_id=m.user_id,
+            group_id=m.group_id,
+            joined_at=m.joined_at.isoformat(),
+        )
 
 
 class ScenarioSummary(BaseModel):
