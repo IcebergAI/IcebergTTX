@@ -53,6 +53,11 @@ dev = [
     "pytest-playwright>=0.7",
 ]
 
+[project.scripts]
+# Out-of-band operator bootstrap (#65): create/promote an admin or facilitator.
+# Also runnable without install as `python -m app.bootstrap_admin`.
+iceberg-ttx-admin = "app.bootstrap_admin:main"
+
 [project.urls]
 Homepage = "https://github.com/IcebergAI/IcebergTTX"
 Repository = "https://github.com/IcebergAI/IcebergTTX"

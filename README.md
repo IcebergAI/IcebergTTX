@@ -78,26 +78,14 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-Open [http://localhost:8000](http://localhost:8000). Register an account (self-registration always creates a **participant**), then promote it to facilitator out-of-band — e.g. in a Python shell:
+Open [http://localhost:8000](http://localhost:8000). Self-registration always creates a **participant**; privileged roles are assigned out-of-band. Create your first admin/facilitator with the bootstrap command:
 
-```python
-import asyncio
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
-from app.database import engine
-from app.models.user import User, UserRole
-
-
-async def promote(email: str) -> None:
-    async with AsyncSession(engine) as s:
-        u = (await s.exec(select(User).where(User.email == email))).one()
-        u.role = UserRole.facilitator
-        s.add(u)
-        await s.commit()
-
-
-asyncio.run(promote("you@example.com"))
+```bash
+# Creates a global-admin facilitator (prompts for the password if --password is omitted).
+python -m app.bootstrap_admin --email you@example.com --name "You"
 ```
+
+The command is idempotent — re-run it to promote or re-enable an existing account, add `--reset-password` to set a new password (revokes existing sessions), or `--no-admin` for a plain facilitator without the global-admin flag. In a container, prefix it with `docker compose exec app` or `kubectl exec -n iceberg-ttx deploy/iceberg-ttx-app --` (see the deployment sections below).
 
 As a facilitator, create a scenario and exercise. To try the app quickly, open Settings and load a sample scenario or demo exercise. In-app help is available at [/help](http://localhost:8000/help).
 
@@ -117,6 +105,12 @@ docker compose ps
 ```
 
 The app will be available on port 80. nginx (the unprivileged image, running as a non-root user and listening on 8080 inside the container) serves static files directly and proxies everything else (including WebSocket upgrades at `/ws/`) to uvicorn.
+
+Create your first admin account once the stack is up:
+
+```bash
+docker compose exec app python -m app.bootstrap_admin --email you@example.com --name "You"
+```
 
 > **TLS**: compose serves plain HTTP on `:80` for local use. In production, put a TLS-terminating proxy or load balancer in front — the app sets `Secure` auth cookies, which browsers won't send over plain HTTP. Never expose the auth flow over unencrypted HTTP.
 
@@ -153,6 +147,10 @@ kubectl rollout status deployment/nginx -n iceberg-ttx
 
 # Confine east-west traffic (requires a NetworkPolicy-enforcing CNI):
 kubectl apply -f k8s/networkpolicy.yaml
+
+# Create the first admin account (idempotent):
+kubectl exec -n iceberg-ttx deploy/iceberg-ttx-app -- \
+    python -m app.bootstrap_admin --email you@example.com --name "You"
 ```
 
 > **TLS**: the nginx Service is `ClusterIP`; `k8s/nginx/ingress.yaml` terminates HTTPS (cert-manager annotation + `force-ssl-redirect`) and forwards to it. Fill in the hostname, `ingressClassName`, and issuer before applying. Do **not** switch nginx back to a `LoadBalancer` on `:80` — that serves auth over plaintext.

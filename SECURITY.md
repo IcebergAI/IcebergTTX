@@ -25,11 +25,25 @@ before any public disclosure.
 
 ## Scope
 
-This project is designed around a **single trusted facilitator team** — any account
-with the `facilitator` role is currently a global administrator over exercises,
-scenarios, and exports (a documented trust boundary, not a vulnerability). Reports
-that depend on a facilitator account acting maliciously are out of scope until
-per-resource ownership scoping lands.
+**Access model.** Facilitator access to **exercises** is scoped per-exercise (#12): a
+facilitator can read and mutate only exercises they created, exercises they are
+enrolled on as a co-facilitator, or — for a global-admin account (`User.is_admin`) —
+any exercise. Cross-facilitator access to an exercise you do not own is **not** a
+documented trust boundary; reports demonstrating it (privilege escalation, IDOR, or a
+bypass of `require_exercise_access` / `require_exercise_owner`) are **in scope**.
+
+The following are **intentional, shared-by-design** and not vulnerabilities on their
+own:
+
+- The **scenario library** is shared — any facilitator may list, read, edit, and
+  export scenarios (they are reusable templates).
+- `GET /users` is facilitator-wide — it is the member-enrolment picker.
+- The **`facilitator` role and `is_admin` flag are assigned out-of-band** (seeded /
+  admin-managed), never via self-registration, which creates participants only (#8).
+
+Reports that these shared surfaces leak data *beyond* their intended audience (e.g. a
+participant reading another team's data, or an unauthenticated caller reaching any of
+them) remain in scope.
 
 Deployment hardening (secret management, TLS termination, network policy, and the
 single-replica WebSocket constraint) is the operator's responsibility; see the
