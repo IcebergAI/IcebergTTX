@@ -5,3 +5,7 @@ metadata:
   namespace: iceberg-ttx
 data:
   ACCESS_TOKEN_EXPIRE_MINUTES: "480"
+  # Trust X-Forwarded-For only from the nginx proxy (the sole ingress) so the app
+  # sees the real client IP, not nginx (#36). Narrow to the nginx pod CIDR if the
+  # app Service is ever exposed beyond the cluster-internal proxy.
+  FORWARDED_ALLOW_IPS: "*"

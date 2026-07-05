@@ -52,4 +52,11 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Trust X-Forwarded-For/Proto from the reverse proxy so request.client.host is the
+# real client, not nginx (#36). The app port is never exposed outside the private
+# proxy→app network, so trusting any peer is safe; override FORWARDED_ALLOW_IPS to
+# a specific proxy range if the app is ever reachable directly. uvicorn reads this
+# env var natively.
+ENV FORWARDED_ALLOW_IPS="*"
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

@@ -29,6 +29,8 @@ services:
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Trust proxied X-Forwarded-For only from nginx (the sole ingress). See #36.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
     volumes:
       - uploads:/app/uploads
       - static_files:/app/static
@@ -41,7 +43,7 @@ services:
       - -c
       - |
         cp -a /app/static_src/. /app/static/ &&
-        exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
     expose:
       - "8000"
 
