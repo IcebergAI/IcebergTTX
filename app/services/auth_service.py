@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
-from jose import jwt
+import jwt
 
 from app.config import settings
 
@@ -24,5 +24,5 @@ def create_access_token(subject: str, role: str) -> str:
 
 
 def decode_access_token(token: str) -> dict:
-    """Raises JWTError if invalid or expired."""
+    """Raises PyJWTError if invalid or expired."""
     return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])

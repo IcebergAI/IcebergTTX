@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Cookie, Depends, Header, HTTPException, status
-from jose import JWTError
+from jwt import PyJWTError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -40,7 +40,7 @@ async def get_current_user(
         email: str | None = payload.get("sub")
         if email is None:
             raise credentials_exc
-    except JWTError:
+    except PyJWTError:
         audit_service.emit(
             "auth.token_invalid", result="fail", reason="decode error", severity="warning"
         )
