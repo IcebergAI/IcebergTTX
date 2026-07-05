@@ -1,0 +1,45 @@
+# TLS termination for IcebergTTX (#IaC-review: no-TLS finding).
+#
+# Terminates HTTPS at the ingress controller and forwards to the nginx Service
+# over the cluster-internal network. Serving the auth flow over plaintext HTTP
+# leaks credentials and the JWT cookie (and the app sets Secure cookies, so auth
+# breaks over plain HTTP anyway).
+#
+# Prerequisites — REPLACE before applying:
+#   - A running ingress controller (ingress-nginx, Traefik, cloud LB ingress …);
+#     set spec.ingressClassName to match it.
+#   - A certificate. Easiest path is cert-manager: install it, create a
+#     ClusterIssuer, and keep the annotation below. Otherwise drop the annotation
+#     and pre-create the TLS Secret named in spec.tls[].secretName.
+#   - Your real hostname in place of ttx.example.com (two places).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: iceberg-ttx
+  namespace: iceberg-ttx
+  labels:
+    app.kubernetes.io/name: iceberg-ttx
+    app.kubernetes.io/part-of: iceberg-ttx
+  annotations:
+    # cert-manager: issues + renews the cert into the Secret below. REPLACE the
+    # issuer name, or remove this line if you manage the Secret yourself.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Redirect HTTP→HTTPS at the controller (ingress-nginx syntax).
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  ingressClassName: nginx  # REPLACE with your ingress controller's class
+  tls:
+    - hosts:
+        - ttx.example.com  # REPLACE
+      secretName: iceberg-ttx-tls
+  rules:
+    - host: ttx.example.com  # REPLACE
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nginx
+                port:
+                  number: 80

@@ -18,9 +18,23 @@ spec:
         app.kubernetes.io/name: postgres
         app.kubernetes.io/part-of: iceberg-ttx
     spec:
+      automountServiceAccountToken: false
+      # Run as the postgres uid (999) with fsGroup so the data PVC is writable
+      # without starting as root. Requires a StorageClass that honours fsGroup.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
           image: postgres:17
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 5432
               name: postgres

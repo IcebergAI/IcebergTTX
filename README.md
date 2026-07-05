@@ -116,7 +116,9 @@ docker compose up -d
 docker compose ps
 ```
 
-The app will be available on port 80. nginx serves static files directly and proxies everything else (including WebSocket upgrades at `/ws/`) to uvicorn.
+The app will be available on port 80. nginx (the unprivileged image, running as a non-root user and listening on 8080 inside the container) serves static files directly and proxies everything else (including WebSocket upgrades at `/ws/`) to uvicorn.
+
+> **TLS**: compose serves plain HTTP on `:80` for local use. In production, put a TLS-terminating proxy or load balancer in front — the app sets `Secure` auth cookies, which browsers won't send over plain HTTP. Never expose the auth flow over unencrypted HTTP.
 
 To stop without losing data:
 ```bash
@@ -132,10 +134,13 @@ Manifests are in `k8s/`. Apply in order:
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/secrets.yaml k8s/configmap.yaml
 
-# Before applying, replace placeholder values in k8s/secrets.yaml
-# and replace 'your-registry/iceberg-ttx:latest' in:
+# Before applying, replace placeholder values in k8s/secrets.yaml,
+# replace 'your-registry/iceberg-ttx:latest' in:
 #   k8s/app/deployment.yaml
 #   k8s/nginx/deployment.yaml
+# (pin by digest — image@sha256:… — in production for reproducible rollouts;
+#  Dependabot's docker updater keeps the base-image digests current), and set
+# the hostname/issuer/ingressClassName placeholders in k8s/nginx/ingress.yaml.
 
 kubectl apply -f k8s/postgres/
 kubectl rollout status statefulset/postgres -n iceberg-ttx
@@ -143,9 +148,16 @@ kubectl rollout status statefulset/postgres -n iceberg-ttx
 kubectl apply -f k8s/app/
 kubectl rollout status deployment/iceberg-ttx-app -n iceberg-ttx
 
-kubectl apply -f k8s/nginx/
+kubectl apply -f k8s/nginx/          # Deployment + ClusterIP Service + TLS Ingress
 kubectl rollout status deployment/nginx -n iceberg-ttx
+
+# Confine east-west traffic (requires a NetworkPolicy-enforcing CNI):
+kubectl apply -f k8s/networkpolicy.yaml
 ```
+
+> **TLS**: the nginx Service is `ClusterIP`; `k8s/nginx/ingress.yaml` terminates HTTPS (cert-manager annotation + `force-ssl-redirect`) and forwards to it. Fill in the hostname, `ingressClassName`, and issuer before applying. Do **not** switch nginx back to a `LoadBalancer` on `:80` — that serves auth over plaintext.
+>
+> **Pod hardening**: all three workloads run non-root under a PSS-`restricted`-style `securityContext` (no privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp; app + init containers use a read-only root filesystem). The Postgres StatefulSet runs as uid 999 with `fsGroup: 999`, which needs a StorageClass that honours `fsGroup`.
 
 > **Note**: The app must run as a single replica (`replicas: 1`) until the in-memory WebSocket manager is replaced with a distributed backend (e.g. Redis pub/sub). The manifests enforce this with `strategy: Recreate`.
 
@@ -196,7 +208,7 @@ static/fonts/        # Self-hosted Archivo · JetBrains Mono · Spectral (woff2)
 static/img/          # Iceberg brand marks (SVG)
 docs/                # README screenshots
 Dockerfile           # Multi-stage build (Tailwind compile + Python runtime)
-docker-compose.yml   # app + postgres:17 + nginx:alpine
+docker-compose.yml   # app + postgres:17 + nginx-unprivileged (non-root)
 docker/nginx.conf    # Reverse proxy config with WebSocket upgrade support
 k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, nginx)
 ```

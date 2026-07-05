@@ -10,6 +10,10 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - iceberg_ttx_net
+    # Postgres' entrypoint needs its default caps to chown PGDATA and drop to the
+    # postgres user, so caps are not dropped here; block privilege escalation.
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U iceberg_ttx -d iceberg_ttx"]
       interval: 10s
@@ -46,19 +50,35 @@ services:
         exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
     expose:
       - "8000"
+    # App runs as non-root (USER appuser in the image) and needs no capabilities.
+    # read_only root fs with a writable tmpfs for /tmp; uploads/static are volumes.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
 
   nginx:
-    image: nginx:alpine
+    # Unprivileged image: runs as non-root (uid 101) and listens on 8080, so it
+    # needs no added capabilities. For production, terminate TLS in front of this
+    # (a TLS proxy / cloud LB) — do not serve the auth flow over plain HTTP.
+    image: nginxinc/nginx-unprivileged:alpine
     restart: unless-stopped
     depends_on:
       - app
     ports:
-      - "80:80"
+      - "80:8080"
     volumes:
       - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - static_files:/app/static:ro
     networks:
       - iceberg_ttx_net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
 volumes:
   postgres_data:
