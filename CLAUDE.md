@@ -31,9 +31,9 @@ API-first architecture.
 
 **Password hashing**: Uses `bcrypt` directly (not `passlib`). `passlib[bcrypt]` is incompatible with Python 3.14 due to a `bcrypt.__about__` removal in bcrypt 4.x.
 
-**Password policy (#13)**: A shared length-only validator (`validate_password_strength` in `app/schemas/auth.py`, `MIN_PASSWORD_LENGTH = 12`) rejects blank/whitespace-only and too-short passwords. Applied via `@field_validator("password")` on both `RegisterRequest` and `UpdateMeRequest` (the latter skips when `password is None`), so `register`/`update_me` return `422` automatically. NIST-aligned: length over character-class complexity. Login does **not** re-validate (it only compares hashes), so legacy short passwords still authenticate until changed.
+**Password policy (#13)**: `validate_password_strength` (`app/schemas/auth.py`, length-only, `MIN_PASSWORD_LENGTH = 12` / `MAX_PASSWORD_LENGTH = 128`, rejects blank/whitespace-only) is applied via reusable `Password` / `OptionalPassword` `Annotated` types on `RegisterRequest` / `UpdateMeRequest`, so `register`/`update_me` return `422` automatically. NIST-aligned: length over character-class complexity (the max caps the unauthenticated register body). Login does **not** re-validate (it only compares hashes), so legacy short passwords still authenticate until changed.
 
-**Token revocation (#14)**: JWTs carry an `iat` claim (`auth_service.create_access_token`) and `User.token_valid_after` (nullable `timestamptz`) is a per-user revocation cutoff. `get_current_user` rejects any token whose `iat` predates `token_valid_after` (a missing `iat` is treated as revoked when a cutoff is set). `update_me` bumps `token_valid_after = now(UTC)` (truncated to whole seconds, so a freshly-minted token is not self-revoked) on password change and re-issues a fresh cookie so the caller's own session survives; all previously-issued tokens are revoked ("change password to kick out an attacker"). Deactivation (`is_active=False`) is already enforced per-request by `get_current_user`. The 8h token lifetime is unchanged (no refresh-token flow yet).
+**Token revocation (#14)**: JWTs carry an `iat` claim (`auth_service.create_access_token`) and `User.token_valid_after` (nullable `timestamptz`) is a per-user revocation cutoff. `get_current_user` rejects any token whose `iat` predates `token_valid_after` (a missing or non-numeric `iat` is treated as revoked when a cutoff is set). `update_me` bumps `token_valid_after = now(UTC)` (truncated to whole seconds, so a freshly-minted token is not self-revoked) on password change and re-issues a fresh cookie so the caller's own session survives; all previously-issued tokens are revoked ("change password to kick out an attacker"). Deactivation (`is_active=False`) is already enforced per-request by `get_current_user`. The 8h token lifetime is unchanged (no refresh-token flow yet).
 
 **Scenario storage**: The full scenario definition (inject tree, branching options, team targets, triggered communications) is stored as a single JSON blob in `Scenario.definition`. Validated against the `ScenarioDefinition` Pydantic model on every write. Not normalised into rows — the tree is always read and written as a unit.
 
@@ -148,7 +148,7 @@ revised/             # Claude Design prototype (static reference, not served)
 | 18 — Tech-debt cleanup (#17 logging config, #18 iterative cycle detection, #19 Alembic, #20 task lifecycle, #21/#31 payload/role-preview DRY, #30 WS team-spoof fix, #32 nits) | ✅ Complete |
 | 19 — Security hardening (P2: #13 password policy, #14 token revocation, #15 sample-loader path traversal, #16 attachment content-type allowlist + nosniff) | ✅ Complete |
 
-Current test count: **234 passing** (1 skipped).
+Current test count: **235 passing** (1 skipped).
 
 ---
 
