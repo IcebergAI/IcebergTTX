@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -41,7 +40,7 @@ async def create_communication(
         subject=subject,
         body=body,
         triggered_by_inject_id=triggered_by_inject_id,
-        visible_to_teams=json.dumps(visible_to_teams) if visible_to_teams else None,
+        visible_to_teams=visible_to_teams or None,
     )
     session.add(comm)
     await session.commit()
@@ -50,10 +49,10 @@ async def create_communication(
 
 
 async def mark_read(session: AsyncSession, comm: Communication, user_id: int) -> Communication:
-    readers: list[int] = json.loads(comm.read_by) if comm.read_by else []
+    readers: list[int] = list(comm.read_by) if comm.read_by else []
     if user_id not in readers:
         readers.append(user_id)
-        comm.read_by = json.dumps(readers)
+        comm.read_by = readers
         session.add(comm)
         await session.commit()
         await session.refresh(comm)
@@ -81,7 +80,7 @@ async def list_communications(
 
     visible = []
     for c in comms:
-        teams = json.loads(c.visible_to_teams) if c.visible_to_teams else None
+        teams = c.visible_to_teams
         if c.direction == CommDirection.outbound:
             sender_team = await sender_team_for_comm(session, c)
             sent_by_user = c.sender_id == user_id and (
@@ -125,7 +124,7 @@ async def visible_to_teams_for_payload(
     c: Communication, session: AsyncSession | None = None
 ) -> list[str] | None:
     if c.visible_to_teams:
-        return json.loads(c.visible_to_teams)
+        return c.visible_to_teams
     if c.direction == CommDirection.inbound and session is not None:
         return await all_team_ids_for_exercise(session, c.exercise_id) or None
     return None
@@ -144,14 +143,14 @@ async def comm_payload(c: Communication, session: AsyncSession | None = None) ->
         triggered_by_inject_id=c.triggered_by_inject_id,
         visible_to_teams=await visible_to_teams_for_payload(c, session),
         sent_at=c.sent_at.isoformat(),
-        read_by=json.loads(c.read_by) if c.read_by else [],
+        read_by=c.read_by or [],
     ).model_dump(mode="json")
 
 
 async def broadcast_communication(comm: Communication) -> None:
     from app.services.ws_manager import manager
 
-    teams = json.loads(comm.visible_to_teams) if comm.visible_to_teams else None
+    teams = comm.visible_to_teams
     message = {
         "type": "communication_received",
         "exercise_id": comm.exercise_id,

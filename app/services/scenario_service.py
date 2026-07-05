@@ -1,4 +1,3 @@
-import json
 from datetime import UTC, datetime
 
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -23,7 +22,7 @@ async def create_scenario(
     scenario = Scenario(
         title=definition.title,
         description=definition.description,
-        tags=json.dumps(definition.tags) if definition.tags else None,
+        tags=definition.tags or None,
         definition=definition_json,
         created_by=created_by,
     )
@@ -41,7 +40,7 @@ async def update_scenario(
 ) -> Scenario:
     scenario.title = definition.title
     scenario.description = definition.description
-    scenario.tags = json.dumps(definition.tags) if definition.tags else None
+    scenario.tags = definition.tags or None
     scenario.definition = definition.model_dump_json()
     scenario.updated_at = datetime.now(UTC)
     session.add(scenario)

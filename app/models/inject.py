@@ -2,7 +2,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime
+from sqlalchemy import Column, DateTime
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -24,7 +25,9 @@ class Inject(SQLModel, table=True):
     scenario_node_id: str | None = None   # links back to the ScenarioDefinition inject id
     title: str
     content: str
-    target_teams: str | None = None       # JSON list of team IDs; None = all teams
+    target_teams: list[str] | None = Field(  # team IDs; None = all teams
+        default=None, sa_column=Column(JSONB)
+    )
     group_id: str | None = None           # exercise-scoped group; None = shared/all groups
     sequence_order: int = Field(default=0)
     state: InjectState = Field(default=InjectState.pending)

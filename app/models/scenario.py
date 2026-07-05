@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime
+from sqlalchemy import Column, DateTime
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -13,8 +14,8 @@ class Scenario(SQLModel, table=True):
     title: str
     description: str | None = None
     version: str = "1.0"
-    tags: str | None = None  # JSON-serialised list
-    definition: str  # Full ScenarioDefinition JSON blob
+    tags: list[str] | None = Field(default=None, sa_column=Column(JSONB))
+    definition: str  # Full ScenarioDefinition JSON blob (validated text, not JSONB)
     created_by: int = Field(foreign_key="user.id")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)

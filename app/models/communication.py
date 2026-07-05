@@ -2,7 +2,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime
+from sqlalchemy import Column, DateTime
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -27,11 +28,15 @@ class Communication(SQLModel, table=True):
     triggered_by_inject_id: int | None = Field(
         default=None, foreign_key="inject.id", ondelete="SET NULL"
     )
-    visible_to_teams: str | None = None     # JSON list; None = all teams
+    visible_to_teams: list[str] | None = Field(  # None = all teams
+        default=None, sa_column=Column(JSONB)
+    )
     sent_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )
-    read_by: str | None = None              # JSON list of user ids
+    read_by: list[int] | None = Field(  # user ids that have read this comm
+        default=None, sa_column=Column(JSONB)
+    )
 
     exercise: Optional["Exercise"] = Relationship(back_populates="communications")
     triggered_by_inject: Optional["Inject"] = Relationship(back_populates="communications")

@@ -2,7 +2,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime
+from sqlalchemy import Column, DateTime
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -22,7 +23,7 @@ class SuggestedInject(SQLModel, table=True):
     triggered_by_response_id: int = Field(foreign_key="response.id", ondelete="CASCADE")
     title: str
     content: str
-    target_teams: str | None = None  # JSON list
+    target_teams: list[str] | None = Field(default=None, sa_column=Column(JSONB))
     llm_model: str
     status: SuggestedInjectStatus = Field(default=SuggestedInjectStatus.pending_review)
     reviewed_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
