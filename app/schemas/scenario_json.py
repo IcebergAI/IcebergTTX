@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import graphlib
+
 from pydantic import BaseModel, field_validator, model_validator
 
 # Sanity bound on scenario size. Real tabletop scenarios have at most dozens of
@@ -111,38 +113,23 @@ class ScenarioDefinition(BaseModel):
 def _check_no_cycles(injects: list[InjectNode]) -> None:
     """Raises ValueError if the scenario graph contains a cycle.
 
-    Every node is seeded as a DFS root (not just start_inject_id) so a cycle in an
-    island unreachable from the start still fails validation (#37). Iterative DFS
-    (explicit stack) so deep linear ``next_inject_id`` chains cannot overflow the
-    recursion limit and surface as an opaque 500 (#18).
+    Delegates to the stdlib ``graphlib.TopologicalSorter``, which processes every
+    node (so a cycle in an island unreachable from the start still fails, #37) and
+    is iterative internally (deep linear ``next_inject_id`` chains cannot overflow
+    the recursion limit, #18). Edge direction is irrelevant for cycle detection,
+    so feeding successors where the sorter expects predecessors is fine.
     """
-    adjacency: dict[str, list[str]] = {}
+    graph: dict[str, list[str]] = {}
     for inj in injects:
-        next_ids = [opt.next_inject_id for opt in inj.options if opt.next_inject_id is not None]
+        successors = [opt.next_inject_id for opt in inj.options if opt.next_inject_id is not None]
         if inj.next_inject_id is not None:
-            next_ids.append(inj.next_inject_id)
-        adjacency[inj.id] = next_ids
+            successors.append(inj.next_inject_id)
+        graph[inj.id] = successors
 
-    WHITE, GREY, BLACK = 0, 1, 2
-    colour: dict[str, int] = dict.fromkeys(adjacency, WHITE)
-
-    for root in adjacency:
-        if colour[root] != WHITE:
-            continue
-        colour[root] = GREY
-        stack: list[tuple[str, object]] = [(root, iter(adjacency[root]))]
-        while stack:
-            node, neighbours = stack[-1]
-            descended = False
-            for neighbour in neighbours:  # type: ignore[attr-defined]
-                state = colour.get(neighbour, WHITE)
-                if state == GREY:
-                    raise ValueError(f"Cycle detected in scenario graph at inject '{neighbour}'")
-                if state == WHITE:
-                    colour[neighbour] = GREY
-                    stack.append((neighbour, iter(adjacency.get(neighbour, []))))
-                    descended = True
-                    break
-            if not descended:
-                colour[node] = BLACK
-                stack.pop()
+    try:
+        graphlib.TopologicalSorter(graph).prepare()
+    except graphlib.CycleError as exc:
+        cycle = exc.args[1] if len(exc.args) > 1 else []
+        raise ValueError(
+            f"Cycle detected in scenario graph: {' -> '.join(cycle)}"
+        ) from exc
