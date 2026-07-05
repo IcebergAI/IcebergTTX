@@ -1,0 +1,77 @@
+# Ingress NetworkPolicies (#IaC-review: flat-namespace finding).
+#
+# Default-deny ingress for the namespace, then allow only the required hops:
+#   ingress-controller → nginx:8080 → app:8000 → postgres:5432
+# This confines lateral movement after any single-pod compromise. Requires a CNI
+# that enforces NetworkPolicy (Calico, Cilium, …); on a CNI that ignores them
+# these are a harmless no-op. Egress is intentionally left open so the app can
+# reach the Anthropic API and cluster DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: iceberg-ttx
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# nginx is the entry point: allow ingress on 8080 from the ingress controller
+# (any source, since the controller's namespace/labels vary by install).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-nginx-ingress
+  namespace: iceberg-ttx
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nginx
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080
+---
+# The app accepts traffic only from nginx.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-from-nginx
+  namespace: iceberg-ttx
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: iceberg-ttx-app
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# Postgres accepts traffic only from the app.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-from-app
+  namespace: iceberg-ttx
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: iceberg-ttx-app
+      ports:
+        - protocol: TCP
+          port: 5432

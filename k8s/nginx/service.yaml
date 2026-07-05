@@ -7,12 +7,14 @@ metadata:
     app.kubernetes.io/name: nginx
     app.kubernetes.io/part-of: iceberg-ttx
 spec:
-  # Use LoadBalancer for cloud providers that provision one automatically.
-  # Use ClusterIP + Ingress if your cluster has an Ingress controller.
-  type: LoadBalancer
+  # ClusterIP: TLS is terminated by the Ingress in front (ingress.yaml), which
+  # routes to this service. Do NOT expose this directly as a LoadBalancer on :80
+  # — that serves the auth flow over plaintext HTTP. If you have no Ingress
+  # controller, put a TLS-terminating LB in front and keep this ClusterIP.
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: nginx
   ports:
     - port: 80
-      targetPort: 80
+      targetPort: 8080
       name: http

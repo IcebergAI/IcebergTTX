@@ -26,12 +26,27 @@ spec:
         app.kubernetes.io/name: iceberg-ttx-app
         app.kubernetes.io/part-of: iceberg-ttx
     spec:
+      # No pod talks to the Kubernetes API — don't mount a usable token.
+      automountServiceAccountToken: false
+      # PSS "restricted": run as the image's non-root appuser and default seccomp.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         # Populate the shared emptyDir with compiled static assets from the
         # image so nginx (which has its own copy) can serve them directly.
         - name: copy-static
           image: your-registry/iceberg-ttx:latest  # REPLACE with actual image
           command: ["/bin/sh", "-c", "cp -a /app/static_src/. /app/static/"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: static-files
               mountPath: /app/static
@@ -39,6 +54,11 @@ spec:
         - name: app
           image: your-registry/iceberg-ttx:latest  # REPLACE with actual image
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 8000
               name: http
@@ -73,6 +93,9 @@ spec:
               mountPath: /app/uploads
             - name: static-files
               mountPath: /app/static
+            # Writable scratch for a read-only root filesystem.
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /api/health
@@ -101,4 +124,6 @@ spec:
           persistentVolumeClaim:
             claimName: app-uploads
         - name: static-files
+          emptyDir: {}
+        - name: tmp
           emptyDir: {}

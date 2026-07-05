@@ -17,6 +17,16 @@ spec:
         app.kubernetes.io/name: nginx
         app.kubernetes.io/part-of: iceberg-ttx
     spec:
+      automountServiceAccountToken: false
+      # nginxinc/nginx-unprivileged runs as uid 101; fsGroup lets the initContainer
+      # and nginx share the static emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         # Copy compiled static assets from the app image into the local emptyDir.
         # nginx serves from this volume directly — no shared PVC required.
@@ -24,15 +34,30 @@ spec:
         # deployed version.
         - name: copy-static
           image: your-registry/iceberg-ttx:latest  # REPLACE — same tag as app
-          command: ["/bin/sh", "-c", "cp -a /app/static_src/. /app/static/"]
+          # cp -rL (not -a): runs as non-root uid 101, so it must not try to
+          # preserve the source files' ownership (uid 1000) — that chown would
+          # fail. Static assets stay world-readable, which is all nginx needs.
+          command: ["/bin/sh", "-c", "cp -rL /app/static_src/. /app/static/"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: static-files
               mountPath: /app/static
       containers:
         - name: nginx
-          image: nginx:alpine
+          # Unprivileged image: runs as non-root and listens on 8080 (no
+          # privileged-port bind, no added capabilities). TLS is terminated at
+          # the Ingress in front (see ingress.yaml).
+          image: nginxinc/nginx-unprivileged:alpine
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               name: http
           volumeMounts:
             - name: nginx-config
@@ -44,7 +69,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /static/css/output.css
-              port: 80
+              port: 8080
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
@@ -52,7 +77,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /static/css/output.css
-              port: 80
+              port: 8080
             initialDelaySeconds: 15
             periodSeconds: 30
             timeoutSeconds: 5
