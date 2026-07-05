@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block title %}Audit log — IcebergTTX{% endblock %}
+
+{% block content %}
+<div x-data="adminAudit()" x-init="init()" class="workspace max-w-[1040px]">
+
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Security audit log</h1>
+      <p class="text-[13.5px] text-muted mt-1">
+        Forward audit events to your SIEM and review the recent security trail.
+      </p>
+    </div>
+  </div>
+
+  <div class="space-y-5">
+
+    <!-- SIEM forwarding config -->
+    <section class="surface p-5">
+      <div class="section-title mb-4 flex items-center justify-between">
+        <h2 class="smallcaps text-muted">SIEM forwarding</h2>
+        <label class="flex items-center gap-2 text-[13px]">
+          <input type="checkbox" x-model="cfg.enabled" />
+          <span>Auditing enabled</span>
+        </label>
+      </div>
+
+      <div class="grid gap-4" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+        <div>
+          <label class="block smallcaps text-muted mb-1">Methods</label>
+          <div class="flex flex-wrap gap-3 text-[13px]">
+            <template x-for="m in allMethods" :key="m">
+              <label class="flex items-center gap-1.5">
+                <input type="checkbox" :value="m" x-model="cfg.methods" />
+                <span x-text="m"></span>
+              </label>
+            </template>
+          </div>
+          <p class="text-[11.5px] text-faint mt-1">
+            stdout is the always-on baseline; file/syslog/http are additive forwarders.
+          </p>
+        </div>
+
+        <div>
+          <label class="block smallcaps text-muted mb-1">Minimum severity</label>
+          <select x-model="cfg.min_severity"
+                  class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface">
+            <template x-for="s in ['info', 'warning', 'critical']" :key="s">
+              <option :value="s" x-text="s"></option>
+            </template>
+          </select>
+        </div>
+
+        <div>
+          <label class="block smallcaps text-muted mb-1">File path (file method)</label>
+          <input type="text" x-model="cfg.file_path" placeholder="/var/log/iceberg-ttx/audit.log"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+
+        <div class="grid gap-2" style="grid-template-columns: 1fr 90px 90px;">
+          <div>
+            <label class="block smallcaps text-muted mb-1">Syslog host</label>
+            <input type="text" x-model="cfg.syslog_host"
+                   class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+          </div>
+          <div>
+            <label class="block smallcaps text-muted mb-1">Port</label>
+            <input type="number" x-model.number="cfg.syslog_port"
+                   class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+          </div>
+          <div>
+            <label class="block smallcaps text-muted mb-1">Proto</label>
+            <select x-model="cfg.syslog_protocol"
+                    class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface">
+              <option>UDP</option>
+              <option>TCP</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block smallcaps text-muted mb-1">HTTP endpoint (Splunk HEC / Elastic / webhook)</label>
+          <input type="text" x-model="cfg.http_endpoint" placeholder="https://siem.example.com/services/collector"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+          <p class="text-[11.5px] text-faint mt-1">
+            Bearer token is set out-of-band via the <span class="mono">SIEM_HTTP_TOKEN</span> secret — never entered or shown here.
+          </p>
+        </div>
+
+        <div class="flex items-end">
+          <label class="flex items-center gap-2 text-[13px]">
+            <input type="checkbox" x-model="cfg.http_verify_tls" />
+            <span>Verify TLS certificate (HTTP)</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 mt-5">
+        <button @click="save()" :disabled="saving"
+                class="btn btn-primary h-9 px-4 text-[13px] justify-center disabled:opacity-50">
+          <span x-text="saving ? 'Saving…' : 'Save forwarding'"></span>
+        </button>
+        <button @click="sendTest()" :disabled="testing"
+                class="btn btn-ghost h-9 px-4 text-[13px] justify-center disabled:opacity-50">
+          <span x-text="testing ? 'Sending…' : 'Send test event'"></span>
+        </button>
+        <p class="text-[12.5px] text-muted" x-text="message"></p>
+      </div>
+    </section>
+
+    <!-- Recent events -->
+    <section class="surface p-5">
+      <div class="section-title mb-4">
+        <h2 class="smallcaps text-muted">Recent events</h2>
+      </div>
+
+      <div class="grid gap-2 mb-4" style="grid-template-columns: repeat(4, minmax(0, 1fr)) auto;">
+        <input type="text" x-model="filters.action" @keydown.enter="loadEvents()" placeholder="action"
+               class="ring-rule rounded-md px-3 py-2 text-[13px] bg-surface mono" />
+        <select x-model="filters.severity" @change="loadEvents()"
+                class="ring-rule rounded-md px-3 py-2 text-[13px] bg-surface">
+          <option value="">any severity</option>
+          <template x-for="s in ['info', 'warning', 'critical']" :key="s">
+            <option :value="s" x-text="s"></option>
+          </template>
+        </select>
+        <select x-model="filters.result" @change="loadEvents()"
+                class="ring-rule rounded-md px-3 py-2 text-[13px] bg-surface">
+          <option value="">any result</option>
+          <template x-for="r in ['success', 'fail', 'deny']" :key="r">
+            <option :value="r" x-text="r"></option>
+          </template>
+        </select>
+        <input type="text" x-model="filters.actor" @keydown.enter="loadEvents()" placeholder="actor email"
+               class="ring-rule rounded-md px-3 py-2 text-[13px] bg-surface" />
+        <button @click="loadEvents()" class="btn btn-ghost h-9 px-4 text-[13px]">Filter</button>
+      </div>
+
+      <template x-if="!loadingEvents && events.length === 0">
+        <p class="text-[13px] text-muted">No events match.</p>
+      </template>
+
+      <div class="overflow-x-auto">
+        <div class="divide-y rule min-w-[720px]">
+          <template x-for="e in events" :key="e.id">
+            <div class="py-2.5 first:pt-0 flex items-start gap-3 text-[12.5px]">
+              <span class="mt-1 h-2 w-2 shrink-0 rounded-full" :class="sevDot(e.severity)"></span>
+              <span class="mono text-faint shrink-0 w-[150px]" x-text="fmtTime(e.created_at)"></span>
+              <span class="mono shrink-0 w-[180px]" x-text="e.action"></span>
+              <span class="pill shrink-0" :class="resultClass(e.result)" x-text="e.result"></span>
+              <div class="min-w-0 flex-1">
+                <div class="truncate">
+                  <span x-text="e.actor_email || '—'"></span>
+                  <span class="text-faint" x-show="e.actor_role" x-text="' · ' + e.actor_role"></span>
+                  <span class="text-faint" x-show="e.reason" x-text="' · ' + e.reason"></span>
+                </div>
+                <div class="mono text-[11px] text-faint truncate">
+                  <span x-text="e.source_ip || ''"></span>
+                  <span x-show="e.method" x-text="' ' + (e.method || '') + ' ' + (e.path || '')"></span>
+                  <span x-show="e.target_type" x-text="' · ' + e.target_type + (e.target_id ? ('#' + e.target_id) : '')"></span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </section>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function adminAudit() {
+  return {
+    allMethods: ['stdout', 'file', 'syslog', 'http'],
+    cfg: {
+      enabled: false, methods: [], min_severity: 'info', file_path: '',
+      syslog_host: 'localhost', syslog_port: 514, syslog_protocol: 'UDP',
+      http_endpoint: '', http_verify_tls: true,
+    },
+    filters: { action: '', severity: '', result: '', actor: '' },
+    events: [],
+    loadingEvents: true,
+    saving: false,
+    testing: false,
+    message: '',
+
+    async init() {
+      await Promise.all([this.loadSettings(), this.loadEvents()]);
+    },
+
+    async loadSettings() {
+      const resp = await apiFetch('/audit/settings');
+      const data = await readJson(resp, null);
+      if (data) {
+        this.cfg = {
+          enabled: !!data.enabled,
+          methods: data.methods || [],
+          min_severity: data.min_severity || 'info',
+          file_path: data.file_path || '',
+          syslog_host: data.syslog_host || 'localhost',
+          syslog_port: data.syslog_port || 514,
+          syslog_protocol: data.syslog_protocol || 'UDP',
+          http_endpoint: data.http_endpoint || '',
+          http_verify_tls: data.http_verify_tls !== false,
+        };
+      }
+    },
+
+    async save() {
+      this.saving = true;
+      this.message = '';
+      const resp = await apiFetch('/audit/settings', {
+        method: 'PUT',
+        body: JSON.stringify(this.cfg),
+      });
+      this.saving = false;
+      this.message = resp && resp.ok ? 'Forwarding saved.' : 'Could not save.';
+      if (resp && resp.ok) await this.loadSettings();
+    },
+
+    async sendTest() {
+      this.testing = true;
+      this.message = '';
+      const resp = await apiFetch('/audit/test', { method: 'POST' });
+      this.testing = false;
+      this.message = resp && resp.ok
+        ? 'Test event emitted through the enabled sinks.'
+        : 'Could not send test event.';
+      if (resp && resp.ok) await this.loadEvents();
+    },
+
+    async loadEvents() {
+      this.loadingEvents = true;
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(this.filters)) {
+        if (v) params.set(k, v);
+      }
+      const qs = params.toString();
+      const resp = await apiFetch('/audit/events' + (qs ? ('?' + qs) : ''));
+      this.events = await readJson(resp, []);
+      this.loadingEvents = false;
+    },
+
+    fmtTime(ts) {
+      if (!ts) return '';
+      try { return new Date(ts).toLocaleString(); } catch { return ts; }
+    },
+    sevDot(sev) {
+      if (sev === 'critical') return 'dot-crit';
+      if (sev === 'warning') return 'dot-warn';
+      return 'dot-info';
+    },
+    resultClass(result) {
+      if (result === 'deny') return 'pill-deny';
+      if (result === 'fail') return 'pill-fail';
+      return '';
+    },
+  }
+}
+</script>
+{% endblock %}

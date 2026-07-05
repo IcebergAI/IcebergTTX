@@ -88,6 +88,54 @@ spec:
                 configMapKeyRef:
                   name: iceberg-ttx-config
                   key: FORWARDED_ALLOW_IPS
+            # SIEM forwarding (#24) — non-secret routing from the ConfigMap; the
+            # HTTP bearer token comes from the Secret. The app forwards audit
+            # events itself (no sidecar).
+            - name: SIEM_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SIEM_ENABLED
+            - name: SIEM_METHODS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SIEM_METHODS
+            - name: SIEM_MIN_SEVERITY
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SIEM_MIN_SEVERITY
+            - name: SIEM_SYSLOG_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SIEM_SYSLOG_HOST
+            - name: SIEM_SYSLOG_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SIEM_SYSLOG_PORT
+            - name: SIEM_SYSLOG_PROTOCOL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SIEM_SYSLOG_PROTOCOL
+            - name: SIEM_HTTP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SIEM_HTTP_ENDPOINT
+            - name: SIEM_HTTP_VERIFY_TLS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SIEM_HTTP_VERIFY_TLS
+            - name: SIEM_HTTP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: iceberg-ttx-secrets
+                  key: SIEM_HTTP_TOKEN
           volumeMounts:
             - name: uploads
               mountPath: /app/uploads

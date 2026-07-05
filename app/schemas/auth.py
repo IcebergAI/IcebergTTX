@@ -70,6 +70,7 @@ class UserResponse(BaseModel):
     display_name: str
     role: UserRole
     team: str | None
+    is_admin: bool = False
     actual_role: UserRole | None = None
     actual_team: str | None = None
     can_switch_roles: bool = False

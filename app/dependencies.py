@@ -117,3 +117,21 @@ def require_actual_role(*roles: UserRole):
         return current_user
 
     return _check
+
+
+def require_admin(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+    """Gate on the real ``User.is_admin`` column (#24 audit admin, #12 ownership).
+
+    A real column, so it survives role-preview ``model_copy`` and is unspoofable —
+    a forged JWT claim buys nothing here.
+    """
+    if not getattr(current_user, "is_admin", False):
+        audit_service.emit(
+            "authz.denied",
+            result="deny",
+            actor=current_user,
+            reason="requires admin",
+            severity="warning",
+        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    return current_user

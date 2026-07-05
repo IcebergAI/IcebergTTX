@@ -46,6 +46,7 @@ def _optional_user(
             "role": role,
             "actual_role": actual_role,
             "team": team,
+            "is_admin": bool(payload.get("is_admin", False)),
         }
     except Exception:
         return None
@@ -83,9 +84,17 @@ def require_ui_actual_facilitator(user: Annotated[dict, Depends(require_ui_user)
     return user
 
 
+def require_ui_admin(user: Annotated[dict, Depends(require_ui_user)]) -> dict:
+    """Guard: require the admin flag (page shell only; the API re-checks the DB)."""
+    if not user.get("is_admin"):
+        raise UIRedirect("/dashboard")
+    return user
+
+
 LoggedInUser = Annotated[dict, Depends(require_ui_user)]
 FacilitatorUser = Annotated[dict, Depends(require_ui_facilitator)]
 ActualFacilitatorUser = Annotated[dict, Depends(require_ui_actual_facilitator)]
+AdminUser = Annotated[dict, Depends(require_ui_admin)]
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -186,3 +195,8 @@ def help_page(request: Request, user: LoggedInUser):
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, user: LoggedInUser):
     return templates.TemplateResponse(request, "settings.html", {"user": user})
+
+
+@router.get("/admin/audit", response_class=HTMLResponse)
+def admin_audit_page(request: Request, user: AdminUser):
+    return templates.TemplateResponse(request, "admin/audit.html", {"user": user})

@@ -13,6 +13,7 @@ from app.middleware import AuditContextMiddleware, CSRFOriginMiddleware
 from app.models import (  # noqa: F401
     assessment,
     audit,
+    audit_settings,
     communication,
     exercise,
     inject,
@@ -22,6 +23,7 @@ from app.models import (  # noqa: F401
     suggested_inject,
     user,
 )
+from app.routers import audit as audit_router
 from app.routers import (
     auth,
     communications,
@@ -44,11 +46,30 @@ from app.services.ws_manager import heartbeat_task
 logger = logging.getLogger("iceberg_ttx")
 
 
+async def _load_siem_config() -> None:
+    """Load the AuditSettings singleton into the SIEM in-memory cache (#24).
+
+    Best-effort: a failure here must not block startup — the cache defaults to
+    disabled (no forwarding) until an admin enables it.
+    """
+    try:
+        from sqlmodel.ext.asyncio.session import AsyncSession
+
+        from app.database import engine
+        from app.services import audit_settings_service
+
+        async with AsyncSession(engine) as session:
+            await audit_settings_service.refresh_cache(session)
+    except Exception:
+        logger.exception("failed to load SIEM audit config; forwarding stays disabled")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
     validate_settings()
     await run_migrations()
+    await _load_siem_config()
     audit_service.emit("app.startup", severity="info")
     task = asyncio.create_task(heartbeat_task())
     yield
@@ -91,6 +112,7 @@ app.include_router(ui.router)
 
 # All JSON API routes prefixed with /api to avoid path conflicts with UI routes
 app.include_router(auth.router, prefix="/api")
+app.include_router(audit_router.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(scenarios.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")

@@ -35,6 +35,19 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Trust proxied X-Forwarded-For only from nginx (the sole ingress). See #36.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+      # SIEM forwarding (#24). The app forwards audit events itself (no sidecar);
+      # these seed the admin-editable /admin/audit config. Outbound HTTP/syslog to
+      # the collector works over the default bridge egress. SIEM_HTTP_TOKEN is a
+      # secret — never logged or persisted.
+      SIEM_ENABLED: ${SIEM_ENABLED:-false}
+      SIEM_METHODS: ${SIEM_METHODS:-stdout}
+      SIEM_MIN_SEVERITY: ${SIEM_MIN_SEVERITY:-info}
+      SIEM_SYSLOG_HOST: ${SIEM_SYSLOG_HOST:-localhost}
+      SIEM_SYSLOG_PORT: ${SIEM_SYSLOG_PORT:-514}
+      SIEM_SYSLOG_PROTOCOL: ${SIEM_SYSLOG_PROTOCOL:-UDP}
+      SIEM_HTTP_ENDPOINT: ${SIEM_HTTP_ENDPOINT:-}
+      SIEM_HTTP_VERIFY_TLS: ${SIEM_HTTP_VERIFY_TLS:-true}
+      SIEM_HTTP_TOKEN: ${SIEM_HTTP_TOKEN:-}
     volumes:
       - uploads:/app/uploads
       - static_files:/app/static

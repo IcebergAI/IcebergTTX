@@ -290,6 +290,13 @@ code, .code { font-family: var(--fs-mono); font-size: 0.86em; background: var(--
 .bg-st-paused    { background: color-mix(in oklch, var(--c-warn) 14%, var(--surface)); color: var(--c-warn); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--c-warn) 30%, var(--line-strong)); }
 .bg-st-completed { background: color-mix(in oklch, var(--accent) 12%, var(--surface)); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent-line); }
 
+/* Audit-log severity dots + result pills (#24) — token-based, theme-aware */
+.dot-info { background: var(--c-ok); }
+.dot-warn { background: var(--c-warn); }
+.dot-crit { background: var(--c-crit); }
+.pill-fail { background: color-mix(in oklch, var(--c-warn) 14%, var(--surface)); color: var(--c-warn); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--c-warn) 30%, var(--line-strong)); }
+.pill-deny { background: color-mix(in oklch, var(--c-crit) 14%, var(--surface)); color: var(--c-crit); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--c-crit) 30%, var(--line-strong)); }
+
 /* --------------------------------------------------------------------------
  *  Buttons  (legacy .btn-* names kept; sibling .btn--* aliases provided)
  * ------------------------------------------------------------------------ */
