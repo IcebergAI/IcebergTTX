@@ -166,7 +166,7 @@ async def broadcast_communication(comm: Communication) -> None:
         else:
             await manager.send_to_facilitators_and_user(comm.exercise_id, comm.sender_id, message)
     elif teams:
-        await manager.broadcast_to_teams(comm.exercise_id, teams, message)
+        await manager.broadcast_to_groups(comm.exercise_id, teams, message)
     else:
         await manager.broadcast_to_exercise(comm.exercise_id, message)
 

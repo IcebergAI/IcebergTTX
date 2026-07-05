@@ -55,11 +55,6 @@ class ConnectionManager:
         ]
         await self._send_to_many(conns, message)
 
-    async def broadcast_to_teams(
-        self, exercise_id: int, teams: list[str], message: dict
-    ) -> None:
-        await self.broadcast_to_groups(exercise_id, teams, message)
-
     async def send_to_facilitators(self, exercise_id: int, message: dict) -> None:
         conns = [
             c for c in self._rooms.get(exercise_id, []) if c["role"] == "facilitator"
