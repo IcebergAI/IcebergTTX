@@ -147,7 +147,7 @@ async def send_comm(
 async def inject_comm(
     exercise_id: int,
     body: InjectCommRequest,
-    _: FacilitatorDep,
+    current_user: FacilitatorDep,
     session: SessionDep,
 ):
     """Facilitator injects a simulated inbound message (e.g. from ICO, press).
@@ -155,7 +155,7 @@ async def inject_comm(
     Intentionally has no exercise-state guard (unlike participant send_comm, #40):
     facilitators may seed simulated inbound comms during draft/paused setup.
     """
-    await require_exercise_access(session, exercise_id, _)
+    await require_exercise_access(session, exercise_id, current_user)
     visible_to_teams = (
         body.visible_to_teams
         or await all_team_ids_for_exercise(session, exercise_id)

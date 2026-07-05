@@ -195,7 +195,7 @@ async def list_injects(exercise_id: int, current_user: CurrentUserDep, session: 
 async def create(
     exercise_id: int,
     request: Request,
-    _: FacilitatorDep,
+    current_user: FacilitatorDep,
     session: SessionDep,
 ):
     try:
@@ -205,7 +205,7 @@ async def create(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    exercise = await require_exercise_access(session, exercise_id, _)
+    exercise = await require_exercise_access(session, exercise_id, current_user)
     group_id = await validate_group_id(session, exercise, body.group_id)
     if group_id is None and body.target_teams and len(body.target_teams) == 1:
         group_id = await validate_group_id(session, exercise, body.target_teams[0])
@@ -235,14 +235,16 @@ async def get_inject(
 
 
 @router.delete("/{inject_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_inject(exercise_id: int, inject_id: int, _: FacilitatorDep, session: SessionDep):
+async def delete_inject(
+    exercise_id: int, inject_id: int, current_user: FacilitatorDep, session: SessionDep
+):
     inject = await get_inject_or_404(session, exercise_id, inject_id)
     _delete_attachment_file(inject)
     await session.delete(inject)
     await session.commit()
     audit_service.emit(
         "inject.delete",
-        actor=_,
+        actor=current_user,
         target_type="inject",
         target_id=inject_id,
         reason=f"exercise={exercise_id}",
