@@ -271,11 +271,11 @@ async def test_ws_participant_cannot_spoof_team_via_view_team(
         await ws.receive_json()
         mine = [
             c for c in manager._rooms.get(active_exercise.id, [])
-            if c["user_id"] == participant.id
+            if c.user_id == participant.id
         ]
         assert mine, "participant connection should be registered"
-        assert all(c["group_id"] == "it_ops" for c in mine)
-        assert all(c["group_id"] != "legal" for c in mine)
+        assert all(c.group_id == "it_ops" for c in mine)
+        assert all(c.group_id != "legal" for c in mine)
 
 
 async def test_ws_facilitator_preview_derives_group_from_view_team(
@@ -296,6 +296,6 @@ async def test_ws_facilitator_preview_derives_group_from_view_team(
         await ws.receive_json()
         mine = [
             c for c in manager._rooms.get(active_exercise.id, [])
-            if c["user_id"] == facilitator.id
+            if c.user_id == facilitator.id
         ]
-        assert mine and all(c["group_id"] == "legal" for c in mine)
+        assert mine and all(c.group_id == "legal" for c in mine)
