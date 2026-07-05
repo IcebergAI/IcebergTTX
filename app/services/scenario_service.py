@@ -50,8 +50,27 @@ async def update_scenario(
     return scenario
 
 
+_PARSED_DEFINITION_ATTR = "_parsed_definition"
+
+
 def export_definition(scenario: Scenario) -> ScenarioDefinition:
-    return ScenarioDefinition.model_validate_json(scenario.definition)
+    """Parse a scenario's stored definition JSON, memoised on the instance (#22).
+
+    List endpoints resolve the same scenario definition once per row (per inject,
+    per response, …). Because the ``Scenario`` row is identity-mapped within a
+    session, all those calls share one instance, so caching the parsed
+    ``ScenarioDefinition`` here collapses O(rows) JSON parses to one per request.
+
+    The cache is keyed on the identity of the source ``definition`` string, so it
+    self-invalidates whenever the column is reassigned (``update_scenario``) or
+    reloaded from the DB (``session.refresh``) — those produce a new string object.
+    """
+    cached = scenario.__dict__.get(_PARSED_DEFINITION_ATTR)
+    if cached is not None and cached[0] is scenario.definition:
+        return cached[1]
+    parsed = ScenarioDefinition.model_validate_json(scenario.definition)
+    scenario.__dict__[_PARSED_DEFINITION_ATTR] = (scenario.definition, parsed)
+    return parsed
 
 
 async def get_scenario_definition(

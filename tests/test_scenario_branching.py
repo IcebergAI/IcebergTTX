@@ -3,8 +3,10 @@
 import pytest
 from pydantic import ValidationError
 
+from app.models.scenario import Scenario
 from app.schemas.scenario_json import InjectNode, InjectOption, ScenarioDefinition
 from app.services.scenario_service import (
+    export_definition,
     get_inject_node,
     get_next_inject_ids,
     resolve_branch,
@@ -174,3 +176,37 @@ async def test_multi_level_branch():
     assert resolve_branch(defn, "a", "go_b") == "b"
     assert resolve_branch(defn, "a", "go_c") == "c"
     assert get_next_inject_ids(defn, "a") == ["b", "c"]
+
+
+# ── export_definition memoisation (#22) ───────────────────────────────────────
+
+async def test_export_definition_memoised_on_instance(sample_definition: ScenarioDefinition):
+    """Repeated parses of one Scenario row collapse to a single JSON parse (#22)."""
+    scenario = Scenario(
+        title=sample_definition.title,
+        definition=sample_definition.model_dump_json(),
+        created_by=1,
+    )
+    first = export_definition(scenario)
+    second = export_definition(scenario)
+    # Same parsed object returned — not re-parsed per call.
+    assert first is second
+
+
+async def test_export_definition_reparses_after_definition_change(
+    sample_definition: ScenarioDefinition,
+):
+    """Reassigning the source JSON must invalidate the memoised parse (#22)."""
+    scenario = Scenario(
+        title=sample_definition.title,
+        definition=sample_definition.model_dump_json(),
+        created_by=1,
+    )
+    first = export_definition(scenario)
+
+    changed = sample_definition.model_copy(update={"title": "Renamed"})
+    scenario.definition = changed.model_dump_json()
+    second = export_definition(scenario)
+
+    assert second is not first
+    assert second.title == "Renamed"
