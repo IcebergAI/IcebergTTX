@@ -113,6 +113,31 @@ def emit(
     if settings.audit_persist:
         _persist(event)
 
+    _ship(event)
+
+
+def _ship(event: dict[str, Any]) -> None:
+    """Schedule best-effort forwarding of the event to the SIEM (#24).
+
+    ``emit`` is synchronous with no DB session, so routing is read from the
+    in-memory ``siem_service`` cache and the network sinks run off the response
+    path on the loop (like ``_persist``). No running loop (e.g. a sync script) ⇒
+    skip — the JSON log line / DB row remain the durable record.
+    """
+    try:
+        from app.services import siem_service
+
+        cfg = siem_service.get_config()
+        if not cfg.enabled:
+            return
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return  # no running loop
+    except Exception:  # nosec B110 # pragma: no cover - forwarding is best-effort
+        return
+
+    spawn(siem_service.emit(event, cfg))
+
 
 def _persist(event: dict[str, Any]) -> None:
     """Schedule a best-effort async write of the audit row.

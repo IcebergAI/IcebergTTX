@@ -110,7 +110,7 @@ async def login(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
 
     login_rate_limiter.reset(rate_key)
-    token = create_access_token(subject=user.email, role=user.role.value)
+    token = create_access_token(subject=user.email, role=user.role.value, is_admin=user.is_admin)
     _set_session_cookie(response, token)
     audit_service.emit(
         "auth.login",
@@ -154,7 +154,9 @@ async def update_me(
     if new_password is not None:
         # Re-issue so the caller's own session survives its own password change;
         # every earlier token is now revoked by the token_valid_after bump.
-        token = create_access_token(subject=current_user.email, role=current_user.role.value)
+        token = create_access_token(
+            subject=current_user.email, role=current_user.role.value, is_admin=current_user.is_admin
+        )
         _set_session_cookie(response, token)
         audit_service.emit(
             "auth.password_change",

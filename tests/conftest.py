@@ -229,7 +229,9 @@ async def admin_fixture(session: AsyncSession) -> User:
 
 @pytest.fixture(name="admin_token")
 def admin_token_fixture(admin: User) -> str:
-    return create_access_token(subject=admin.email, role=admin.role.value)
+    return create_access_token(
+        subject=admin.email, role=admin.role.value, is_admin=admin.is_admin
+    )
 
 
 @pytest.fixture(name="sample_definition")

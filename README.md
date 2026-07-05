@@ -30,7 +30,7 @@ ships with Docker Compose and Kubernetes deployment manifests.
 - **LLM assessment** — Claude evaluates participant decisions and suggests follow-up injects
 - **Role-based access** — facilitator, participant, and observer roles (self-registration always creates a participant; elevation is out-of-band)
 - **Role preview** — facilitators can view the app as a participant or observer without changing accounts
-- **Security hardening** — enforced SECRET_KEY at startup, Secure cookie + CSRF origin checks, login rate limiting, and structured audit logging
+- **Security hardening** — enforced SECRET_KEY at startup, Secure cookie + CSRF origin checks, login rate limiting, and structured audit logging with off-host SIEM forwarding (syslog / HTTP / file)
 - **Sample templates** — optional bundled scenarios can be loaded from Settings; the database stays empty by default
 - **Export** — transcript (JSON), responses (CSV), and AI assessments (JSON)
 
@@ -161,6 +161,53 @@ kubectl apply -f k8s/networkpolicy.yaml
 
 > **Note**: The app must run as a single replica (`replicas: 1`) until the in-memory WebSocket manager is replaced with a distributed backend (e.g. Redis pub/sub). The manifests enforce this with `strategy: Recreate`.
 
+## Forward security events to your SIEM
+
+Audit events (logins, authorization denials, privilege/role changes, inject
+release/delete, exports, config changes, …) can be shipped off-host to a SIEM so
+they are centralized, retained, and alertable even if a pod restarts or the app
+is compromised (#24). **The app is the forwarder** — there is no Vector/Fluent Bit
+sidecar to run.
+
+- **Enable it live** at `/admin/audit` (admin only): toggle *Auditing enabled*,
+  pick the methods, set the minimum severity, and click **Send test event** to
+  verify connectivity end-to-end.
+- **Methods** (any combination):
+  - `stdout` — the always-on JSON baseline on the `iceberg_ttx.audit` logger; a
+    node-level shipper (Filebeat/Fluentd/Vector) you provide can tail it.
+  - `file` — append JSON lines to a path (for a file-tailing shipper).
+  - `syslog` — RFC 5424 over UDP/TCP; point TCP at a TLS syslog collector for
+    secure transit.
+  - `http` — JSON `POST` to a Splunk HEC / Elastic / generic webhook endpoint,
+    authenticated with a bearer token.
+- **Secret handling**: the HTTP bearer token is set **only** via the
+  `SIEM_HTTP_TOKEN` env var / Secret — it is never stored in the database, never
+  returned by the API, and never logged.
+- **Reliability**: a slow or unreachable SIEM (5-second timeouts) **never blocks
+  or fails a request** — each sink is failure-isolated, and the persisted
+  `AuditEvent` table (`AUDIT_PERSIST=true`) remains the durable record. Ensure
+  hosts are NTP-synced to UTC so SIEM correlation is accurate.
+
+Seed the defaults from the `SIEM_*` env vars (see `.env.example`); routing is then
+edited live from `/admin/audit`. In Kubernetes the non-secret routing lives in
+`k8s/configmap.yaml` and the token in `k8s/secrets.yaml`.
+
+**Example alert rule** (brute-force detection, ties to the login rate limiter
+#11) — Splunk SPL over the shipped events:
+
+```spl
+index=iceberg_ttx action="auth.login" result="fail"
+| bin _time span=5m
+| stats count by _time, source_ip
+| where count >= 5
+```
+
+Alert when a single `source_ip` produces ≥ 5 failed `auth.login` events in a
+5-minute window. Comparable rules are worth configuring for `authz.denied`
+spikes, `audit.settings_updated` / role changes, and unexpected `*.export` events.
+Treat the SIEM store as append-only with restricted read/write access, and set a
+retention period that meets your legal/contractual requirements.
+
 ## Running Tests
 
 ```bash
@@ -188,10 +235,10 @@ app/
 ├── middleware.py    # Audit request context + CSRF origin checks
 ├── database.py      # Async Postgres engine + get_session dependency
 ├── dependencies.py  # FastAPI dependencies (auth, role guards)
-├── models/          # SQLModel table definitions (incl. AuditEvent)
+├── models/          # SQLModel table definitions (incl. AuditEvent, AuditSettings)
 ├── schemas/         # Pydantic request/response schemas
-├── routers/         # FastAPI routers (one per resource) + ui.py (Jinja2 pages)
-├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control, audit_service, rate_limit)
+├── routers/         # FastAPI routers (one per resource, incl. audit) + ui.py (Jinja2 pages)
+├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control, audit_service, siem_service, audit_settings_service, rate_limit)
 ├── samples/         # Bundled quick-start scenario templates (loaded only on demand)
 └── templates/       # Jinja2 HTML templates
     ├── base.html            # App shell (dark rail + breadcrumb topbar), shared JS helpers

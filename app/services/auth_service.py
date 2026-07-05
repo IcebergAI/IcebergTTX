@@ -14,12 +14,14 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
-def create_access_token(subject: str, role: str) -> str:
+def create_access_token(subject: str, role: str, is_admin: bool = False) -> str:
     now = datetime.now(UTC)
     expire = now + timedelta(minutes=settings.access_token_expire_minutes)
     # `iat` (issued-at) is required for token revocation (#14): get_current_user
     # rejects tokens whose iat predates the user's token_valid_after cutoff.
-    payload = {"sub": subject, "role": role, "iat": now, "exp": expire}
+    # `is_admin` is a UI convenience only (page/nav gating in ui.py) — API access
+    # is always re-checked against the real DB column, so a forged claim is inert.
+    payload = {"sub": subject, "role": role, "is_admin": is_admin, "iat": now, "exp": expire}
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 

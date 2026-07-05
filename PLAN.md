@@ -413,7 +413,9 @@ Closes GitHub issues #8, #9, #10, #11, #23 (the "auth rate limiting" item once n
 - **#11 Login rate limiting**: in-memory sliding-window limiter (`rate_limit.py`), `429` + `Retry-After` after repeated failures, reset on success.
 - **#23 Audit logging**: `AuditEvent` model + `audit_service.emit()` structured JSON logger, request-context middleware, sanitisation against log injection, real-identity attribution under role-preview.
 
-Deferred to **P2**: per-facilitator ownership scoping (#12 — documented trust boundary) and SIEM shipping (companion to #23).
+- **#24 SIEM forwarding**: app-as-forwarder (`siem_service.py`) shipping audit events to file/syslog/http sinks off the response path, admin-editable `AuditSettings` singleton + `/admin/audit` UI (event trail, SIEM config, test event), env-only HTTP bearer token, failure-isolated sinks that never block a request.
+
+Both **P2** follow-ups are now complete: per-facilitator ownership scoping (#12) and SIEM shipping (#24, companion to #23).
 
 ---
 

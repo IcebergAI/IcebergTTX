@@ -9,3 +9,16 @@ data:
   # sees the real client IP, not nginx (#36). Narrow to the nginx pod CIDR if the
   # app Service is ever exposed beyond the cluster-internal proxy.
   FORWARDED_ALLOW_IPS: "*"
+  # SIEM forwarding (#24) — non-secret routing that seeds the admin-editable
+  # /admin/audit config. The app forwards audit events itself (no sidecar); the
+  # HTTP/syslog sink reaches an external collector via the app's egress (left open
+  # in k8s/networkpolicy.yaml for the Anthropic API). The bearer token is a Secret
+  # (SIEM_HTTP_TOKEN), never here. Enable + change methods live from /admin/audit.
+  SIEM_ENABLED: "false"
+  SIEM_METHODS: "stdout"
+  SIEM_MIN_SEVERITY: "info"
+  SIEM_SYSLOG_HOST: "localhost"
+  SIEM_SYSLOG_PORT: "514"
+  SIEM_SYSLOG_PROTOCOL: "UDP"
+  SIEM_HTTP_ENDPOINT: ""
+  SIEM_HTTP_VERIFY_TLS: "true"
