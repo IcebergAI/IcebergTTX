@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.exercise import Exercise
 from app.models.scenario import Scenario
 from app.schemas.scenario_json import ScenarioDefinition
 
@@ -51,6 +52,26 @@ async def update_scenario(
 
 def export_definition(scenario: Scenario) -> ScenarioDefinition:
     return ScenarioDefinition.model_validate_json(scenario.definition)
+
+
+async def get_scenario_definition(
+    session: AsyncSession, scenario_id: int | None
+) -> ScenarioDefinition | None:
+    """Load and parse the definition for a scenario id, or None if absent."""
+    if not scenario_id:
+        return None
+    scenario = await session.get(Scenario, scenario_id)
+    return export_definition(scenario) if scenario else None
+
+
+async def definition_for_exercise(
+    session: AsyncSession, exercise_id: int
+) -> ScenarioDefinition | None:
+    """Load the scenario definition for an exercise, or None if either is missing."""
+    exercise = await session.get(Exercise, exercise_id)
+    if not exercise:
+        return None
+    return await get_scenario_definition(session, exercise.scenario_id)
 
 
 def get_inject_node(definition: ScenarioDefinition, inject_id: str):
