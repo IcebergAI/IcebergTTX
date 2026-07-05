@@ -27,7 +27,7 @@ from app.services.response_service import (
     response_payload,
     submit_response,
 )
-from app.services.scenario_service import export_definition, get_inject_node
+from app.services.scenario_service import get_inject_node, get_scenario_definition
 
 router = APIRouter(prefix="/exercises/{exercise_id}/responses", tags=["responses"])
 
@@ -100,12 +100,10 @@ async def submit(
             detail="Response already submitted for this inject",
         )
 
-    from app.models.scenario import Scenario
-
-    scenario = await session.get(Scenario, exercise.scenario_id)
+    definition = await get_scenario_definition(session, exercise.scenario_id)
     node = None
-    if scenario and inject.scenario_node_id is not None:
-        node = get_inject_node(export_definition(scenario), inject.scenario_node_id)
+    if definition and inject.scenario_node_id is not None:
+        node = get_inject_node(definition, inject.scenario_node_id)
 
     if node and (node.free_text_response or not node.options) and not body.content.strip():
         raise HTTPException(

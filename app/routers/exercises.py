@@ -14,7 +14,6 @@ from app.models.exercise import Exercise, ExerciseMember, ExerciseState
 from app.models.inject import Inject
 from app.models.inject_comment import InjectComment
 from app.models.response import Response
-from app.models.scenario import Scenario
 from app.models.user import User, UserRole
 from app.schemas.api import ExercisePublic, MemberPublic
 from app.services import audit_service
@@ -30,7 +29,7 @@ from app.services.exercise_service import (
     transition_state,
     update_member_group,
 )
-from app.services.scenario_service import export_definition
+from app.services.scenario_service import get_scenario_definition
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
 
@@ -123,10 +122,9 @@ async def get_exercise(exercise_id: int, current_user: CurrentUserDep, session: 
 @router.get("/{exercise_id}/teams")
 async def list_exercise_teams(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
     exercise = await require_exercise_access(session, exercise_id, current_user)
-    scenario = await session.get(Scenario, exercise.scenario_id)
-    if not scenario:
+    definition = await get_scenario_definition(session, exercise.scenario_id)
+    if not definition:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found")
-    definition = export_definition(scenario)
     return [team.model_dump() for team in definition.participant_teams]
 
 

@@ -9,13 +9,12 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.communication import CommDirection, Communication
-from app.models.exercise import Exercise, ExerciseMember
+from app.models.exercise import ExerciseMember
 from app.models.inject import Inject
-from app.models.scenario import Scenario
 from app.models.user import User
 from app.schemas.api import CommunicationPublic
 from app.services.background import spawn
-from app.services.scenario_service import export_definition
+from app.services.scenario_service import definition_for_exercise
 
 logger = logging.getLogger(__name__)
 
@@ -116,13 +115,9 @@ async def sender_team_for_comm(session: AsyncSession | None, comm: Communication
 
 
 async def all_team_ids_for_exercise(session: AsyncSession, exercise_id: int) -> list[str]:
-    exercise = await session.get(Exercise, exercise_id)
-    if not exercise:
+    definition = await definition_for_exercise(session, exercise_id)
+    if not definition:
         return []
-    scenario = await session.get(Scenario, exercise.scenario_id)
-    if not scenario:
-        return []
-    definition = export_definition(scenario)
     return [team.id for team in definition.participant_teams]
 
 

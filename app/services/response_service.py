@@ -6,9 +6,12 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.inject import Inject, InjectState
 from app.models.response import Response
-from app.models.scenario import Scenario
 from app.schemas.api import ResponsePublic
-from app.services.scenario_service import export_definition, get_next_inject_ids, resolve_branch
+from app.services.scenario_service import (
+    definition_for_exercise,
+    get_next_inject_ids,
+    resolve_branch,
+)
 
 
 async def submit_response(
@@ -48,21 +51,13 @@ async def _compute_next_inject_ids(
     inject_id: int,
     selected_option: str | None,
 ) -> list[str]:
-    from app.models.exercise import Exercise
-
-    exercise = await session.get(Exercise, exercise_id)
-    if not exercise or not exercise.scenario_id:
-        return []
-
-    scenario = await session.get(Scenario, exercise.scenario_id)
-    if not scenario:
+    definition = await definition_for_exercise(session, exercise_id)
+    if not definition:
         return []
 
     inject = await session.get(Inject, inject_id)
     if not inject or not inject.scenario_node_id:
         return []
-
-    definition = export_definition(scenario)
 
     if selected_option:
         next_id = resolve_branch(definition, inject.scenario_node_id, selected_option)

@@ -84,19 +84,14 @@ async def _trigger_communications(session: AsyncSession, inject: Inject) -> None
 
     if not inject.scenario_node_id:
         return
-    from app.models.exercise import Exercise
-    from app.models.scenario import Scenario
 
-    exercise = await session.get(Exercise, inject.exercise_id)
-    if not exercise:
-        return
-    scenario = await session.get(Scenario, exercise.scenario_id)
-    if not scenario:
+    from app.services.scenario_service import definition_for_exercise, get_inject_node
+
+    definition = await definition_for_exercise(session, inject.exercise_id)
+    if not definition:
         return
 
-    from app.services.scenario_service import export_definition, get_inject_node
-
-    node = get_inject_node(export_definition(scenario), inject.scenario_node_id)
+    node = get_inject_node(definition, inject.scenario_node_id)
     if node and node.triggers_communications:
         schedule_triggered_comms(inject, node.triggers_communications)
 
@@ -138,17 +133,12 @@ def inject_attachment_payload(inject: Inject) -> dict | None:
 async def _inject_node(session: AsyncSession, inject: Inject):
     if not inject.scenario_node_id:
         return None
-    from app.models.exercise import Exercise
-    from app.models.scenario import Scenario
-    from app.services.scenario_service import export_definition, get_inject_node
+    from app.services.scenario_service import definition_for_exercise, get_inject_node
 
-    exercise = await session.get(Exercise, inject.exercise_id)
-    if not exercise:
+    definition = await definition_for_exercise(session, inject.exercise_id)
+    if not definition:
         return None
-    scenario = await session.get(Scenario, exercise.scenario_id)
-    if not scenario:
-        return None
-    return get_inject_node(export_definition(scenario), inject.scenario_node_id)
+    return get_inject_node(definition, inject.scenario_node_id)
 
 
 async def _inject_options(session: AsyncSession, inject: Inject) -> list[dict]:
