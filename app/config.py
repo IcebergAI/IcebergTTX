@@ -6,7 +6,13 @@ MIN_SECRET_KEY_LENGTH = 32
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore": the project-root .env is shared with docker-compose, which
+    # needs keys the app doesn't declare (e.g. POSTGRES_PASSWORD). Ignore unknown
+    # keys rather than raising a ValidationError at import (which broke local
+    # uvicorn/pytest whenever .env carried a compose-only key).
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     database_url: str = "postgresql+asyncpg://iceberg_ttx:iceberg_ttx@localhost:5432/iceberg_ttx"
     secret_key: str = DEFAULT_SECRET_KEY
