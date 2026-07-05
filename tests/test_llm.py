@@ -165,7 +165,7 @@ async def test_suggest_inject_stores_suggestion(
     assert suggested.id is not None
     assert suggested.exercise_id == active_exercise.id
     assert suggested.title == "Ransomware Note Found"
-    assert json.loads(suggested.target_teams) == ["it_ops"]
+    assert suggested.target_teams == ["it_ops"]
 
 
 @pytest.mark.asyncio

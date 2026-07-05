@@ -1,4 +1,3 @@
-import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -68,11 +67,11 @@ async def _comm_visible_to_user(session: AsyncSession, comm: Communication, user
             return True
         if not comm.visible_to_teams:
             return False
-        return group_id in json.loads(comm.visible_to_teams)
+        return group_id in comm.visible_to_teams
     if not comm.visible_to_teams:
         return True
     group_id = await exercise_group_for_user(session, comm.exercise_id, user) or user.team
-    return group_id in json.loads(comm.visible_to_teams)
+    return group_id in comm.visible_to_teams
 
 
 @router.get("", response_model=list[CommunicationPublic])

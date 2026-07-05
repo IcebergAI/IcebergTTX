@@ -42,7 +42,7 @@ def _scenario_summary(scenario: Scenario) -> dict:
         "title": scenario.title,
         "description": scenario.description,
         "version": scenario.version,
-        "tags": json.loads(scenario.tags) if scenario.tags else [],
+        "tags": scenario.tags or [],
         "inject_count": len(injects),
         "branch_count": sum(1 for inj in injects if len(inj.get("options", [])) > 1),
         "created_by": scenario.created_by,

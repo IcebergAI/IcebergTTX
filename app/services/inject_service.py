@@ -1,4 +1,3 @@
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -42,7 +41,7 @@ async def create_inject(
         scenario_node_id=scenario_node_id,
         title=title,
         content=content,
-        target_teams=json.dumps(normalized_targets) if normalized_targets else None,
+        target_teams=normalized_targets or None,
         group_id=normalized_group_id,
         sequence_order=sequence_order,
         attachment_filename=attachment.filename if attachment else None,
@@ -124,7 +123,7 @@ async def _broadcast_inject_released(session: AsyncSession, inject: Inject) -> N
 def _inject_target_groups(inject: Inject) -> list[str] | None:
     if inject.group_id:
         return [inject.group_id]
-    return json.loads(inject.target_teams) if inject.target_teams else None
+    return inject.target_teams
 
 
 def inject_attachment_payload(inject: Inject) -> dict | None:
@@ -172,7 +171,7 @@ async def inject_payload(session: AsyncSession, inject: Inject) -> dict:
         scenario_node_id=inject.scenario_node_id,
         title=inject.title,
         content=inject.content,
-        target_teams=json.loads(inject.target_teams) if inject.target_teams else None,
+        target_teams=inject.target_teams,
         group_id=inject.group_id,
         sequence_order=inject.sequence_order,
         state=inject.state,

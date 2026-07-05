@@ -1,4 +1,3 @@
-import json
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -62,7 +61,7 @@ async def approve(
     ).all()
     next_order = max((i.sequence_order for i in existing), default=0) + 1
 
-    target_teams = json.loads(s.target_teams) if s.target_teams else None
+    target_teams = s.target_teams
     group_id = target_teams[0] if target_teams and len(target_teams) == 1 else None
     inject = await create_inject(
         session,

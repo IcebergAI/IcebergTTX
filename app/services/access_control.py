@@ -1,4 +1,3 @@
-import json
 
 from fastapi import HTTPException, status
 from sqlmodel import select
@@ -64,7 +63,7 @@ async def require_exercise_access(session: AsyncSession, exercise_id: int, user:
 
 
 def inject_target_teams(inject: Inject) -> list[str] | None:
-    return json.loads(inject.target_teams) if inject.target_teams else None
+    return inject.target_teams
 
 
 def inject_matches_group(

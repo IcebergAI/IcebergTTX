@@ -149,7 +149,7 @@ async def suggest_inject(session, response, inject, exercise, definition):
         triggered_by_response_id=response.id,
         title=data.get("title", "Follow-up inject"),
         content=data.get("content", text),
-        target_teams=json.dumps(target_teams) if target_teams else None,
+        target_teams=target_teams or None,
         llm_model=_MODEL,
     )
     session.add(suggested)
@@ -238,7 +238,7 @@ def _suggested_payload(s) -> dict:
         triggered_by_response_id=s.triggered_by_response_id,
         title=s.title,
         content=s.content,
-        target_teams=json.loads(s.target_teams) if s.target_teams else None,
+        target_teams=s.target_teams,
         llm_model=s.llm_model,
         status=s.status,
         reviewed_by=s.reviewed_by,
