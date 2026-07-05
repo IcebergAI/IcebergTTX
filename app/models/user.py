@@ -19,6 +19,10 @@ class User(SQLModel, table=True):
     role: UserRole = Field(default=UserRole.participant)
     team: str | None = None
     is_active: bool = Field(default=True)
+    # Global-admin flag (#12): retains cross-facilitator access to every exercise
+    # for oversight/support, bypassing per-exercise ownership scoping. Assigned
+    # out-of-band (seeded / DB), like the facilitator role — never via registration.
+    is_admin: bool = Field(default=False)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )
