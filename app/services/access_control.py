@@ -67,6 +67,24 @@ def inject_target_teams(inject: Inject) -> list[str] | None:
     return json.loads(inject.target_teams) if inject.target_teams else None
 
 
+def inject_matches_group(
+    inject: Inject, group_id: str | None, user_team: str | None = None
+) -> bool:
+    """Whether an inject targets the given group.
+
+    A group-scoped inject matches only its exact group. A team-targeted inject
+    matches when the group (or, when supplied, the user's global team) is in its
+    target list. An untargeted inject matches everyone. Pass ``user_team`` to
+    include the fallback team match (visibility checks do; branch resolution does not).
+    """
+    if inject.group_id is not None:
+        return group_id == inject.group_id
+    teams = inject_target_teams(inject)
+    if teams:
+        return group_id in teams or (user_team is not None and user_team in teams)
+    return True
+
+
 async def exercise_group_for_user(
     session: AsyncSession, exercise_id: int, user: User
 ) -> str | None:
@@ -86,12 +104,7 @@ async def is_inject_visible_to_user(session: AsyncSession, inject: Inject, user:
     if user.role == UserRole.observer:
         return True
     group_id = await exercise_group_for_user(session, inject.exercise_id, user)
-    if inject.group_id is not None:
-        return group_id == inject.group_id
-    teams = inject_target_teams(inject)
-    if teams:
-        return group_id in teams or user.team in teams
-    return True
+    return inject_matches_group(inject, group_id, user_team=user.team)
 
 
 async def require_inject_visible(session: AsyncSession, inject: Inject, user: User) -> None:
