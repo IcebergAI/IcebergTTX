@@ -1,4 +1,3 @@
-import json
 from datetime import UTC, datetime
 
 from sqlmodel import select
@@ -7,6 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.inject import Inject, InjectState
 from app.models.response import Response
 from app.schemas.api import ResponsePublic
+from app.services.access_control import inject_matches_group
 from app.services.scenario_service import (
     definition_for_exercise,
     get_next_inject_ids,
@@ -96,19 +96,10 @@ async def _pending_next_injects(
         inject
         for inject in injects
         if inject.scenario_node_id in ordered_ids
-        and _inject_matches_group(inject, group_id)
+        and inject_matches_group(inject, group_id)
     ]
     matches.sort(key=lambda inject: ordered_ids.get(inject.scenario_node_id or "", 9999))
     return [_next_inject_payload(inject) for inject in matches]
-
-
-def _inject_matches_group(inject: Inject, group_id: str | None) -> bool:
-    if inject.group_id is not None:
-        return group_id == inject.group_id
-    if inject.target_teams:
-        teams = json.loads(inject.target_teams)
-        return group_id in teams
-    return True
 
 
 async def broadcast_response_submitted(

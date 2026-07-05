@@ -63,28 +63,11 @@ class UpdateMemberRequest(BaseModel):
 # ── Serialisation helpers ─────────────────────────────────────────────────────
 
 def _exercise_out(ex: Exercise) -> dict:
-    return {
-        "id": ex.id,
-        "scenario_id": ex.scenario_id,
-        "title": ex.title,
-        "state": ex.state,
-        "current_node_id": ex.current_node_id,
-        "llm_enabled": ex.llm_enabled,
-        "started_at": ex.started_at.isoformat() if ex.started_at else None,
-        "ended_at": ex.ended_at.isoformat() if ex.ended_at else None,
-        "created_by": ex.created_by,
-        "created_at": ex.created_at.isoformat(),
-    }
+    return ExercisePublic.from_model(ex).model_dump(mode="json")
 
 
 def _member_out(m: ExerciseMember) -> dict:
-    return {
-        "id": m.id,
-        "exercise_id": m.exercise_id,
-        "user_id": m.user_id,
-        "group_id": m.group_id,
-        "joined_at": m.joined_at.isoformat(),
-    }
+    return MemberPublic.from_model(m).model_dump(mode="json")
 
 
 async def _get_or_404(session: AsyncSession, exercise_id: int) -> Exercise:
@@ -273,6 +256,44 @@ async def delete_member(
 
 # ── Export ────────────────────────────────────────────────────────────────────
 
+# Exports use deliberately slim row projections (not the full *Public schemas) —
+# a data dump, not the live API shape. Kept as named helpers so the projection is
+# explicit and stays consistent across the JSON and CSV exports.
+
+def _export_inject_row(i: Inject) -> dict:
+    return {
+        "id": i.id,
+        "scenario_node_id": i.scenario_node_id,
+        "title": i.title,
+        "state": i.state,
+        "group_id": i.group_id,
+        "released_at": i.released_at.isoformat() if i.released_at else None,
+    }
+
+
+def _export_response_row(r: Response) -> dict:
+    return {
+        "id": r.id,
+        "inject_id": r.inject_id,
+        "user_id": r.user_id,
+        "group_id": r.group_id,
+        "content": r.content,
+        "selected_option": r.selected_option,
+        "submitted_at": r.submitted_at.isoformat(),
+    }
+
+
+def _export_comment_row(c: InjectComment) -> dict:
+    return {
+        "id": c.id,
+        "inject_id": c.inject_id,
+        "user_id": c.user_id,
+        "group_id": c.group_id,
+        "content": c.content,
+        "created_at": c.created_at.isoformat(),
+    }
+
+
 async def _build_export(session: AsyncSession, exercise_id: int) -> dict:
     ex = await _get_or_404(session, exercise_id)
     injects = (
@@ -290,40 +311,9 @@ async def _build_export(session: AsyncSession, exercise_id: int) -> dict:
     return {
         "exercise": _exercise_out(ex),
         "members": [_member_out(m) for m in members],
-        "injects": [
-            {
-                "id": i.id,
-                "scenario_node_id": i.scenario_node_id,
-                "title": i.title,
-                "state": i.state,
-                "group_id": i.group_id,
-                "released_at": i.released_at.isoformat() if i.released_at else None,
-            }
-            for i in injects
-        ],
-        "responses": [
-            {
-                "id": r.id,
-                "inject_id": r.inject_id,
-                "user_id": r.user_id,
-                "group_id": r.group_id,
-                "content": r.content,
-                "selected_option": r.selected_option,
-                "submitted_at": r.submitted_at.isoformat(),
-            }
-            for r in responses
-        ],
-        "inject_comments": [
-            {
-                "id": c.id,
-                "inject_id": c.inject_id,
-                "user_id": c.user_id,
-                "group_id": c.group_id,
-                "content": c.content,
-                "created_at": c.created_at.isoformat(),
-            }
-            for c in comments
-        ],
+        "injects": [_export_inject_row(i) for i in injects],
+        "responses": [_export_response_row(r) for r in responses],
+        "inject_comments": [_export_comment_row(c) for c in comments],
     }
 
 

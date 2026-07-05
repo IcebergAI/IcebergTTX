@@ -24,6 +24,7 @@ from app.services.access_control import (
 )
 from app.services.exercise_service import validate_group_id
 from app.services.inject_service import (
+    AttachmentMeta,
     create_inject,
     get_inject_or_404,
     inject_payload,
@@ -129,9 +130,9 @@ async def _request_body_and_attachment(
 async def _save_attachment(
     file: UploadFile | None,
     exercise_id: int,
-) -> dict[str, str | int | None]:
+) -> AttachmentMeta | None:
     if file is None:
-        return {}
+        return None
     original_filename = Path(file.filename or "attachment").name
     safe_filename = _safe_filename(original_filename)
     storage_dir = ATTACHMENT_ROOT / str(exercise_id)
@@ -155,12 +156,12 @@ async def _save_attachment(
         raise
     finally:
         await file.close()
-    return {
-        "attachment_filename": original_filename,
-        "attachment_content_type": _normalize_content_type(file.content_type),
-        "attachment_path": str(storage_path),
-        "attachment_size": size,
-    }
+    return AttachmentMeta(
+        filename=original_filename,
+        content_type=_normalize_content_type(file.content_type),
+        path=str(storage_path),
+        size=size,
+    )
 
 
 def _delete_attachment_file(inject: Inject) -> None:
@@ -195,7 +196,7 @@ async def list_injects(exercise_id: int, current_user: CurrentUserDep, session: 
 async def create(
     exercise_id: int,
     request: Request,
-    _: FacilitatorDep,
+    current_user: FacilitatorDep,
     session: SessionDep,
 ):
     try:
@@ -205,11 +206,11 @@ async def create(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    exercise = await require_exercise_access(session, exercise_id, _)
+    exercise = await require_exercise_access(session, exercise_id, current_user)
     group_id = await validate_group_id(session, exercise, body.group_id)
     if group_id is None and body.target_teams and len(body.target_teams) == 1:
         group_id = await validate_group_id(session, exercise, body.target_teams[0])
-    attachment_fields = await _save_attachment(attachment, exercise_id)
+    attachment_meta = await _save_attachment(attachment, exercise_id)
     inject = await create_inject(
         session,
         exercise_id=exercise_id,
@@ -219,7 +220,7 @@ async def create(
         target_teams=body.target_teams,
         group_id=group_id,
         sequence_order=body.sequence_order,
-        **attachment_fields,
+        attachment=attachment_meta,
     )
     return await inject_payload(session, inject)
 
@@ -235,14 +236,16 @@ async def get_inject(
 
 
 @router.delete("/{inject_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_inject(exercise_id: int, inject_id: int, _: FacilitatorDep, session: SessionDep):
+async def delete_inject(
+    exercise_id: int, inject_id: int, current_user: FacilitatorDep, session: SessionDep
+):
     inject = await get_inject_or_404(session, exercise_id, inject_id)
     _delete_attachment_file(inject)
     await session.delete(inject)
     await session.commit()
     audit_service.emit(
         "inject.delete",
-        actor=_,
+        actor=current_user,
         target_type="inject",
         target_id=inject_id,
         reason=f"exercise={exercise_id}",

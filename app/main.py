@@ -3,7 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import validate_settings
@@ -37,6 +37,7 @@ from app.routers import (
     users,
     ws,
 )
+from app.routers.ui import UIRedirect
 from app.services import audit_service
 from app.services.ws_manager import heartbeat_task
 
@@ -61,6 +62,11 @@ app = FastAPI(title="IcebergTTX", lifespan=lifespan)
 # runs so blocked requests are still attributable.
 app.add_middleware(CSRFOriginMiddleware)
 app.add_middleware(AuditContextMiddleware)
+
+
+@app.exception_handler(UIRedirect)
+async def ui_redirect_handler(request: Request, exc: UIRedirect) -> RedirectResponse:
+    return RedirectResponse(exc.url)
 
 
 @app.exception_handler(Exception)

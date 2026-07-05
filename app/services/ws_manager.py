@@ -1,13 +1,24 @@
 import asyncio
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import WebSocket
 
 
+@dataclass
+class Connection:
+    ws: WebSocket
+    user_id: int
+    role: str
+    group_id: str | None
+    last_ping: datetime
+
+
 class ConnectionManager:
     def __init__(self) -> None:
-        # exercise_id -> connection metadata
-        self._rooms: dict[int, list[dict]] = {}
+        # exercise_id -> live connections
+        self._rooms: dict[int, list[Connection]] = {}
 
     async def connect(
         self,
@@ -19,24 +30,37 @@ class ConnectionManager:
     ) -> None:
         await ws.accept()
         self._rooms.setdefault(exercise_id, []).append(
-            {
-                "ws": ws,
-                "user_id": user_id,
-                "role": role,
-                "group_id": group_id,
-                "last_ping": datetime.now(UTC),
-            }
+            Connection(
+                ws=ws,
+                user_id=user_id,
+                role=role,
+                group_id=group_id,
+                last_ping=datetime.now(UTC),
+            )
         )
 
     def disconnect(self, ws: WebSocket, exercise_id: int) -> None:
         conns = self._rooms.get(exercise_id, [])
-        self._rooms[exercise_id] = [c for c in conns if c["ws"] is not ws]
+        self._rooms[exercise_id] = [c for c in conns if c.ws is not ws]
 
     def ping(self, ws: WebSocket, exercise_id: int) -> None:
         for c in self._rooms.get(exercise_id, []):
-            if c["ws"] is ws:
-                c["last_ping"] = datetime.now(UTC)
+            if c.ws is ws:
+                c.last_ping = datetime.now(UTC)
                 return
+
+    def _matching(
+        self, exercise_id: int, predicate: Callable[[Connection], bool]
+    ) -> list[Connection]:
+        """Connections satisfying `predicate`, de-duplicated by socket identity."""
+        seen: set[int] = set()
+        out: list[Connection] = []
+        for c in self._rooms.get(exercise_id, []):
+            if not predicate(c) or id(c.ws) in seen:
+                continue
+            seen.add(id(c.ws))
+            out.append(c)
+        return out
 
     async def broadcast_to_exercise(self, exercise_id: int, message: dict) -> None:
         await self._send_to_many(self._rooms.get(exercise_id, []), message)
@@ -51,34 +75,20 @@ class ConnectionManager:
         conns = [
             c
             for c in self._rooms.get(exercise_id, [])
-            if c["group_id"] in group_ids or c["role"] in ("facilitator", "observer")
+            if c.group_id in group_ids or c.role in ("facilitator", "observer")
         ]
         await self._send_to_many(conns, message)
 
-    async def broadcast_to_teams(
-        self, exercise_id: int, teams: list[str], message: dict
-    ) -> None:
-        await self.broadcast_to_groups(exercise_id, teams, message)
-
     async def send_to_facilitators(self, exercise_id: int, message: dict) -> None:
-        conns = [
-            c for c in self._rooms.get(exercise_id, []) if c["role"] == "facilitator"
-        ]
+        conns = self._matching(exercise_id, lambda c: c.role == "facilitator")
         await self._send_to_many(conns, message)
 
     async def send_to_facilitators_and_user(
         self, exercise_id: int, user_id: int | None, message: dict
     ) -> None:
-        conns = []
-        seen: set[int] = set()
-        for c in self._rooms.get(exercise_id, []):
-            if c["role"] != "facilitator" and c["user_id"] != user_id:
-                continue
-            ws_id = id(c["ws"])
-            if ws_id in seen:
-                continue
-            seen.add(ws_id)
-            conns.append(c)
+        conns = self._matching(
+            exercise_id, lambda c: c.role == "facilitator" or c.user_id == user_id
+        )
         await self._send_to_many(conns, message)
 
     async def send_to_facilitators_user_and_groups(
@@ -88,27 +98,21 @@ class ConnectionManager:
         group_ids: list[str],
         message: dict,
     ) -> None:
-        conns = []
-        seen: set[int] = set()
-        for c in self._rooms.get(exercise_id, []):
-            if (
-                c["role"] != "facilitator"
-                and c["user_id"] != user_id
-                and c["group_id"] not in group_ids
-            ):
-                continue
-            ws_id = id(c["ws"])
-            if ws_id in seen:
-                continue
-            seen.add(ws_id)
-            conns.append(c)
+        conns = self._matching(
+            exercise_id,
+            lambda c: (
+                c.role == "facilitator"
+                or c.user_id == user_id
+                or c.group_id in group_ids
+            ),
+        )
         await self._send_to_many(conns, message)
 
-    async def _send_to_many(self, conns: list[dict], message: dict) -> None:
-        dead: list[dict] = []
+    async def _send_to_many(self, conns: list[Connection], message: dict) -> None:
+        dead: list[Connection] = []
         for c in conns:
             try:
-                await c["ws"].send_json(message)
+                await c.ws.send_json(message)
             except Exception:
                 dead.append(c)
         for c in dead:
@@ -122,12 +126,12 @@ class ConnectionManager:
         """Close and remove connections that haven't pinged recently."""
         now = datetime.now(UTC)
         for exercise_id, conns in list(self._rooms.items()):
-            live: list[dict] = []
+            live: list[Connection] = []
             for c in conns:
-                idle = (now - c["last_ping"]).total_seconds()
+                idle = (now - c.last_ping).total_seconds()
                 if idle > max_idle_seconds:
                     try:
-                        await c["ws"].close()
+                        await c.ws.close()
                     # best-effort close of an already-dead socket
                     except Exception:  # nosec B110
                         pass

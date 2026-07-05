@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
@@ -8,6 +9,16 @@ from app.models.inject import Inject, InjectState
 from app.models.scenario import Scenario
 from app.schemas.api import InjectPublic
 from app.services.scenario_service import export_definition
+
+
+@dataclass(frozen=True)
+class AttachmentMeta:
+    """Stored attachment fields, grouped so they travel as one value (#5)."""
+
+    filename: str
+    content_type: str
+    path: str
+    size: int
 
 
 async def create_inject(
@@ -20,10 +31,7 @@ async def create_inject(
     target_teams: list[str] | None = None,
     group_id: str | None = None,
     sequence_order: int = 0,
-    attachment_filename: str | None = None,
-    attachment_content_type: str | None = None,
-    attachment_path: str | None = None,
-    attachment_size: int | None = None,
+    attachment: AttachmentMeta | None = None,
 ) -> Inject:
     normalized_group_id = group_id.strip() if group_id and group_id.strip() else None
     normalized_targets = target_teams
@@ -37,10 +45,10 @@ async def create_inject(
         target_teams=json.dumps(normalized_targets) if normalized_targets else None,
         group_id=normalized_group_id,
         sequence_order=sequence_order,
-        attachment_filename=attachment_filename,
-        attachment_content_type=attachment_content_type,
-        attachment_path=attachment_path,
-        attachment_size=attachment_size,
+        attachment_filename=attachment.filename if attachment else None,
+        attachment_content_type=attachment.content_type if attachment else None,
+        attachment_path=attachment.path if attachment else None,
+        attachment_size=attachment.size if attachment else None,
     )
     session.add(inject)
     await session.commit()
