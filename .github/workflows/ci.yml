@@ -26,6 +26,15 @@ jobs:
       - name: Lint
         run: ruff check app/ tests/
 
+      - name: Security scan (bandit)
+        run: bandit -c pyproject.toml -r app/
+
+      - name: Dependency audit (pip-audit)
+        # Warn-only: an unfixable transitive CVE should surface in the logs, not
+        # block every PR. Tighten to a hard failure once findings are triaged.
+        continue-on-error: true
+        run: pip-audit --skip-editable
+
       # The test suite starts its own Postgres via testcontainers (Docker is
       # available on GitHub-hosted runners) and sets DATABASE_URL itself. To run
       # against an external Postgres instead, set DATABASE_URL_OVERRIDE_FOR_TESTS.

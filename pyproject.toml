@@ -46,6 +46,7 @@ dev = [
     "testcontainers[postgres]>=4.0",
     "ruff>=0.4",
     "bandit>=1.7",
+    "pip-audit>=2.7",
     "vulture>=2.11",
     "pyright>=1.1",
     "pytailwindcss>=0.3",
