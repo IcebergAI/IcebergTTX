@@ -188,6 +188,50 @@ def participant_token_fixture(participant: User) -> str:
     return create_access_token(subject=participant.email, role=participant.role.value)
 
 
+@pytest_asyncio.fixture(name="second_facilitator")
+async def second_facilitator_fixture(session: AsyncSession) -> User:
+    """A second, unrelated facilitator — used to assert per-exercise ownership
+    scoping (#12): they must not reach the first facilitator's exercises."""
+    user = User(
+        email="facilitator2@example.com",
+        display_name="Facilitator Two",
+        hashed_password=hash_password("password1234"),
+        role=UserRole.facilitator,
+    )
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+@pytest.fixture(name="second_facilitator_token")
+def second_facilitator_token_fixture(second_facilitator: User) -> str:
+    return create_access_token(
+        subject=second_facilitator.email, role=second_facilitator.role.value
+    )
+
+
+@pytest_asyncio.fixture(name="admin")
+async def admin_fixture(session: AsyncSession) -> User:
+    """A global admin (#12) — retains cross-facilitator access to every exercise."""
+    user = User(
+        email="admin@example.com",
+        display_name="Admin",
+        hashed_password=hash_password("password1234"),
+        role=UserRole.facilitator,
+        is_admin=True,
+    )
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+@pytest.fixture(name="admin_token")
+def admin_token_fixture(admin: User) -> str:
+    return create_access_token(subject=admin.email, role=admin.role.value)
+
+
 @pytest.fixture(name="sample_definition")
 def sample_definition_fixture() -> ScenarioDefinition:
     """Minimal valid two-inject scenario with one branch."""

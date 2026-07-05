@@ -13,6 +13,11 @@ def is_actual_facilitator(user: User) -> bool:
     return getattr(user, "actual_role", user.role) == UserRole.facilitator
 
 
+def is_admin(user: User) -> bool:
+    # A real DB column, so it survives role-preview model_copy and is never spoofable.
+    return getattr(user, "is_admin", False)
+
+
 async def get_exercise_or_404(session: AsyncSession, exercise_id: int) -> Exercise:
     exercise = await session.get(Exercise, exercise_id)
     if not exercise:
@@ -45,8 +50,14 @@ async def exercise_member_for_user(
 
 
 async def require_exercise_access(session: AsyncSession, exercise_id: int, user: User) -> Exercise:
+    """Read gate: admins, the creator, and members (participants *and* facilitator
+    co-facilitators) may view the exercise. Any other facilitator is now denied —
+    facilitator access is scoped per-exercise (#12), not global.
+    """
     exercise = await get_exercise_or_404(session, exercise_id)
-    if user.role == UserRole.facilitator or is_actual_facilitator(user):
+    if is_admin(user):
+        return exercise
+    if user.id is not None and exercise.created_by == user.id:
         return exercise
     if user.id is not None and await is_exercise_member(session, exercise_id, user.id):
         return exercise
@@ -57,6 +68,33 @@ async def require_exercise_access(session: AsyncSession, exercise_id: int, user:
         target_type="exercise",
         target_id=exercise_id,
         reason="not an exercise member",
+        severity="warning",
+    )
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Exercise access denied")
+
+
+async def require_exercise_owner(session: AsyncSession, exercise_id: int, user: User) -> Exercise:
+    """Mutation gate: only an admin, the creator, or a facilitator co-facilitator
+    (a facilitator enrolled as a member) may mutate the exercise (#12).
+    """
+    exercise = await get_exercise_or_404(session, exercise_id)
+    if is_admin(user):
+        return exercise
+    if user.id is not None and exercise.created_by == user.id:
+        return exercise
+    if (
+        is_actual_facilitator(user)
+        and user.id is not None
+        and await is_exercise_member(session, exercise_id, user.id)
+    ):
+        return exercise
+    audit_service.emit(
+        "authz.denied",
+        result="deny",
+        actor=user,
+        target_type="exercise",
+        target_id=exercise_id,
+        reason="not exercise owner",
         severity="warning",
     )
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Exercise access denied")

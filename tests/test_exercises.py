@@ -1,3 +1,6 @@
+import json
+import logging
+
 from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -7,6 +10,21 @@ from app.models.inject import Inject
 from app.models.user import User
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.exercise_service import transition_state
+
+
+def _bearer(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _authz_denials(caplog) -> list[dict]:
+    events = []
+    for rec in caplog.records:
+        if rec.name == "iceberg_ttx.audit":
+            try:
+                events.append(json.loads(rec.getMessage()))
+            except ValueError:
+                pass
+    return [e for e in events if e.get("action") == "authz.denied" and e.get("result") == "deny"]
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
@@ -486,3 +504,116 @@ async def test_enrol_member_participant_forbidden(
         headers={"Authorization": f"Bearer {participant_token}"},
     )
     assert r.status_code == 403
+
+
+# ── #12: per-exercise facilitator ownership scoping ───────────────────────────
+
+async def test_other_facilitator_denied_read(
+    client: AsyncClient, second_facilitator_token: str, draft_exercise, participant: User, caplog
+):
+    with caplog.at_level(logging.INFO, logger="iceberg_ttx.audit"):
+        r = await client.get(
+            f"/api/exercises/{draft_exercise.id}", headers=_bearer(second_facilitator_token)
+        )
+    assert r.status_code == 403
+    denials = _authz_denials(caplog)
+    assert any(str(e.get("target_id")) == str(draft_exercise.id) for e in denials)
+
+
+async def test_other_facilitator_denied_mutations(
+    client: AsyncClient, second_facilitator_token: str, draft_exercise, participant: User
+):
+    h = _bearer(second_facilitator_token)
+    eid = draft_exercise.id
+    assert (await client.put(
+        f"/api/exercises/{eid}", json={"title": "hijack"}, headers=h
+    )).status_code == 403
+    assert (await client.delete(f"/api/exercises/{eid}", headers=h)).status_code == 403
+    assert (await client.post(f"/api/exercises/{eid}/start", headers=h)).status_code == 403
+    assert (await client.get(f"/api/exercises/{eid}/members", headers=h)).status_code == 403
+    assert (await client.post(
+        f"/api/exercises/{eid}/members", json={"user_id": participant.id}, headers=h
+    )).status_code == 403
+    assert (await client.get(f"/api/exercises/{eid}/export", headers=h)).status_code == 403
+    assert (await client.get(f"/api/exercises/{eid}/export.csv", headers=h)).status_code == 403
+
+
+async def test_owner_facilitator_still_allowed(
+    client: AsyncClient, facilitator_token: str, draft_exercise
+):
+    h = _bearer(facilitator_token)
+    eid = draft_exercise.id
+    assert (await client.get(f"/api/exercises/{eid}", headers=h)).status_code == 200
+    assert (await client.put(
+        f"/api/exercises/{eid}", json={"title": "renamed"}, headers=h
+    )).status_code == 200
+    assert (await client.get(f"/api/exercises/{eid}/export", headers=h)).status_code == 200
+
+
+async def test_cofacilitator_member_gains_access(
+    client: AsyncClient,
+    facilitator_token: str,
+    second_facilitator: User,
+    second_facilitator_token: str,
+    draft_exercise,
+):
+    eid = draft_exercise.id
+    # Owner enrols the second facilitator as a co-facilitator (member).
+    enrol = await client.post(
+        f"/api/exercises/{eid}/members",
+        json={"user_id": second_facilitator.id},
+        headers=_bearer(facilitator_token),
+    )
+    assert enrol.status_code == 201
+    # Now the co-facilitator can read and mutate.
+    h = _bearer(second_facilitator_token)
+    assert (await client.get(f"/api/exercises/{eid}", headers=h)).status_code == 200
+    assert (await client.put(
+        f"/api/exercises/{eid}", json={"title": "co-edited"}, headers=h
+    )).status_code == 200
+
+
+async def test_admin_has_global_access(
+    client: AsyncClient, admin_token: str, draft_exercise
+):
+    h = _bearer(admin_token)
+    eid = draft_exercise.id
+    assert (await client.get(f"/api/exercises/{eid}", headers=h)).status_code == 200
+    assert (await client.put(
+        f"/api/exercises/{eid}", json={"title": "admin-touch"}, headers=h
+    )).status_code == 200
+
+
+async def test_list_exercises_scoped_per_facilitator(
+    client: AsyncClient,
+    facilitator_token: str,
+    second_facilitator_token: str,
+    admin_token: str,
+    draft_exercise,
+):
+    eid = draft_exercise.id
+    owner_ids = [e["id"] for e in (
+        await client.get("/api/exercises", headers=_bearer(facilitator_token))
+    ).json()]
+    assert eid in owner_ids
+
+    other = (await client.get("/api/exercises", headers=_bearer(second_facilitator_token))).json()
+    assert other == []
+
+    admin_ids = [e["id"] for e in (
+        await client.get("/api/exercises", headers=_bearer(admin_token))
+    ).json()]
+    assert eid in admin_ids
+
+
+async def test_participant_member_is_read_only(
+    client: AsyncClient, participant_token: str, active_exercise
+):
+    # active_exercise enrols `participant` as a member — read is allowed…
+    h = _bearer(participant_token)
+    eid = active_exercise.id
+    assert (await client.get(f"/api/exercises/{eid}", headers=h)).status_code == 200
+    # …but mutation is still blocked (require_role facilitator).
+    assert (await client.put(
+        f"/api/exercises/{eid}", json={"title": "nope"}, headers=h
+    )).status_code == 403
