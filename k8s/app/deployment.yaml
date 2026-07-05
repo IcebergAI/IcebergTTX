@@ -63,6 +63,11 @@ spec:
                 configMapKeyRef:
                   name: iceberg-ttx-config
                   key: ACCESS_TOKEN_EXPIRE_MINUTES
+            - name: FORWARDED_ALLOW_IPS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: FORWARDED_ALLOW_IPS
           volumeMounts:
             - name: uploads
               mountPath: /app/uploads

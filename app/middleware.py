@@ -15,10 +15,15 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 
 
 def client_ip(request: Request) -> str | None:
-    """Source IP, honouring X-Forwarded-For (nginx) — first hop is the client."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Source IP as resolved by uvicorn's ProxyHeadersMiddleware (#36).
+
+    uvicorn rewrites ``request.client`` from ``X-Forwarded-For`` **only** when the
+    immediate peer is a trusted proxy (``--forwarded-allow-ips`` /
+    ``FORWARDED_ALLOW_IPS``). The app is reachable only through the nginx reverse
+    proxy, which appends the real client hop, so an untrusted client cannot spoof
+    this value (the old hand-rolled leftmost-XFF parse trusted whatever the client
+    sent). This IP feeds the audit ``source_ip`` and the login rate-limit key.
+    """
     return request.client.host if request.client else None
 
 

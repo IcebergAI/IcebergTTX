@@ -47,6 +47,31 @@ async def test_login_rate_limited_after_repeated_failures(client: AsyncClient, f
     assert "Retry-After" in resp.headers
 
 
+async def test_spoofed_forwarded_for_does_not_bypass_rate_limit(
+    client: AsyncClient, facilitator: User
+):
+    """#36: a rotating X-Forwarded-For must not mint distinct rate-limit keys.
+
+    client_ip() now derives from request.client.host (set by uvicorn's trusted
+    proxy handling), so the client-supplied header is ignored and all attempts
+    share one key — the lockout still fires despite a different spoofed IP each
+    time. With the old leftmost-XFF parse each request keyed a fresh bucket and
+    the limiter never tripped.
+    """
+    creds = {"email": facilitator.email, "password": "wrongpassword"}
+    for i in range(5):
+        resp = await client.post(
+            "/api/auth/login", json=creds, headers={"X-Forwarded-For": f"203.0.113.{i}"}
+        )
+        assert resp.status_code == 401
+    locked = await client.post(
+        "/api/auth/login",
+        json={"email": facilitator.email, "password": "password1234"},
+        headers={"X-Forwarded-For": "203.0.113.250"},
+    )
+    assert locked.status_code == 429
+
+
 async def test_login_success_resets_rate_counter(client: AsyncClient, facilitator: User):
     for _ in range(3):
         await client.post("/api/auth/login", json={"email": facilitator.email, "password": "nope"})
