@@ -13,6 +13,92 @@ from app.services import audit_service
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 
+# Strict same-origin Content-Security-Policy. `script-src 'self'` carries NO
+# 'unsafe-inline'/'unsafe-eval' — the app ships the @alpinejs/csp build and all
+# JS is same-origin files (#77). `style-src` keeps 'unsafe-inline' only to allow
+# dynamic `style=` attributes and the critical-theme block (style injection is
+# not a script-execution vector).
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self'; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'"
+)
+
+# Deny every browser feature we don't use.
+_PERMISSIONS_POLICY = ", ".join(
+    f"{feature}=()"
+    for feature in (
+        "accelerometer",
+        "autoplay",
+        "camera",
+        "display-capture",
+        "encrypted-media",
+        "fullscreen",
+        "geolocation",
+        "gyroscope",
+        "magnetometer",
+        "microphone",
+        "midi",
+        "payment",
+        "usb",
+        "xr-spatial-tracking",
+    )
+)
+
+
+def build_security_headers() -> dict[str, str]:
+    """Security response headers emitted by the app on every HTTP response (#77).
+
+    The app is the single source of truth: nginx adds no security headers, so
+    this applies uniformly to Docker, Kubernetes, and local uvicorn. HSTS is
+    gated on ``dev_mode`` (the app sits behind a TLS-terminating proxy in prod).
+    """
+    headers = {
+        "Content-Security-Policy": CONTENT_SECURITY_POLICY,
+        "X-Frame-Options": "DENY",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": _PERMISSIONS_POLICY,
+        "Cross-Origin-Opener-Policy": "same-origin",
+    }
+    if not settings.dev_mode:
+        headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return headers
+
+
+class SecurityHeadersMiddleware:
+    """Attach the security header set to every HTTP response.
+
+    Uses setdefault semantics (never overwrites a header a route already set), so
+    the per-download ``X-Content-Type-Options: nosniff`` on attachment downloads
+    (#16) is preserved without duplication. WebSocket scopes pass through.
+    """
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                for name, value in build_security_headers().items():
+                    if name not in headers:
+                        headers[name] = value
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
 
 def client_ip(request: Request) -> str | None:
     """Source IP as resolved by uvicorn's ProxyHeadersMiddleware (#36).

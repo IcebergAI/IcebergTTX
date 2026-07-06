@@ -9,7 +9,11 @@ from fastapi.staticfiles import StaticFiles
 from app.config import validate_settings
 from app.database import run_migrations
 from app.logging_config import configure_logging
-from app.middleware import AuditContextMiddleware, CSRFOriginMiddleware
+from app.middleware import (
+    AuditContextMiddleware,
+    CSRFOriginMiddleware,
+    SecurityHeadersMiddleware,
+)
 from app.models import (  # noqa: F401
     assessment,
     audit,
@@ -79,9 +83,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="IcebergTTX", lifespan=lifespan)
 
-# Outermost first: audit context must be set before CSRF (and everything else)
-# runs so blocked requests are still attributable.
+# add_middleware wraps outermost-last. Order (outer → inner):
+#   AuditContext → SecurityHeaders → CSRF.
+# Audit context must be outermost so blocked requests are still attributable;
+# SecurityHeaders wraps CSRF so even CSRF-blocked 403s carry the security headers.
 app.add_middleware(CSRFOriginMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(AuditContextMiddleware)
 
 

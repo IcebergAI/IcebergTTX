@@ -44,29 +44,3 @@
   </div>
 </div>
 {% endblock %}
-
-{% block scripts %}
-<script>
-function loginForm() {
-  return {
-    email: '', password: '', loading: false, error: '',
-    async submit() {
-      this.loading = true; this.error = '';
-      const resp = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: this.email, password: this.password }),
-      });
-      this.loading = false;
-      if (resp.ok) {
-        const data = await resp.json();
-        localStorage.setItem('dt_token', data.access_token);
-        window.location.href = '/dashboard';
-      } else {
-        this.error = 'Invalid email or password.';
-      }
-    }
-  }
-}
-</script>
-{% endblock %}

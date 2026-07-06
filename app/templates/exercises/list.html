@@ -2,7 +2,7 @@
 {% block title %}Exercises — IcebergTTX{% endblock %}
 
 {% block content %}
-<div x-data="exerciseList()" x-init="init()" class="workspace">
+<div x-data="exerciseList({{ show_create|default(false)|tojson }})" class="workspace">
 
   <div class="page-head">
     <div>
@@ -79,10 +79,14 @@
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2.5">
             <span class="text-[14px] font-medium" x-text="ex.title"></span>
-            <span x-html="stateBadge(ex.state)"></span>
+            <span class="pill" :class="stateBadgeClass(ex.state)">
+              <span x-show="ex.state === 'active'" class="live-dot"></span>
+              <span x-show="ex.state !== 'active'" class="dot" :class="stateDotClass(ex.state)"></span>
+              <span x-text="ex.state"></span>
+            </span>
           </div>
           <div class="mono text-[11.5px] text-muted mt-0.5"
-               x-text="'EX-' + String(ex.id).padStart(3,'0') + (ex.started_at ? ' · started ' + fmtTime(ex.started_at) : '')"></div>
+               x-text="'EX-' + padId(ex.id, 3) + (ex.started_at ? ' · started ' + fmtTime(ex.started_at) : '')"></div>
         </div>
 
         <div class="flex items-center gap-2 shrink-0">
@@ -118,87 +122,4 @@
   </div>
 
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-function exerciseList() {
-  return {
-    loading: true,
-    exercises: [],
-    scenarios: [],
-    isF: false,
-    showCreate: {% if show_create %}true{% else %}false{% endif %},
-    newTitle: '',
-    newScenarioId: '',
-    newLlmEnabled: false,
-    creating: false,
-    createError: '',
-
-    async init() {
-      const me = await apiFetch('/auth/me');
-      if (!me) return;
-      const meData = await readJson(me);
-      if (!meData) return;
-      this.isF = meData.role === 'facilitator';
-
-      const [er, sr] = await Promise.all([
-        apiFetch('/exercises'),
-        this.isF ? apiFetch('/scenarios') : Promise.resolve(null),
-      ]);
-      if (er && er.ok) this.exercises = await readJson(er, []);
-      if (sr && sr.ok) this.scenarios = await readJson(sr, []);
-      this.loading = false;
-    },
-
-    async load() {
-      const r = await apiFetch('/exercises');
-      if (r && r.ok) this.exercises = await readJson(r, []);
-    },
-
-    async createExercise() {
-      if (!this.newTitle || !this.newScenarioId) {
-        this.createError = 'Title and scenario are required.';
-        return;
-      }
-      this.creating = true; this.createError = '';
-      const r = await apiFetch('/exercises', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: this.newTitle,
-          scenario_id: parseInt(this.newScenarioId),
-          llm_enabled: this.newLlmEnabled,
-        }),
-      });
-      this.creating = false;
-      if (r && r.ok) {
-        this.showCreate = false;
-        this.newTitle = ''; this.newScenarioId = ''; this.newLlmEnabled = false;
-        await this.load();
-      } else if (r) {
-        const data = await r.json();
-        this.createError = data.detail || 'Failed to create exercise.';
-      }
-    },
-
-    async doTransition(ex, action) {
-      const r = await apiFetch(`/exercises/${ex.id}/${action}`, { method: 'POST' });
-      if (r && r.ok) {
-        const updated = await r.json();
-        const idx = this.exercises.findIndex(e => e.id === ex.id);
-        if (idx !== -1) this.exercises[idx] = updated;
-      }
-    },
-
-    async deleteExercise(id) {
-      if (!confirm('Delete this exercise?')) return;
-      await apiFetch(`/exercises/${id}`, { method: 'DELETE' });
-      await this.load();
-    },
-
-    stateBadge(s) { return stateBadge(s); },
-    fmtTime(s) { return fmtTime(s); },
-  }
-}
-</script>
 {% endblock %}

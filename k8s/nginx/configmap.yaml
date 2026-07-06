@@ -18,9 +18,10 @@ data:
         listen 8080;
         server_name _;
 
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header X-Frame-Options "DENY" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        # Security headers (CSP, HSTS, X-Frame-Options, Referrer-Policy, …) are
+        # emitted by the app's SecurityHeadersMiddleware (app/middleware.py) — the
+        # single strict source of truth across all environments (#77). nginx adds
+        # nothing here (this config previously shipped no CSP at all).
 
         client_max_body_size 30m;
 
@@ -28,6 +29,7 @@ data:
             alias /app/static/;
             expires 7d;
             add_header Cache-Control "public, immutable";
+            add_header X-Content-Type-Options "nosniff" always;
             access_log off;
         }
 
