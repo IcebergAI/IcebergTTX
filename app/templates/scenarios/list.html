@@ -31,7 +31,7 @@
   }
 </style>
 
-<div x-data="scenarioList()" x-init="init()" class="workspace">
+<div x-data="scenarioList()" class="workspace">
 
   <div class="page-head">
     <div>
@@ -86,7 +86,7 @@
           <a :href="'/scenarios/' + s.id"
              class="scenario-row-title text-[14px] font-medium hover:text-ink" x-text="s.title"></a>
           <div class="scenario-row-meta mono text-[11px] text-faint mt-0.5"
-               x-text="'SC-' + String(s.id).padStart(3,'0')"></div>
+               x-text="'SC-' + padId(s.id, 3)"></div>
         </div>
 
         <!-- Tags -->
@@ -119,66 +119,4 @@
   </div>
 
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-function scenarioList() {
-  return {
-    loading: true, scenarios: [], isF: false,
-    importError: '', importSuccess: '',
-
-    async init() {
-      const me = await apiFetch('/auth/me');
-      if (!me) return;
-      const meData = await readJson(me);
-      if (!meData) return;
-      this.isF = meData.role === 'facilitator';
-      await this.load();
-    },
-
-    async load() {
-      this.loading = true;
-      const r = await apiFetch('/scenarios');
-      if (r && r.ok) this.scenarios = await readJson(r, []);
-      this.loading = false;
-    },
-
-    async importFile(event) {
-      this.importError = ''; this.importSuccess = '';
-      const file = event.target.files[0];
-      if (!file) return;
-      const text = await file.text();
-      let definition;
-      try {
-        definition = JSON.parse(text);
-      } catch {
-        this.importError = 'Invalid JSON file.';
-        event.target.value = '';
-        return;
-      }
-      const resp = await apiFetch('/scenarios/import', {
-        method: 'POST',
-        body: JSON.stringify({ definition }),
-      });
-      if (resp && resp.ok) {
-        this.importSuccess = 'Scenario imported successfully.';
-        await this.load();
-      } else {
-        const data = resp ? await resp.json() : null;
-        this.importError = (data && data.detail) || 'Import failed.';
-      }
-      event.target.value = '';
-    },
-
-    async deleteScenario(id) {
-      if (!confirm('Delete this scenario?')) return;
-      await apiFetch('/scenarios/' + id, { method: 'DELETE' });
-      await this.load();
-    },
-
-    fmtAgo(s) { return fmtAgo(s); },
-  }
-}
-</script>
 {% endblock %}

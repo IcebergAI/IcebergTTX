@@ -54,7 +54,8 @@ async def test_shell_marks_main_region_for_soft_navigation(
     r = await client.get("/exercises")
     assert r.status_code == 200
     assert '<main id="app-main"' in r.text
-    assert "startViewTransition" in r.text
+    # Soft-navigation now lives in the external same-origin runtime (strict CSP, #77).
+    assert "/static/js/app.js" in r.text
     assert "dt-navigation-curtain" not in r.text
 
 
@@ -94,5 +95,7 @@ async def test_preview_participant_hides_facilitator_sidebar_navigation(
     client.cookies.set("dt_view_role", "participant")
     r = await client.get("/dashboard")
     assert r.status_code == 200
-    assert 'x-show="user?.role === \'facilitator\'"' in r.text
-    assert "Previewing as " in r.text
+    # Rail nav is client-gated via the sidebarNav component (strict CSP, #77):
+    # facilitator-only links behind isFacilitator, the preview indicator behind hasPreview.
+    assert 'x-show="isFacilitator"' in r.text
+    assert 'x-show="hasPreview"' in r.text

@@ -2,7 +2,7 @@
 {% block title %}Home — IcebergTTX{% endblock %}
 
 {% block content %}
-<div x-data="dashboard()" x-init="init()" class="workspace">
+<div x-data="dashboard()" class="workspace">
 
   <div class="page-head">
     <div>
@@ -63,10 +63,14 @@
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <span class="text-[14px] font-medium truncate" x-text="ex.title"></span>
-                <span x-html="stateBadge(ex.state)"></span>
+                <span class="pill" :class="stateBadgeClass(ex.state)">
+                  <span x-show="ex.state === 'active'" class="live-dot"></span>
+                  <span x-show="ex.state !== 'active'" class="dot" :class="stateDotClass(ex.state)"></span>
+                  <span x-text="ex.state"></span>
+                </span>
               </div>
               <div class="mono text-[11.5px] text-muted mt-0.5"
-                   x-text="'EX-' + String(ex.id).padStart(3,'0')"></div>
+                   x-text="'EX-' + padId(ex.id, 3)"></div>
             </div>
             <div class="text-right shrink-0">
               <div class="mono text-[12px] text-ink-soft" x-text="ex.started_at ? fmtElapsed(ex.started_at) : '—'"></div>
@@ -104,58 +108,4 @@
   </div>
 
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-function dashboard() {
-  return {
-    loading: true,
-    scenarios: [],
-    exercises: [],
-    isF: false,
-    canManageScenarios: false,
-    liveElapsedInterval: null,
-    liveElapsed: '—',
-
-    get liveExercise() {
-      return this.exercises.find(e => e.state === 'active') || null;
-    },
-
-    async init() {
-      const [mr, er] = await Promise.all([
-        apiFetch('/auth/me'),
-        apiFetch('/exercises'),
-      ]);
-      if (mr && mr.ok) {
-        const me = await readJson(mr);
-        this.isF = me?.role === 'facilitator';
-        this.canManageScenarios = this.isF;
-      }
-      if (er && er.ok) this.exercises = await readJson(er, []);
-      if (this.canManageScenarios) {
-        const sr = await apiFetch('/scenarios');
-        if (sr && sr.ok) this.scenarios = await readJson(sr, []);
-      }
-      this.loading = false;
-
-      if (this.liveExercise) {
-        this.liveElapsed = fmtElapsed(this.liveExercise.started_at);
-        this.liveElapsedInterval = setInterval(() => {
-          if (this.liveExercise) this.liveElapsed = fmtElapsed(this.liveExercise.started_at);
-        }, 10000);
-      }
-    },
-
-    stateBadge(state) { return stateBadge(state); },
-    fmtElapsed(s)     { return fmtElapsed(s); },
-    fmtAgo(s)         { return fmtAgo(s); },
-    fmtTime(s)        { return fmtTime(s); },
-
-    destroy() {
-      if (this.liveElapsedInterval) clearInterval(this.liveElapsedInterval);
-    },
-  }
-}
-</script>
 {% endblock %}

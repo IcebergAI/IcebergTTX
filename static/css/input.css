@@ -1,6 +1,12 @@
 @import "tailwindcss";
 @import "./iceberg.css";
 
+/* Utility classes are now also emitted from the Alpine component JS (e.g. the
+   teamColor() / state-badge maps in app.js), so scan the same-origin JS the app
+   ships — excluding the vendored Alpine build. (#77) */
+@source "../js/app.js";
+@source "../js/pages";
+
 /* Map Tailwind's colour/font utilities onto the shared Iceberg tokens defined
    in iceberg.css. `inline` makes utilities reference the CSS variables directly
    (e.g. `bg-surface` -> var(--surface)) so light/dark switch with the tokens. */

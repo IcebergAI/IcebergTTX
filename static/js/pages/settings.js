@@ -1,0 +1,149 @@
+// Settings page component — registered via Alpine.data (strict CSP, #77).
+
+document.addEventListener('alpine:init', () => {
+  Alpine.data('settingsPage', () => ({
+    me: null,
+    displayName: '',
+    savingProfile: false,
+    profileMessage: '',
+    theme: localStorage.getItem('dt_theme') || 'system',
+    viewRole: localStorage.getItem('dt_view_role') || 'facilitator',
+    viewTeam: localStorage.getItem('dt_view_team') || 'it_ops',
+    previewTeams: [],
+    samples: [],
+    loadingSamples: true,
+    sampleMessage: '',
+
+    get canSwitch() { return !!this.me?.can_switch_roles; },
+    get previewTeamOptions() {
+      const teams = new Map();
+      const addTeam = (team) => {
+        const id = typeof team === 'string' ? team : team?.id;
+        if (!id) return;
+        teams.set(id, {
+          id,
+          label: typeof team === 'string' ? team : (team.label || id),
+        });
+      };
+      for (const team of this.previewTeams) addTeam(team);
+      addTeam(this.me?.team);
+      addTeam(this.viewTeam);
+      if (teams.size === 0) {
+        [
+          { id: 'it_ops', label: 'IT Operations' },
+          { id: 'legal', label: 'Legal' },
+          { id: 'exec', label: 'Executive' },
+          { id: 'comms', label: 'Communications' },
+        ].forEach(addTeam);
+      }
+      return [...teams.values()];
+    },
+
+    async init() {
+      const meResp = await apiFetch('/auth/me');
+      this.me = await readJson(meResp);
+      this.displayName = this.me?.display_name || '';
+      if (this.me?.role) this.viewRole = this.me.role;
+      if (this.me?.actual_role && this.me.actual_role !== this.me.role && this.me?.team) {
+        this.viewTeam = this.me.team;
+      }
+      if (this.canSwitch) await Promise.all([this.loadSamples(), this.loadPreviewTeams()]);
+    },
+
+    async saveProfile() {
+      this.savingProfile = true;
+      this.profileMessage = '';
+      const resp = await apiFetch('/auth/me', {
+        method: 'PUT',
+        body: JSON.stringify({ display_name: this.displayName }),
+      });
+      this.savingProfile = false;
+      this.profileMessage = resp && resp.ok ? 'Saved.' : 'Could not save name.';
+    },
+
+    setTheme(value) {
+      this.theme = value;
+      applyTheme(this.theme);
+    },
+
+    setCookie(name, value) {
+      document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
+    },
+
+    setPreviewRole(role) {
+      this.viewRole = role;
+      localStorage.setItem('dt_view_role', role);
+      this.setCookie('dt_view_role', role);
+      this.setPreviewTeam();
+      window.location.reload();
+    },
+
+    setPreviewTeam() {
+      const team = (this.viewTeam || 'it_ops').trim();
+      this.viewTeam = team;
+      localStorage.setItem('dt_view_team', team);
+      this.setCookie('dt_view_team', team);
+    },
+
+    teamLabel(team) {
+      if (!team?.label || team.label === team.id) return team?.id || '';
+      return `${team.label} (${team.id})`;
+    },
+
+    async loadPreviewTeams() {
+      const resp = await apiFetch('/scenarios');
+      const scenarios = await readJson(resp, []);
+      const details = await Promise.all(
+        scenarios.map(async (scenario) => {
+          const detailResp = await apiFetch(`/scenarios/${scenario.id}`);
+          return readJson(detailResp, null);
+        })
+      );
+      const teams = [];
+      const seen = new Set();
+      for (const scenario of details) {
+        for (const team of (scenario?.definition?.participant_teams || [])) {
+          if (!team?.id || seen.has(team.id)) continue;
+          seen.add(team.id);
+          teams.push({ id: team.id, label: team.label || team.id });
+        }
+      }
+      this.previewTeams = teams;
+    },
+
+    async loadSamples() {
+      this.loadingSamples = true;
+      const resp = await apiFetch('/settings/samples/scenarios');
+      this.samples = await readJson(resp, []);
+      this.loadingSamples = false;
+    },
+
+    async loadSample(sample) {
+      this.sampleMessage = '';
+      const resp = await apiFetch(`/settings/samples/scenarios/${sample.id}/load`, {
+        method: 'POST',
+      });
+      const data = await readJson(resp);
+      if (resp && resp.ok) {
+        this.sampleMessage = data.created ? 'Scenario loaded.' : 'Scenario already exists.';
+      } else {
+        this.sampleMessage = 'Could not load sample.';
+      }
+    },
+
+    async createDemo(sample) {
+      this.sampleMessage = '';
+      const resp = await apiFetch(`/settings/samples/scenarios/${sample.id}/demo-exercise`, {
+        method: 'POST',
+      });
+      const data = await readJson(resp);
+      if (resp && resp.ok) {
+        this.sampleMessage = 'Demo exercise created.';
+        const path = this.viewRole === 'facilitator' ? 'facilitate' : 'participate';
+        window.location.href = `/exercises/${data.exercise.id}/${path}`;
+      } else {
+        this.sampleMessage = 'Could not create demo exercise.';
+      }
+    },
+  }));
+});

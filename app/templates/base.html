@@ -24,44 +24,22 @@
       color-scheme: light;
     }
   </style>
-  <script>
-    (() => {
-      const maxAge = 60 * 60 * 24 * 365;
-      const readCookie = (name) => {
-        const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
-        return match ? decodeURIComponent(match[1]) : null;
-      };
-      const writeCookie = (name, value) => {
-        document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; samesite=lax`;
-      };
-      const readLocal = (key) => {
-        try { return localStorage.getItem(key); } catch { return null; }
-      };
-      const writeLocal = (key, value) => {
-        try { localStorage.setItem(key, value); } catch {}
-      };
-      const storedTheme = readLocal('dt_theme');
-      const cookieTheme = readCookie('dt_theme');
-      const theme = storedTheme || (['system', 'light', 'dark'].includes(cookieTheme) ? cookieTheme : 'system');
-      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const resolvedTheme = theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
-      const resolvedBg = resolvedTheme === 'dark' ? 'oklch(0.185 0.02 256)' : 'oklch(0.984 0.006 240)';
-      document.documentElement.dataset.theme = resolvedTheme;
-      document.documentElement.style.backgroundColor = resolvedBg;
-      document.documentElement.style.colorScheme = resolvedTheme;
-      document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', resolvedTheme);
-      document.addEventListener('DOMContentLoaded', () => {
-        document.body.style.backgroundColor = resolvedBg;
-      }, { once: true });
-      writeCookie('dt_theme', theme);
-      writeCookie('dt_resolved_theme', resolvedTheme);
-      if (!storedTheme) writeLocal('dt_theme', theme);
-    })();
-  </script>
+  <!-- Theme/FOUC bootstrap: synchronous (non-defer) so it runs before first paint. -->
+  <script src="/static/js/theme-boot.js"></script>
   <link rel="stylesheet" href="/static/css/output.css" />
   <link rel="stylesheet" href="/static/css/fonts.css" />
-  <!-- Self-hosted, version-pinned AlpineJS (no third-party CDN) — see #69. -->
-  <script defer src="/static/js/alpine-3.15.12.min.js"></script>
+  <!-- Strict-CSP (#77): shared runtime + Alpine.data registries load BEFORE the
+       @alpinejs/csp build so their alpine:init listeners exist when it fires.
+       Self-hosted, version-pinned — no third-party CDN, no inline scripts. -->
+  <script defer src="/static/js/app.js"></script>
+  <script defer src="/static/js/pages/auth.js"></script>
+  <script defer src="/static/js/pages/dashboard.js"></script>
+  <script defer src="/static/js/pages/settings.js"></script>
+  <script defer src="/static/js/pages/scenarios.js"></script>
+  <script defer src="/static/js/pages/exercises.js"></script>
+  <script defer src="/static/js/pages/comms.js"></script>
+  <script defer src="/static/js/pages/admin.js"></script>
+  <script defer src="/static/js/vendor/alpine-csp-3.15.12.min.js"></script>
 </head>
 <body>
   <div class="brandbar"></div>
@@ -87,7 +65,7 @@
           <a href="/dashboard" class="rail-link" :class="isActive('/dashboard') && 'is-active'">
             <span class="rail-dot"></span><span class="rail-link-label">Home</span>
           </a>
-          <a href="/scenarios" x-show="user?.role === 'facilitator'"
+          <a href="/scenarios" x-show="isFacilitator"
              class="rail-link" :class="isActive('/scenarios') && 'is-active'">
             <span class="rail-dot"></span><span class="rail-link-label">Scenarios</span>
             <span x-show="scenarioCount" class="rail-link-meta mono" x-text="scenarioCount"></span>
@@ -96,13 +74,13 @@
             <span class="rail-dot"></span><span class="rail-link-label">Exercises</span>
             <template x-if="liveExercise"><span class="rail-link-meta mono">live</span></template>
           </a>
-          <a :href="liveExercise ? '/exercises/' + liveExercise.id + '/communications' : '/communications'"
+          <a :href="commsHref"
              class="rail-link" :class="currentPath.includes('/communications') && 'is-active'">
             <span class="rail-dot"></span><span class="rail-link-label">Comms</span>
           </a>
         </div>
 
-        <div class="rail-group" x-show="user?.is_admin">
+        <div class="rail-group" x-show="isAdmin">
           <div class="rail-group-label">Administration</div>
           <a href="/admin/audit" class="rail-link" :class="isActive('/admin/audit') && 'is-active'">
             <span class="rail-dot"></span><span class="rail-link-label">Audit log</span>
@@ -121,10 +99,9 @@
 
         <!-- Live-now widget -->
         <template x-if="liveExercise">
-          <a :href="'/exercises/' + liveExercise.id + (user?.role === 'facilitator' ? '/facilitate' : '/participate')"
-             class="rail-live">
+          <a :href="liveHref" class="rail-live">
             <div class="rail-live-title" x-text="liveExercise.title"></div>
-            <div class="rail-live-sub" x-text="'Live · EX-' + String(liveExercise.id).padStart(2,'0')"></div>
+            <div class="rail-live-sub" x-text="liveSub"></div>
           </a>
         </template>
       </nav>
@@ -134,10 +111,10 @@
         <div class="rail-id">
           <div class="rail-avatar" x-text="initials"></div>
           <div class="rail-id-meta">
-            <div class="rail-id-name" x-text="user?.display_name || user?.email"></div>
-            <div class="rail-id-role" x-text="user?.role"></div>
-            <div x-show="user?.actual_role && user.actual_role !== user.role"
-                 class="rail-id-preview" x-text="user ? 'Previewing as ' + user.role : ''"></div>
+            <div class="rail-id-name" x-text="displayName"></div>
+            <div class="rail-id-role" x-text="roleLabel"></div>
+            <div x-show="hasPreview"
+                 class="rail-id-preview" x-text="previewLabel"></div>
           </div>
           <button @click="logout()" class="rail-logout">Sign out</button>
         </div>
@@ -160,297 +137,5 @@
     </div>
   </div>
 
-  <script>
-    // ── Shared auth helpers ──────────────────────────────────────────────────
-
-    function getToken() {
-      return localStorage.getItem('dt_token');
-    }
-
-    function isAuthPage() {
-      return ['/login', '/register'].includes(window.location.pathname);
-    }
-
-    function clearAuthState() {
-      localStorage.removeItem('dt_token');
-      localStorage.removeItem('dt_view_role');
-      localStorage.removeItem('dt_view_team');
-      document.cookie = 'access_token=; Max-Age=0; path=/';
-      document.cookie = 'dt_view_role=; Max-Age=0; path=/';
-      document.cookie = 'dt_view_team=; Max-Age=0; path=/';
-    }
-
-    async function apiFetch(path, options = {}) {
-      const token = getToken();
-      const headers = { ...(options.headers || {}) };
-      if (!(options.body instanceof FormData) && !headers['Content-Type']) {
-        headers['Content-Type'] = 'application/json';
-      }
-      if (token) headers['Authorization'] = 'Bearer ' + token;
-      const apiPath = path.startsWith('/api/') ? path : '/api' + path;
-      let resp;
-      try {
-        resp = await fetch(apiPath, { ...options, headers });
-      } catch {
-        return null;
-      }
-      if (resp.status === 401) {
-        clearAuthState();
-        if (!isAuthPage()) window.location.href = '/login';
-        return null;
-      }
-      return resp;
-    }
-
-    async function readJson(resp, fallback = null) {
-      if (!resp || !resp.ok) return fallback;
-      try {
-        return await resp.json();
-      } catch {
-        return fallback;
-      }
-    }
-
-    function setPreferenceCookie(name, value) {
-      document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
-    }
-
-    function resolveTheme(theme) {
-      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-      return theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
-    }
-
-    function applyTheme(theme) {
-      localStorage.setItem('dt_theme', theme);
-      const resolvedTheme = resolveTheme(theme);
-      const resolvedBg = resolvedTheme === 'dark' ? 'oklch(0.185 0.02 256)' : 'oklch(0.984 0.006 240)';
-      document.documentElement.dataset.theme = resolvedTheme;
-      document.documentElement.style.backgroundColor = resolvedBg;
-      document.body.style.backgroundColor = resolvedBg;
-      document.documentElement.style.colorScheme = resolvedTheme;
-      document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', resolvedTheme);
-      setPreferenceCookie('dt_theme', theme);
-      setPreferenceCookie('dt_resolved_theme', resolvedTheme);
-    }
-
-    function shouldSoftNavigate(event, anchor) {
-      if (!anchor || event.defaultPrevented || anchor.hasAttribute('download')) return false;
-      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
-      if (anchor.target && anchor.target !== '_self') return false;
-      const url = new URL(anchor.href, window.location.href);
-      if (!['http:', 'https:'].includes(url.protocol)) return false;
-      if (url.origin !== window.location.origin) return false;
-      if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/static/')) return false;
-      if (url.pathname === window.location.pathname && url.search === window.location.search) return false;
-      return true;
-    }
-
-    function installSoftNavigationScripts(nextDoc) {
-      const scripts = [...nextDoc.body.querySelectorAll('script')]
-        .filter(script => !script.src && !script.textContent.includes('Shared auth helpers'));
-      for (const source of scripts) {
-        let code = source.textContent || '';
-        if (!code.trim()) continue;
-        code = code.replace(/\blet\s+_keyCounter\s*=\s*0\s*;/, 'window._keyCounter = window._keyCounter || 0;');
-        const script = document.createElement('script');
-        script.dataset.softNavigationScript = 'true';
-        script.textContent = code;
-        document.body.appendChild(script);
-        script.remove();
-      }
-    }
-
-    async function swapMainContent(nextDoc, nextUrl, replaceState = false) {
-      const main = document.getElementById('app-main');
-      const nextMain = nextDoc.getElementById('app-main') || nextDoc.querySelector('main');
-      if (!main || !nextMain) return false;
-
-      window.Alpine?.destroyTree?.(main);
-      installSoftNavigationScripts(nextDoc);
-      main.innerHTML = nextMain.innerHTML;
-      document.title = nextDoc.title || document.title;
-      window.Alpine?.initTree?.(main);
-
-      if (replaceState) {
-        window.history.replaceState({ icebergTtxSoftNavigation: true }, '', nextUrl.href);
-      } else {
-        window.history.pushState({ icebergTtxSoftNavigation: true }, '', nextUrl.href);
-      }
-      document.dispatchEvent(new CustomEvent('dt:soft-navigated', {
-        detail: { path: nextUrl.pathname, url: nextUrl.href },
-      }));
-      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-      return true;
-    }
-
-    async function softNavigate(href, options = {}) {
-      const url = new URL(href, window.location.href);
-      const main = document.getElementById('app-main');
-      if (!main) {
-        window.location.href = url.href;
-        return;
-      }
-
-      let html;
-      let finalUrl = url;
-      try {
-        const resp = await fetch(url.href, {
-          credentials: 'same-origin',
-          headers: { Accept: 'text/html, application/xhtml+xml' },
-        });
-        if (!resp.ok || !resp.headers.get('content-type')?.includes('text/html')) {
-          throw new Error('Soft navigation received a non-HTML response.');
-        }
-        html = await resp.text();
-        finalUrl = new URL(resp.url || url.href);
-      } catch {
-        window.location.href = url.href;
-        return;
-      }
-
-      const nextDoc = new DOMParser().parseFromString(html, 'text/html');
-      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      const update = async () => {
-        main.classList.remove('is-leaving');
-        const swapped = await swapMainContent(nextDoc, finalUrl, options.replaceState);
-        if (!swapped) throw new Error('Soft navigation response did not include a main region.');
-      };
-
-      try {
-        if (document.startViewTransition && !reducedMotion) {
-          await document.startViewTransition(update).finished;
-        } else {
-          main.classList.add('is-leaving');
-          main.classList.add('is-entering');
-          await update();
-          requestAnimationFrame(() => main.classList.remove('is-entering'));
-        }
-      } catch {
-        window.location.href = finalUrl.href;
-      }
-    }
-
-    document.addEventListener('click', (event) => {
-      const anchor = event.target.closest?.('a[href]');
-      if (!shouldSoftNavigate(event, anchor)) return;
-      event.preventDefault();
-      softNavigate(anchor.href);
-    });
-    window.addEventListener('popstate', () => {
-      softNavigate(window.location.href, { replaceState: true });
-    });
-
-    // ── Format helpers ───────────────────────────────────────────────────────
-
-    function fmtElapsed(isoStr) {
-      if (!isoStr) return '—';
-      const s = Math.max(0, Math.floor((Date.now() - new Date(isoStr)) / 1000));
-      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-      return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
-    }
-    function fmtAgo(isoStr) {
-      if (!isoStr) return '—';
-      const diff = (Date.now() - new Date(isoStr)) / 1000;
-      if (diff < 60)    return `${Math.floor(diff)}s ago`;
-      if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
-      if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-      return `${Math.floor(diff / 86400)}d ago`;
-    }
-    function fmtTime(isoStr) {
-      if (!isoStr) return '—';
-      return new Date(isoStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    function teamColor(id) {
-      const map = {
-        it_ops: 'bg-sky-100/70 text-sky-800 ring-sky-200',
-        legal:  'bg-violet-100/70 text-violet-800 ring-violet-200',
-        exec:   'bg-amber-100/70 text-amber-900 ring-amber-200',
-        comms:  'bg-emerald-100/70 text-emerald-800 ring-emerald-200',
-      };
-      return map[id] || 'pill mono';
-    }
-    function stateBadge(state) {
-      const map = {
-        active:    `<span class="pill bg-st-active"><span class="live-dot"></span>active</span>`,
-        paused:    `<span class="pill bg-st-paused"><span class="dot" style="background:var(--c-warn)"></span>paused</span>`,
-        draft:     `<span class="pill bg-st-draft"><span class="dot" style="background:var(--muted)"></span>draft</span>`,
-        completed: `<span class="pill bg-st-completed"><span class="dot" style="background:var(--accent-ink)"></span>completed</span>`,
-      };
-      return map[state] || '';
-    }
-
-    // ── Rail nav component ───────────────────────────────────────────────────
-
-    function sidebarNav() {
-      return {
-        user: null,
-        liveExercise: null,
-        scenarioCount: null,
-        currentPath: window.location.pathname,
-
-        async init() {
-          document.addEventListener('dt:soft-navigated', (event) => {
-            this.currentPath = event.detail.path;
-          });
-          if (isAuthPage()) return;
-          const token = getToken();
-          if (!token) return;
-          const [mr, er] = await Promise.all([
-            apiFetch('/auth/me'),
-            apiFetch('/exercises'),
-          ]);
-          this.user = await readJson(mr);
-          if (er && er.ok) {
-            const exs = await readJson(er, []);
-            this.liveExercise = exs.find(e => e.state === 'active') || null;
-          }
-          if (this.user?.role === 'facilitator') {
-            const sr = await apiFetch('/scenarios');
-            const scenarios = await readJson(sr, []);
-            this.scenarioCount = scenarios.length > 0 ? scenarios.length : null;
-          } else {
-            this.scenarioCount = null;
-          }
-        },
-
-        get initials() {
-          const name = this.user?.display_name || this.user?.email || '';
-          return name.split(/[\s@]/).filter(Boolean).map(x => x[0]).join('').slice(0, 2).toUpperCase();
-        },
-
-        get exercisesActive() {
-          return this.currentPath.startsWith('/exercises') &&
-            !this.currentPath.includes('/communications');
-        },
-
-        get crumbLabel() {
-          const p = this.currentPath;
-          if (p.includes('/communications')) return 'Communications';
-          if (p === '/' || p.startsWith('/dashboard')) return 'Command center';
-          if (p.startsWith('/scenarios')) return 'Scenarios';
-          if (p.startsWith('/exercises')) return 'Exercises';
-          if (p.startsWith('/admin/audit')) return 'Audit log';
-          if (p.startsWith('/help')) return 'Help';
-          if (p.startsWith('/settings')) return 'Settings';
-          const seg = p.replace(/^\/+/, '').split('/')[0] || 'Home';
-          return seg.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        },
-
-        isActive(path) {
-          return this.currentPath === path || this.currentPath.startsWith(path + '/');
-        },
-
-        async logout() {
-          try {
-            await fetch('/api/auth/logout', { method: 'POST' });
-          } catch {}
-          clearAuthState();
-          window.location.href = '/login';
-        }
-      }
-    }
-  </script>
-
-  {% block scripts %}{% endblock %}
 </body>
 </html>
