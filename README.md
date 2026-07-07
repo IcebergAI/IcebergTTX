@@ -206,6 +206,76 @@ spikes, `audit.settings_updated` / role changes, and unexpected `*.export` event
 Treat the SIEM store as append-only with restricted read/write access, and set a
 retention period that meets your legal/contractual requirements.
 
+## Single sign-on (OIDC / SSO)
+
+IcebergTTX can authenticate users against an external OpenID Connect identity
+provider (IdP) instead of, or alongside, the built-in email/password store. The
+flow is **Authorization Code + PKCE**: `GET /api/auth/oidc/{provider}/login`
+redirects to the IdP; `GET /api/auth/oidc/{provider}/callback` validates the
+response (`state`, `nonce`, and the ID token's signature/issuer/audience/expiry via
+the IdP's JWKS) and then issues the normal app session cookie — so every existing
+role/authorization check is unchanged.
+
+- **`AUTH_MODE`** — `local` (password only), `oidc` (SSO only; local login/register
+  are disabled), or `both` (default). Enabled providers each render a "Sign in
+  with …" button on the login page; multiple providers can run concurrently.
+- **Provisioning** — first-time SSO users are just-in-time created as
+  **participant** (the IdP can never self-assign a privileged role). A returning
+  identity is matched on its stable `sub`; a *verified* email that matches an
+  existing local account links the two (preserving that account's role). A disabled
+  account (`is_active=false`) is refused regardless of the IdP.
+- **Role mapping (optional, off by default)** — set `OIDC_<PROVIDER>_ROLE_CLAIM`
+  and `OIDC_<PROVIDER>_ROLE_MAP` (`group=role,…`) to elevate members of specific
+  IdP groups. Unmapped users stay participants.
+- **Secrets** — client secrets are read only from the environment
+  (`OIDC_*_CLIENT_SECRET`); they are never stored in the database or logged. SSO
+  login/link/JIT-provision events are audited (`auth.oidc_login`, `auth.oidc_link`,
+  `auth.jit_provision`) without tokens or codes.
+
+Set `OIDC_REDIRECT_BASE_URL` to the app's public `https://` origin (no trailing
+slash) so the callback URL matches what you register with the IdP.
+
+### Microsoft Entra ID
+
+1. **Entra admin center → App registrations → New registration.** Add a **Web**
+   redirect URI: `https://<your-host>/api/auth/oidc/entra/callback`.
+2. **Certificates & secrets → New client secret**; copy the value.
+3. Copy the **Application (client) ID** and **Directory (tenant) ID**. Use the
+   specific tenant ID — never `common`/`organizations` — so issuer validation is
+   exact.
+4. (Optional roles) **App roles** → define roles, assign users/groups; they arrive
+   in the `roles` claim. Set `OIDC_ENTRA_ROLE_CLAIM=roles` and map them.
+5. Configure:
+   ```bash
+   AUTH_MODE=both
+   OIDC_ENTRA_ENABLED=true
+   OIDC_ENTRA_TENANT_ID=<tenant-guid>
+   OIDC_ENTRA_CLIENT_ID=<client-id>
+   OIDC_ENTRA_CLIENT_SECRET=<client-secret>
+   # OIDC_ENTRA_ROLE_CLAIM=roles
+   # OIDC_ENTRA_ROLE_MAP=ttx-facilitators=facilitator
+   ```
+
+### Authentik (self-hostable — a good test IdP)
+
+1. **Providers → Create → OAuth2/OpenID Provider.** Client type **Confidential**;
+   add redirect URI `https://<your-host>/api/auth/oidc/authentik/callback`. Copy the
+   **Client ID** and **Client Secret**.
+2. **Applications → Create**, choose a **slug**, and bind the provider. The
+   discovery URL is `https://<authentik-host>/application/o/<slug>/.well-known/openid-configuration`.
+3. (Optional roles) ensure the `groups` scope is on the provider; group names arrive
+   in the `groups` claim.
+4. Configure:
+   ```bash
+   AUTH_MODE=both
+   OIDC_AUTHENTIK_ENABLED=true
+   OIDC_AUTHENTIK_BASE_URL=https://<authentik-host>
+   OIDC_AUTHENTIK_APP_SLUG=<slug>
+   OIDC_AUTHENTIK_CLIENT_ID=<client-id>
+   OIDC_AUTHENTIK_CLIENT_SECRET=<client-secret>
+   # OIDC_AUTHENTIK_ROLE_MAP=ttx-facilitators=facilitator
+   ```
+
 ## Running Tests
 
 ```bash

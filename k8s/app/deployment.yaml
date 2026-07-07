@@ -136,6 +136,78 @@ spec:
                 secretKeyRef:
                   name: iceberg-ttx-secrets
                   key: SIEM_HTTP_TOKEN
+            # OIDC / SSO (#25) — non-secret routing from the ConfigMap; the client
+            # secrets come from the Secret. A disabled provider needs no secret.
+            - name: AUTH_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: AUTH_MODE
+            - name: OIDC_REDIRECT_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_REDIRECT_BASE_URL
+            - name: OIDC_ENTRA_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_ENTRA_ENABLED
+            - name: OIDC_ENTRA_TENANT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_ENTRA_TENANT_ID
+            - name: OIDC_ENTRA_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_ENTRA_CLIENT_ID
+            - name: OIDC_ENTRA_ROLE_CLAIM
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_ENTRA_ROLE_CLAIM
+            - name: OIDC_ENTRA_ROLE_MAP
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_ENTRA_ROLE_MAP
+            - name: OIDC_ENTRA_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: iceberg-ttx-secrets
+                  key: OIDC_ENTRA_CLIENT_SECRET
+            - name: OIDC_AUTHENTIK_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_AUTHENTIK_ENABLED
+            - name: OIDC_AUTHENTIK_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_AUTHENTIK_BASE_URL
+            - name: OIDC_AUTHENTIK_APP_SLUG
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_AUTHENTIK_APP_SLUG
+            - name: OIDC_AUTHENTIK_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_AUTHENTIK_CLIENT_ID
+            - name: OIDC_AUTHENTIK_ROLE_MAP
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_AUTHENTIK_ROLE_MAP
+            - name: OIDC_AUTHENTIK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: iceberg-ttx-secrets
+                  key: OIDC_AUTHENTIK_CLIENT_SECRET
           volumeMounts:
             - name: uploads
               mountPath: /app/uploads

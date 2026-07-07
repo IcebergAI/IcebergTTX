@@ -9,11 +9,22 @@ from fastapi import APIRouter, Cookie, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app.config import settings
 from app.services.auth_service import decode_access_token
+from app.services.oidc import service as oidc_service
 from app.services.role_preview import effective_role
 
 router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="app/templates")
+
+
+def _auth_context() -> dict:
+    """SSO buttons + local-form visibility for the auth pages (#25)."""
+    oidc_service.ensure_registered()
+    return {
+        "local_auth": settings.local_auth_enabled,
+        "oidc_providers": [(p.key, p.display_name) for p in oidc_service.registered_providers()],
+    }
 
 
 class UIRedirect(Exception):
@@ -108,14 +119,18 @@ def index(user: UserContext):
 def login_page(request: Request, user: UserContext):
     if user:
         return RedirectResponse("/dashboard")
-    return templates.TemplateResponse(request, "auth/login.html")
+    return templates.TemplateResponse(request, "auth/login.html", _auth_context())
 
 
 @router.get("/register", response_class=HTMLResponse)
 def register_page(request: Request, user: UserContext):
     if user:
         return RedirectResponse("/dashboard")
-    return templates.TemplateResponse(request, "auth/register.html")
+    # Self-registration is a local-auth affordance; redirect to /login when
+    # local auth is off (OIDC-only) so there's no dead form.
+    if not settings.local_auth_enabled:
+        return RedirectResponse("/login")
+    return templates.TemplateResponse(request, "auth/register.html", _auth_context())
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
