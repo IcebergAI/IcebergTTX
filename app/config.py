@@ -1,8 +1,39 @@
+from dataclasses import dataclass, field
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Well-known insecure default. Production must override SECRET_KEY (see #9).
 DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"  # nosec B105 - sentinel, rejected in prod
 MIN_SECRET_KEY_LENGTH = 32
+
+# Auth modes (#25). Governs whether the local email/password store, OIDC SSO, or
+# both are available. "oidc" disables the local login/register endpoints + forms.
+AUTH_MODE_LOCAL = "local"
+AUTH_MODE_OIDC = "oidc"
+AUTH_MODE_BOTH = "both"
+
+# OIDC provider keys shipped with adapters (#25). The registry in
+# app/services/oidc maps these to adapter implementations.
+OIDC_PROVIDER_KEYS = ("entra", "authentik")
+
+
+@dataclass(frozen=True)
+class OIDCProviderConfig:
+    """Resolved config for one enabled OIDC provider (built from flat env vars)."""
+
+    key: str
+    display_name: str
+    client_id: str
+    client_secret: str
+    metadata_url: str
+    scopes: str = "openid email profile"
+    # Optional group/role claim → UserRole allowlist. Empty ⇒ everyone is a
+    # participant (no self-elevation, mirrors #8).
+    role_claim: str = ""
+    role_map: dict[str, str] = field(default_factory=dict)
+    # Provider-specific: the expected issuer (Entra pins a single tenant so issuer
+    # validation is exact). Empty ⇒ trust the discovery document's issuer.
+    issuer: str = ""
 
 
 class Settings(BaseSettings):
@@ -65,6 +96,59 @@ class Settings(BaseSettings):
     siem_http_verify_tls: bool = True
     siem_http_token: str = ""  # SECRET: env-only, never persisted or logged
 
+    # OIDC / SSO (#25). auth_mode selects local | oidc | both. Each provider is
+    # enabled independently and, if enabled, contributes a login button. Client
+    # secrets are SECRETS — env-only, never a DB column, never logged. Multiple
+    # providers can run concurrently. oidc_redirect_base_url overrides the
+    # request-derived callback base (set it when behind a proxy that rewrites the
+    # host/scheme so the redirect_uri matches what the IdP has registered).
+    auth_mode: str = AUTH_MODE_BOTH
+    oidc_redirect_base_url: str = ""
+
+    # Microsoft Entra ID. oidc_entra_tenant_id MUST be a specific tenant (a GUID or
+    # verified domain) — never "common"/"organizations" — so ID-token issuer
+    # validation is exact.
+    oidc_entra_enabled: bool = False
+    oidc_entra_client_id: str = ""
+    oidc_entra_client_secret: str = ""  # SECRET
+    oidc_entra_tenant_id: str = ""
+    oidc_entra_scopes: str = "openid email profile"
+    oidc_entra_role_claim: str = ""
+    oidc_entra_role_map: str = ""  # "group=role,group2=role2"
+
+    # Authentik. Discovery URL is built from base_url + app_slug.
+    oidc_authentik_enabled: bool = False
+    oidc_authentik_client_id: str = ""
+    oidc_authentik_client_secret: str = ""  # SECRET
+    oidc_authentik_base_url: str = ""  # e.g. https://auth.example.com
+    oidc_authentik_app_slug: str = ""
+    oidc_authentik_scopes: str = "openid email profile"
+    oidc_authentik_role_claim: str = "groups"
+    oidc_authentik_role_map: str = ""  # "group=role,group2=role2"
+
+    # Auth0. Discovery is https://<domain>/.well-known/openid-configuration. Roles
+    # are not sent by default — expose them via an Action as a namespaced custom
+    # claim and set oidc_auth0_role_claim to it (e.g. https://<app>/roles).
+    oidc_auth0_enabled: bool = False
+    oidc_auth0_client_id: str = ""
+    oidc_auth0_client_secret: str = ""  # SECRET
+    oidc_auth0_domain: str = ""  # e.g. your-tenant.us.auth0.com
+    oidc_auth0_scopes: str = "openid email profile"
+    oidc_auth0_role_claim: str = ""
+    oidc_auth0_role_map: str = ""  # "group=role,group2=role2"
+
+    # Okta. Discovery uses the org server (https://<domain>/.well-known/...) or a
+    # custom authorization server when oidc_okta_auth_server is set (commonly
+    # "default"): https://<domain>/oauth2/<server>/.well-known/openid-configuration.
+    oidc_okta_enabled: bool = False
+    oidc_okta_client_id: str = ""
+    oidc_okta_client_secret: str = ""  # SECRET
+    oidc_okta_domain: str = ""  # e.g. dev-12345.okta.com
+    oidc_okta_auth_server: str = ""  # "" = org server; else e.g. "default"
+    oidc_okta_scopes: str = "openid email profile"
+    oidc_okta_role_claim: str = "groups"
+    oidc_okta_role_map: str = ""  # "group=role,group2=role2"
+
     @property
     def secret_key_is_insecure(self) -> bool:
         return (
@@ -89,10 +173,114 @@ class Settings(BaseSettings):
         parts = (p.strip().lower() for p in self.siem_methods.split(","))
         return [m for m in parts if m in allowed]
 
+    @property
+    def local_auth_enabled(self) -> bool:
+        return self.auth_mode in (AUTH_MODE_LOCAL, AUTH_MODE_BOTH)
+
+    @property
+    def oidc_auth_enabled(self) -> bool:
+        return self.auth_mode in (AUTH_MODE_OIDC, AUTH_MODE_BOTH)
+
+    def enabled_oidc_providers(self) -> list[OIDCProviderConfig]:
+        """Build the config for every enabled OIDC provider (#25).
+
+        Only providers whose ``*_enabled`` flag is set and whose required inputs
+        resolve to a metadata URL are returned; providers with blank inputs are
+        skipped (validate_settings() fails fast on that in production).
+        """
+        providers: list[OIDCProviderConfig] = []
+        if self.oidc_auth_enabled and self.oidc_entra_enabled and self.oidc_entra_tenant_id:
+            authority = f"https://login.microsoftonline.com/{self.oidc_entra_tenant_id}/v2.0"
+            providers.append(
+                OIDCProviderConfig(
+                    key="entra",
+                    display_name="Microsoft Entra ID",
+                    client_id=self.oidc_entra_client_id,
+                    client_secret=self.oidc_entra_client_secret,
+                    metadata_url=f"{authority}/.well-known/openid-configuration",
+                    issuer=authority,
+                    scopes=self.oidc_entra_scopes,
+                    role_claim=self.oidc_entra_role_claim,
+                    role_map=_parse_role_map(self.oidc_entra_role_map),
+                )
+            )
+        if (
+            self.oidc_auth_enabled
+            and self.oidc_authentik_enabled
+            and self.oidc_authentik_base_url
+            and self.oidc_authentik_app_slug
+        ):
+            base = self.oidc_authentik_base_url.rstrip("/")
+            slug = self.oidc_authentik_app_slug
+            providers.append(
+                OIDCProviderConfig(
+                    key="authentik",
+                    display_name="Authentik",
+                    client_id=self.oidc_authentik_client_id,
+                    client_secret=self.oidc_authentik_client_secret,
+                    metadata_url=f"{base}/application/o/{slug}/.well-known/openid-configuration",
+                    scopes=self.oidc_authentik_scopes,
+                    role_claim=self.oidc_authentik_role_claim,
+                    role_map=_parse_role_map(self.oidc_authentik_role_map),
+                )
+            )
+        if self.oidc_auth_enabled and self.oidc_auth0_enabled and self.oidc_auth0_domain:
+            domain = self.oidc_auth0_domain.rstrip("/")
+            providers.append(
+                OIDCProviderConfig(
+                    key="auth0",
+                    display_name="Auth0",
+                    client_id=self.oidc_auth0_client_id,
+                    client_secret=self.oidc_auth0_client_secret,
+                    metadata_url=f"https://{domain}/.well-known/openid-configuration",
+                    scopes=self.oidc_auth0_scopes,
+                    role_claim=self.oidc_auth0_role_claim,
+                    role_map=_parse_role_map(self.oidc_auth0_role_map),
+                )
+            )
+        if self.oidc_auth_enabled and self.oidc_okta_enabled and self.oidc_okta_domain:
+            domain = self.oidc_okta_domain.rstrip("/")
+            server = self.oidc_okta_auth_server.strip("/")
+            path = f"/oauth2/{server}" if server else ""
+            providers.append(
+                OIDCProviderConfig(
+                    key="okta",
+                    display_name="Okta",
+                    client_id=self.oidc_okta_client_id,
+                    client_secret=self.oidc_okta_client_secret,
+                    metadata_url=f"https://{domain}{path}/.well-known/openid-configuration",
+                    scopes=self.oidc_okta_scopes,
+                    role_claim=self.oidc_okta_role_claim,
+                    role_map=_parse_role_map(self.oidc_okta_role_map),
+                )
+            )
+        return providers
+
+
+def _parse_role_map(raw: str) -> dict[str, str]:
+    """Parse a "group=role,group2=role2" allowlist into a dict (#25).
+
+    Only maps to real UserRole values; unknown roles are dropped. Kept import-free
+    of the model to avoid a cycle — validated against UserRole where it is applied.
+    """
+    result: dict[str, str] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if not pair or "=" not in pair:
+            continue
+        group, role = (p.strip() for p in pair.split("=", 1))
+        if group and role:
+            result[group] = role
+    return result
+
 
 def validate_settings(s: Settings | None = None) -> None:
     """Fail fast on insecure production configuration. Called at startup."""
     s = s or settings
+    if s.auth_mode not in (AUTH_MODE_LOCAL, AUTH_MODE_OIDC, AUTH_MODE_BOTH):
+        raise RuntimeError(
+            f"AUTH_MODE must be one of local|oidc|both, got {s.auth_mode!r}."
+        )
     if s.dev_mode:
         return
     if s.secret_key_is_insecure:
@@ -102,6 +290,45 @@ def validate_settings(s: Settings | None = None) -> None:
             "`python -c \"import secrets; print(secrets.token_hex(32))\"` and set it "
             "via the SECRET_KEY environment variable, or set DEV_MODE=true for "
             "local development."
+        )
+    # OIDC providers that are switched on must carry credentials + discovery inputs.
+    if s.oidc_auth_enabled:
+        if s.oidc_entra_enabled and not (
+            s.oidc_entra_client_id and s.oidc_entra_client_secret and s.oidc_entra_tenant_id
+        ):
+            raise RuntimeError(
+                "OIDC_ENTRA_ENABLED is set but OIDC_ENTRA_CLIENT_ID / "
+                "OIDC_ENTRA_CLIENT_SECRET / OIDC_ENTRA_TENANT_ID are incomplete."
+            )
+        if s.oidc_authentik_enabled and not (
+            s.oidc_authentik_client_id
+            and s.oidc_authentik_client_secret
+            and s.oidc_authentik_base_url
+            and s.oidc_authentik_app_slug
+        ):
+            raise RuntimeError(
+                "OIDC_AUTHENTIK_ENABLED is set but OIDC_AUTHENTIK_CLIENT_ID / "
+                "OIDC_AUTHENTIK_CLIENT_SECRET / OIDC_AUTHENTIK_BASE_URL / "
+                "OIDC_AUTHENTIK_APP_SLUG are incomplete."
+            )
+        if s.oidc_auth0_enabled and not (
+            s.oidc_auth0_client_id and s.oidc_auth0_client_secret and s.oidc_auth0_domain
+        ):
+            raise RuntimeError(
+                "OIDC_AUTH0_ENABLED is set but OIDC_AUTH0_CLIENT_ID / "
+                "OIDC_AUTH0_CLIENT_SECRET / OIDC_AUTH0_DOMAIN are incomplete."
+            )
+        if s.oidc_okta_enabled and not (
+            s.oidc_okta_client_id and s.oidc_okta_client_secret and s.oidc_okta_domain
+        ):
+            raise RuntimeError(
+                "OIDC_OKTA_ENABLED is set but OIDC_OKTA_CLIENT_ID / "
+                "OIDC_OKTA_CLIENT_SECRET / OIDC_OKTA_DOMAIN are incomplete."
+            )
+    if s.auth_mode == AUTH_MODE_OIDC and not s.enabled_oidc_providers():
+        raise RuntimeError(
+            "AUTH_MODE=oidc but no OIDC provider is enabled/configured; users would "
+            "have no way to sign in."
         )
 
 

@@ -34,8 +34,24 @@ def _set_session_cookie(response: Response, token: str) -> None:
     )
 
 
+def _require_local_auth() -> None:
+    """Guard the local email/password endpoints when AUTH_MODE=oidc (#25)."""
+    if not settings.local_auth_enabled:
+        audit_service.emit(
+            "auth.login",
+            result="deny",
+            reason="local auth disabled",
+            severity="warning",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Local authentication is disabled; sign in via SSO.",
+        )
+
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, session: Annotated[AsyncSession, Depends(get_session)]):
+    _require_local_auth()
     if (await session.exec(select(User).where(User.email == body.email))).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
@@ -69,6 +85,7 @@ async def login(
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ):
+    _require_local_auth()
     ip = client_ip(request) or "unknown"
     rate_key = f"{ip}:{body.email}"
     if login_rate_limiter.is_limited(rate_key):
@@ -87,7 +104,11 @@ async def login(
         )
 
     user = (await session.exec(select(User).where(User.email == body.email))).first()
-    if not user or not verify_password(body.password, user.hashed_password):
+    # An OIDC-provisioned account has no local password (hashed_password is NULL) and
+    # must not authenticate here — it signs in via SSO (#25).
+    if not user or user.hashed_password is None or not verify_password(
+        body.password, user.hashed_password
+    ):
         login_rate_limiter.record_failure(rate_key)
         audit_service.emit(
             "auth.login",

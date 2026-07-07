@@ -5,6 +5,15 @@ import os
 os.environ.setdefault("DEV_MODE", "true")  # relax SECRET_KEY/cookie checks (#9, #10)
 os.environ.setdefault("AUDIT_PERSIST", "false")  # don't write audit rows to the dev DB (#23)
 
+# Enable an Authentik OIDC provider so the SSO routes are registered for tests
+# (#25). The provider is only ever exercised via a stubbed Authlib client — the
+# discovery/JWKS URLs are never fetched. AUTH_MODE stays the default "both".
+os.environ.setdefault("OIDC_AUTHENTIK_ENABLED", "true")
+os.environ.setdefault("OIDC_AUTHENTIK_BASE_URL", "https://authentik.test")
+os.environ.setdefault("OIDC_AUTHENTIK_APP_SLUG", "ttx")
+os.environ.setdefault("OIDC_AUTHENTIK_CLIENT_ID", "test-client")
+os.environ.setdefault("OIDC_AUTHENTIK_CLIENT_SECRET", "test-secret")
+
 # Spin up a real Postgres before importing the app so that the module-level
 # async engine (app.database.engine, bound at import from DATABASE_URL) and the
 # test session both target the same database. The container is reused for the

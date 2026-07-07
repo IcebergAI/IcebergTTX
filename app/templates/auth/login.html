@@ -20,6 +20,7 @@
          style="background:#fee2e2; color:#b91c1c;"
          x-text="error"></div>
 
+    {% if local_auth %}
     <form @submit.prevent="submit()" class="space-y-3.5">
       <div>
         <label class="block smallcaps text-muted mb-1">Email</label>
@@ -36,11 +37,32 @@
         <span x-text="loading ? 'Signing in…' : 'Sign in'"></span>
       </button>
     </form>
+    {% endif %}
 
+    {% if oidc_providers %}
+      {% if local_auth %}
+      <div class="flex items-center gap-3 my-5">
+        <span class="h-px flex-1" style="background: var(--line);"></span>
+        <span class="smallcaps text-muted">or</span>
+        <span class="h-px flex-1" style="background: var(--line);"></span>
+      </div>
+      {% endif %}
+      <div class="space-y-2.5">
+        {% for key, name in oidc_providers %}
+        <a href="/api/auth/oidc/{{ key }}/login"
+           class="btn btn-ghost ring-rule w-full h-9 text-[13.5px] justify-center">
+          Sign in with {{ name }}
+        </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if local_auth %}
     <p class="mt-5 text-[13px] text-center text-muted">
       No account?
       <a href="/register" class="text-ink-soft font-medium hover:underline">Register</a>
     </p>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

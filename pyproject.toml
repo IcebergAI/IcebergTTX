@@ -34,6 +34,13 @@ dependencies = [
     "anthropic>=0.40",
     "asyncpg>=0.29",
     "alembic>=1.13",
+    # OIDC / SSO (#25). authlib drives the Authorization-Code+PKCE flow, discovery,
+    # and JWKS ID-token validation; httpx is its async HTTP client (also promoted
+    # from dev for server-to-server token/JWKS fetches); itsdangerous backs the
+    # Starlette SessionMiddleware that stores the transient state/nonce/PKCE verifier.
+    "authlib>=1.6",
+    "httpx>=0.27",
+    "itsdangerous>=2.0",
 ]
 
 [project.optional-dependencies]
