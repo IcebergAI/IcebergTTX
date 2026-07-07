@@ -1,0 +1,110 @@
+# Scheduled logical backup of the Postgres database to a dedicated PVC.
+#
+# This is a starting point, NOT a turnkey backup solution: it keeps dumps on an
+# in-cluster PVC (same failure domain as the cluster) and applies simple
+# time-based retention. For production, copy the dumps off-cluster (object
+# storage) and verify restores regularly. See the README "Backup & restore"
+# section for the manual pg_dump/pg_restore procedure.
+#
+# Apply:  kubectl apply -f k8s/postgres/backup-cronjob.yaml
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backups
+  namespace: iceberg-ttx
+  labels:
+    app.kubernetes.io/name: postgres-backup
+    app.kubernetes.io/part-of: iceberg-ttx
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # storageClassName: ""  # Uncomment and set if your cluster requires a specific class
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: iceberg-ttx
+  labels:
+    app.kubernetes.io/name: postgres-backup
+    app.kubernetes.io/part-of: iceberg-ttx
+spec:
+  # 02:15 every day (cluster timezone). Adjust to your window.
+  schedule: "15 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: postgres-backup
+            app.kubernetes.io/part-of: iceberg-ttx
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: pg-dump
+              # Must match the server's major version (see k8s/postgres/statefulset.yaml).
+              image: postgres:17
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: PGHOST
+                  value: postgres
+                - name: PGUSER
+                  value: iceberg_ttx
+                - name: PGDATABASE
+                  value: iceberg_ttx
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: iceberg-ttx-secrets
+                      key: POSTGRES_PASSWORD
+                # Keep this many days of dumps on the PVC.
+                - name: RETENTION_DAYS
+                  value: "14"
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+                  out="/backups/iceberg_ttx-${ts}.dump"
+                  echo "Dumping ${PGDATABASE} to ${out}"
+                  pg_dump --format=custom --compress=9 --file="${out}"
+                  echo "Pruning dumps older than ${RETENTION_DAYS} days"
+                  find /backups -name 'iceberg_ttx-*.dump' -type f \
+                    -mtime "+${RETENTION_DAYS}" -print -delete
+                  echo "Backup complete: ${out}"
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: postgres-backups

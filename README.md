@@ -159,6 +159,89 @@ kubectl exec -n iceberg-ttx deploy/iceberg-ttx-app -- \
 
 > **Note**: The app must run as a single replica (`replicas: 1`) until the in-memory WebSocket manager is replaced with a distributed backend (e.g. Redis pub/sub). The manifests enforce this with `strategy: Recreate`.
 
+## Backup & restore
+
+All persistent state lives in two places: the **PostgreSQL database** (users,
+scenarios, exercises, injects, responses, communications, audit events) and the
+**`uploads/` volume** (inject file attachments). Back up both — a database dump
+alone will reference attachment files that no longer exist. Take backups on a
+regular schedule; without them a lost volume or PVC means losing the exercise
+record.
+
+Alembic self-migrates on startup, so a dump taken from an **older** app version
+restores cleanly into a **newer** one — the schema is upgraded to head
+automatically on the next boot. Restoring into an **older** app than the dump was
+taken from is not supported.
+
+> Postgres `pg_dump`/`pg_restore` are version-sensitive: run them from the same
+> major version as the server (the images here are `postgres:17`). The examples
+> use the custom format (`-Fc`), which is compressed and restorable with
+> `pg_restore`.
+
+### Docker Compose
+
+```bash
+# --- Database ---
+# Dump the database (custom format) to a file on the host:
+docker compose exec -T db \
+    pg_dump -U iceberg_ttx -d iceberg_ttx -Fc \
+    > "iceberg_ttx-$(date -u +%Y%m%dT%H%M%SZ).dump"
+
+# Restore into a running, empty database (--clean drops existing objects first):
+docker compose exec -T db \
+    pg_restore -U iceberg_ttx -d iceberg_ttx --clean --if-exists \
+    < iceberg_ttx-YYYYMMDDTHHMMSSZ.dump
+
+# --- Uploads volume (inject attachments) ---
+# Tar the uploads named volume to a file on the host:
+docker run --rm \
+    -v deep_thought_uploads:/data:ro -v "$PWD":/backup alpine \
+    tar czf /backup/uploads-"$(date -u +%Y%m%dT%H%M%SZ)".tar.gz -C /data .
+
+# Restore it (into the same named volume):
+docker run --rm \
+    -v deep_thought_uploads:/data -v "$PWD":/backup alpine \
+    sh -c 'tar xzf /backup/uploads-YYYYMMDDTHHMMSSZ.tar.gz -C /data'
+```
+
+> The volume name is `<project>_uploads` — `deep_thought_uploads` when the compose
+> project is the repo directory. Run `docker volume ls` to confirm the exact name.
+
+### Kubernetes
+
+```bash
+# --- Database ---
+# Dump from the postgres pod to a file on your workstation:
+kubectl exec -n iceberg-ttx statefulset/postgres -- \
+    pg_dump -U iceberg_ttx -d iceberg_ttx -Fc \
+    > "iceberg_ttx-$(date -u +%Y%m%dT%H%M%SZ).dump"
+
+# Restore (streams the local dump back into the pod):
+kubectl exec -i -n iceberg-ttx statefulset/postgres -- \
+    pg_restore -U iceberg_ttx -d iceberg_ttx --clean --if-exists \
+    < iceberg_ttx-YYYYMMDDTHHMMSSZ.dump
+
+# --- Uploads volume ---
+# Copy the attachments out of the app pod:
+kubectl cp -n iceberg-ttx \
+    "$(kubectl get pod -n iceberg-ttx -l app.kubernetes.io/name=iceberg-ttx-app \
+        -o jsonpath='{.items[0].metadata.name}')":/app/uploads ./uploads-backup
+```
+
+#### Scheduled database backups (optional)
+
+`k8s/postgres/backup-cronjob.yaml` is a ready-to-adapt `CronJob` that runs a daily
+`pg_dump` to a dedicated `postgres-backups` PVC with simple time-based retention:
+
+```bash
+kubectl apply -f k8s/postgres/backup-cronjob.yaml
+```
+
+It is a **starting point**, not a complete backup strategy — the dumps sit on an
+in-cluster PVC (same failure domain as the database). For real durability, copy
+them off-cluster (e.g. to object storage), back up the `uploads/` PVC too, and
+**test your restores** regularly; a backup you have never restored is not a backup.
+
 ## Forward security events to your SIEM
 
 Audit events (logins, authorization denials, privilege/role changes, inject
@@ -383,6 +466,13 @@ k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, 
 6. **Complete and export** — Complete button, then export transcript/responses from the right pane
 
 See [/help](/help) for full documentation including the scenario JSON schema.
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development workflow and PR expectations, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+for community standards. Security issues should be reported privately per
+[SECURITY.md](SECURITY.md).
 
 ## License
 
