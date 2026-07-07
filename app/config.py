@@ -126,6 +126,29 @@ class Settings(BaseSettings):
     oidc_authentik_role_claim: str = "groups"
     oidc_authentik_role_map: str = ""  # "group=role,group2=role2"
 
+    # Auth0. Discovery is https://<domain>/.well-known/openid-configuration. Roles
+    # are not sent by default — expose them via an Action as a namespaced custom
+    # claim and set oidc_auth0_role_claim to it (e.g. https://<app>/roles).
+    oidc_auth0_enabled: bool = False
+    oidc_auth0_client_id: str = ""
+    oidc_auth0_client_secret: str = ""  # SECRET
+    oidc_auth0_domain: str = ""  # e.g. your-tenant.us.auth0.com
+    oidc_auth0_scopes: str = "openid email profile"
+    oidc_auth0_role_claim: str = ""
+    oidc_auth0_role_map: str = ""  # "group=role,group2=role2"
+
+    # Okta. Discovery uses the org server (https://<domain>/.well-known/...) or a
+    # custom authorization server when oidc_okta_auth_server is set (commonly
+    # "default"): https://<domain>/oauth2/<server>/.well-known/openid-configuration.
+    oidc_okta_enabled: bool = False
+    oidc_okta_client_id: str = ""
+    oidc_okta_client_secret: str = ""  # SECRET
+    oidc_okta_domain: str = ""  # e.g. dev-12345.okta.com
+    oidc_okta_auth_server: str = ""  # "" = org server; else e.g. "default"
+    oidc_okta_scopes: str = "openid email profile"
+    oidc_okta_role_claim: str = "groups"
+    oidc_okta_role_map: str = ""  # "group=role,group2=role2"
+
     @property
     def secret_key_is_insecure(self) -> bool:
         return (
@@ -201,6 +224,36 @@ class Settings(BaseSettings):
                     role_map=_parse_role_map(self.oidc_authentik_role_map),
                 )
             )
+        if self.oidc_auth_enabled and self.oidc_auth0_enabled and self.oidc_auth0_domain:
+            domain = self.oidc_auth0_domain.rstrip("/")
+            providers.append(
+                OIDCProviderConfig(
+                    key="auth0",
+                    display_name="Auth0",
+                    client_id=self.oidc_auth0_client_id,
+                    client_secret=self.oidc_auth0_client_secret,
+                    metadata_url=f"https://{domain}/.well-known/openid-configuration",
+                    scopes=self.oidc_auth0_scopes,
+                    role_claim=self.oidc_auth0_role_claim,
+                    role_map=_parse_role_map(self.oidc_auth0_role_map),
+                )
+            )
+        if self.oidc_auth_enabled and self.oidc_okta_enabled and self.oidc_okta_domain:
+            domain = self.oidc_okta_domain.rstrip("/")
+            server = self.oidc_okta_auth_server.strip("/")
+            path = f"/oauth2/{server}" if server else ""
+            providers.append(
+                OIDCProviderConfig(
+                    key="okta",
+                    display_name="Okta",
+                    client_id=self.oidc_okta_client_id,
+                    client_secret=self.oidc_okta_client_secret,
+                    metadata_url=f"https://{domain}{path}/.well-known/openid-configuration",
+                    scopes=self.oidc_okta_scopes,
+                    role_claim=self.oidc_okta_role_claim,
+                    role_map=_parse_role_map(self.oidc_okta_role_map),
+                )
+            )
         return providers
 
 
@@ -257,6 +310,20 @@ def validate_settings(s: Settings | None = None) -> None:
                 "OIDC_AUTHENTIK_ENABLED is set but OIDC_AUTHENTIK_CLIENT_ID / "
                 "OIDC_AUTHENTIK_CLIENT_SECRET / OIDC_AUTHENTIK_BASE_URL / "
                 "OIDC_AUTHENTIK_APP_SLUG are incomplete."
+            )
+        if s.oidc_auth0_enabled and not (
+            s.oidc_auth0_client_id and s.oidc_auth0_client_secret and s.oidc_auth0_domain
+        ):
+            raise RuntimeError(
+                "OIDC_AUTH0_ENABLED is set but OIDC_AUTH0_CLIENT_ID / "
+                "OIDC_AUTH0_CLIENT_SECRET / OIDC_AUTH0_DOMAIN are incomplete."
+            )
+        if s.oidc_okta_enabled and not (
+            s.oidc_okta_client_id and s.oidc_okta_client_secret and s.oidc_okta_domain
+        ):
+            raise RuntimeError(
+                "OIDC_OKTA_ENABLED is set but OIDC_OKTA_CLIENT_ID / "
+                "OIDC_OKTA_CLIENT_SECRET / OIDC_OKTA_DOMAIN are incomplete."
             )
     if s.auth_mode == AUTH_MODE_OIDC and not s.enabled_oidc_providers():
         raise RuntimeError(

@@ -16,8 +16,10 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.config import OIDCProviderConfig, settings
 from app.models.user import LOCAL_AUTH_PROVIDER, User, UserRole
 from app.services import audit_service
+from app.services.oidc import auth0 as _auth0  # noqa: F401 - registers adapter
 from app.services.oidc import authentik as _authentik  # noqa: F401 - registers adapter
 from app.services.oidc import entra as _entra  # noqa: F401 - registers adapter
+from app.services.oidc import okta as _okta  # noqa: F401 - registers adapter
 from app.services.oidc.base import OIDCIdentity
 
 # Process-wide registry, populated by register_providers() at startup.

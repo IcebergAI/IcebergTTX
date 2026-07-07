@@ -276,6 +276,51 @@ slash) so the callback URL matches what you register with the IdP.
    # OIDC_AUTHENTIK_ROLE_MAP=ttx-facilitators=facilitator
    ```
 
+### Auth0
+
+1. **Auth0 Dashboard → Applications → Create Application → Regular Web
+   Application.** Add `https://<your-host>/api/auth/oidc/auth0/callback` to
+   **Allowed Callback URLs**. Copy the **Domain**, **Client ID**, and **Client
+   Secret**.
+2. (Optional roles) Auth0 does not send roles by default. Add an **Action**
+   (Login flow) that sets a *namespaced* custom claim on the ID token, e.g.
+   `api.idToken.setCustomClaim("https://ttx.example.com/roles", event.authorization?.roles)`,
+   and point `OIDC_AUTH0_ROLE_CLAIM` at that exact URI.
+3. Configure:
+   ```bash
+   AUTH_MODE=both
+   OIDC_AUTH0_ENABLED=true
+   OIDC_AUTH0_DOMAIN=your-tenant.us.auth0.com
+   OIDC_AUTH0_CLIENT_ID=<client-id>
+   OIDC_AUTH0_CLIENT_SECRET=<client-secret>
+   # OIDC_AUTH0_ROLE_CLAIM=https://ttx.example.com/roles
+   # OIDC_AUTH0_ROLE_MAP=ttx-facilitators=facilitator
+   ```
+
+### Okta
+
+1. **Okta Admin → Applications → Create App Integration → OIDC / Web
+   Application.** Add `https://<your-host>/api/auth/oidc/okta/callback` as the
+   **Sign-in redirect URI**. Copy the **Client ID** and **Client Secret**, and
+   your Okta **domain**.
+2. Choose the authorization server: leave `OIDC_OKTA_AUTH_SERVER` blank to use the
+   **org** server, or set it to `default` (or a custom authorization-server id).
+   The discovery URL is
+   `https://<domain>/oauth2/<server>/.well-known/openid-configuration` (org server
+   omits `/oauth2/<server>`).
+3. (Optional roles) add a **groups claim** to the token on the chosen
+   authorization server so group names arrive in the `groups` claim.
+4. Configure:
+   ```bash
+   AUTH_MODE=both
+   OIDC_OKTA_ENABLED=true
+   OIDC_OKTA_DOMAIN=dev-12345.okta.com
+   OIDC_OKTA_AUTH_SERVER=default
+   OIDC_OKTA_CLIENT_ID=<client-id>
+   OIDC_OKTA_CLIENT_SECRET=<client-secret>
+   # OIDC_OKTA_ROLE_MAP=ttx-facilitators=facilitator
+   ```
+
 ## Running Tests
 
 ```bash

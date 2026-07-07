@@ -208,6 +208,66 @@ spec:
                 secretKeyRef:
                   name: iceberg-ttx-secrets
                   key: OIDC_AUTHENTIK_CLIENT_SECRET
+            - name: OIDC_AUTH0_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_AUTH0_ENABLED
+            - name: OIDC_AUTH0_DOMAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_AUTH0_DOMAIN
+            - name: OIDC_AUTH0_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_AUTH0_CLIENT_ID
+            - name: OIDC_AUTH0_ROLE_CLAIM
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_AUTH0_ROLE_CLAIM
+            - name: OIDC_AUTH0_ROLE_MAP
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_AUTH0_ROLE_MAP
+            - name: OIDC_AUTH0_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: iceberg-ttx-secrets
+                  key: OIDC_AUTH0_CLIENT_SECRET
+            - name: OIDC_OKTA_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_OKTA_ENABLED
+            - name: OIDC_OKTA_DOMAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_OKTA_DOMAIN
+            - name: OIDC_OKTA_AUTH_SERVER
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_OKTA_AUTH_SERVER
+            - name: OIDC_OKTA_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_OKTA_CLIENT_ID
+            - name: OIDC_OKTA_ROLE_MAP
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OIDC_OKTA_ROLE_MAP
+            - name: OIDC_OKTA_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: iceberg-ttx-secrets
+                  key: OIDC_OKTA_CLIENT_SECRET
           volumeMounts:
             - name: uploads
               mountPath: /app/uploads

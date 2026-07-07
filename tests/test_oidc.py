@@ -270,6 +270,61 @@ def test_authentik_missing_email_raises():
         adapter.extract_identity({"sub": "s"}, "groups")
 
 
+@pytest.mark.parametrize("key", ["authentik", "auth0", "okta"])
+def test_standard_adapters_share_claim_mapping(key):
+    adapter = get_adapter(key)
+    ident = adapter.extract_identity(
+        {"sub": "s", "email": "e@x.test", "email_verified": True, "name": "N", "roles": ["r"]},
+        "roles",
+    )
+    assert (ident.subject, ident.email, ident.email_verified, ident.groups) == (
+        "s",
+        "e@x.test",
+        True,
+        ["r"],
+    )
+
+
+@pytest.mark.parametrize("key", ["auth0", "okta"])
+def test_standard_adapter_email_unverified_defaults_false(key):
+    ident = get_adapter(key).extract_identity({"sub": "s", "email": "e@x.test"}, "")
+    assert ident.email_verified is False
+
+
+def test_config_builds_auth0_and_okta_metadata_urls(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "oidc_auth0_enabled", True)
+    monkeypatch.setattr(settings, "oidc_auth0_domain", "t.us.auth0.com")
+    monkeypatch.setattr(settings, "oidc_auth0_client_id", "a")
+    monkeypatch.setattr(settings, "oidc_auth0_client_secret", "b")
+    monkeypatch.setattr(settings, "oidc_okta_enabled", True)
+    monkeypatch.setattr(settings, "oidc_okta_domain", "dev-1.okta.com")
+    monkeypatch.setattr(settings, "oidc_okta_auth_server", "default")
+    monkeypatch.setattr(settings, "oidc_okta_client_id", "c")
+    monkeypatch.setattr(settings, "oidc_okta_client_secret", "d")
+
+    by_key = {p.key: p for p in settings.enabled_oidc_providers()}
+    assert by_key["auth0"].metadata_url == "https://t.us.auth0.com/.well-known/openid-configuration"
+    assert (
+        by_key["okta"].metadata_url
+        == "https://dev-1.okta.com/oauth2/default/.well-known/openid-configuration"
+    )
+
+
+def test_config_okta_org_server_omits_oauth2_path(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "oidc_okta_enabled", True)
+    monkeypatch.setattr(settings, "oidc_okta_domain", "dev-1.okta.com")
+    monkeypatch.setattr(settings, "oidc_okta_auth_server", "")  # org server
+    monkeypatch.setattr(settings, "oidc_okta_client_id", "c")
+    monkeypatch.setattr(settings, "oidc_okta_client_secret", "d")
+
+    okta = next(p for p in settings.enabled_oidc_providers() if p.key == "okta")
+    assert okta.metadata_url == "https://dev-1.okta.com/.well-known/openid-configuration"
+
+
 # --------------------------------------------------------------------------- #
 # Routes (HTTP, stubbed IdP)
 # --------------------------------------------------------------------------- #
