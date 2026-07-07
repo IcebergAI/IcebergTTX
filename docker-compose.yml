@@ -91,6 +91,18 @@ services:
         exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
     expose:
       - "8000"
+    # DB-aware readiness (#71): 503 when Postgres is unreachable. No curl/wget in
+    # the slim image, so probe via Python stdlib (urllib raises on a 5xx status).
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://localhost:8000/api/health/ready", timeout=5)
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     # App runs as non-root (USER appuser in the image) and needs no capabilities.
     # read_only root fs with a writable tmpfs for /tmp; uploads/static are volumes.
     security_opt:
@@ -108,7 +120,8 @@ services:
     image: nginxinc/nginx-unprivileged:alpine
     restart: unless-stopped
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     ports:
       - "80:8080"
     volumes:

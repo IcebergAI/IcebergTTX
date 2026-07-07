@@ -277,8 +277,10 @@ spec:
             - name: tmp
               mountPath: /tmp
           readinessProbe:
+            # DB-aware readiness (#71): returns 503 when Postgres is unreachable
+            # so the pod is pulled from the endpoint set during a DB outage.
             httpGet:
-              path: /api/health
+              path: /api/health/ready
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 10
