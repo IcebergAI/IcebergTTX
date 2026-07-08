@@ -183,43 +183,21 @@ document.addEventListener('alpine:init', () => {
     },
 
     connectWs() {
-      const token = localStorage.getItem('dt_token');
-      if (!token) return;
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const params = new URLSearchParams({ token });
-      const viewRole = localStorage.getItem('dt_view_role');
-      const viewTeam = localStorage.getItem('dt_view_team');
-      if (viewRole) params.set('view_role', viewRole);
-      if (viewTeam) params.set('view_team', viewTeam);
-      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?${params}`);
-
-      this.ws.onopen = () => {
-        this.wsConnected = true;
-        this.pingInterval = setInterval(() => {
-          if (this.ws && this.ws.readyState === WebSocket.OPEN)
-            this.ws.send(JSON.stringify({ type: 'ping' }));
-        }, 30000);
-      };
-
-      this.ws.onclose = () => {
-        this.wsConnected = false;
-        clearInterval(this.pingInterval);
-        this.pingInterval = null;
-        if (!this.destroyed) this.reconnectTimeout = setTimeout(() => this.connectWs(), 3000);
-      };
-
-      this.ws.onmessage = async (ev) => {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'inject_released') {
-          await this._enrichAndAdd(msg.payload);
-        }
-        if (msg.type === 'exercise_state_change') {
-          this.exercise = { ...this.exercise, state: msg.payload.state };
-        }
-        if (msg.type === 'inject_comment_created') {
-          this.upsertComment(msg.payload);
-        }
-      };
+      // Cookie-authenticated socket (#68) — shared lifecycle in app.js.
+      DT.connectExerciseWs(exerciseId, this, {
+        viewParams: true,
+        onMessage: async (msg) => {
+          if (msg.type === 'inject_released') {
+            await this._enrichAndAdd(msg.payload);
+          }
+          if (msg.type === 'exercise_state_change') {
+            this.exercise = { ...this.exercise, state: msg.payload.state };
+          }
+          if (msg.type === 'inject_comment_created') {
+            this.upsertComment(msg.payload);
+          }
+        },
+      });
     },
 
     destroy() {
@@ -498,55 +476,38 @@ document.addEventListener('alpine:init', () => {
     },
 
     connectWs() {
-      const token = localStorage.getItem('dt_token');
-      if (!token) return;
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?token=${token}`);
-
-      this.ws.onopen = () => {
-        this.wsConnected = true;
-        this.pingInterval = setInterval(() => {
-          if (this.ws && this.ws.readyState === WebSocket.OPEN)
-            this.ws.send(JSON.stringify({ type: 'ping' }));
-        }, 30000);
-      };
-
-      this.ws.onclose = () => {
-        this.wsConnected = false;
-        clearInterval(this.pingInterval);
-        this.pingInterval = null;
-        if (!this.destroyed) this.reconnectTimeout = setTimeout(() => this.connectWs(), 3000);
-      };
-
-      this.ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'inject_released') {
-          const idx = this.injects.findIndex(i => i.id === msg.payload.id);
-          if (idx !== -1) this.injects[idx] = msg.payload;
-          else this.injects.push(msg.payload);
-        }
-        if (msg.type === 'response_submitted') {
-          const r = {
-            ...msg.payload.response,
-            _next_inject_ids: msg.payload.next_inject_ids || [],
-            _next_injects: msg.payload.next_injects || [],
-          };
-          this.responses.unshift(r);
-        }
-        if (msg.type === 'inject_comment_created') {
-          this.upsertComment(msg.payload);
-        }
-        if (msg.type === 'exercise_state_change') {
-          this.exercise = { ...this.exercise, state: msg.payload.state };
-        }
-        if (msg.type === 'assessment_ready') {
-          this.assessments[msg.payload.response_id] = msg.payload.assessment;
-          this.assessments = { ...this.assessments };
-        }
-        if (msg.type === 'inject_suggested') {
-          this.suggestedInjects.unshift(msg.payload);
-        }
-      };
+      // Cookie-authenticated socket (#68) — shared lifecycle in app.js. The
+      // console is always the real facilitator view, so no view-preview params.
+      DT.connectExerciseWs(exerciseId, this, {
+        onMessage: (msg) => {
+          if (msg.type === 'inject_released') {
+            const idx = this.injects.findIndex(i => i.id === msg.payload.id);
+            if (idx !== -1) this.injects[idx] = msg.payload;
+            else this.injects.push(msg.payload);
+          }
+          if (msg.type === 'response_submitted') {
+            const r = {
+              ...msg.payload.response,
+              _next_inject_ids: msg.payload.next_inject_ids || [],
+              _next_injects: msg.payload.next_injects || [],
+            };
+            this.responses.unshift(r);
+          }
+          if (msg.type === 'inject_comment_created') {
+            this.upsertComment(msg.payload);
+          }
+          if (msg.type === 'exercise_state_change') {
+            this.exercise = { ...this.exercise, state: msg.payload.state };
+          }
+          if (msg.type === 'assessment_ready') {
+            this.assessments[msg.payload.response_id] = msg.payload.assessment;
+            this.assessments = { ...this.assessments };
+          }
+          if (msg.type === 'inject_suggested') {
+            this.suggestedInjects.unshift(msg.payload);
+          }
+        },
+      });
     },
 
     destroy() {

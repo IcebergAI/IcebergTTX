@@ -13,6 +13,25 @@ from app.services import audit_service
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 
+
+def origin_allowed(origin: str | None, request_host: str | None) -> bool:
+    """Return True if ``origin`` (an Origin/Referer value) is a trusted origin.
+
+    Trusted = the configured ``TRUSTED_ORIGINS`` set plus the request's own Host
+    (same-origin). Compares only the host[:port] netloc, so it is scheme-agnostic.
+    Shared by ``CSRFOriginMiddleware`` (HTTP) and the WebSocket handshake (CSWSH,
+    #68), which pass the upgrade request's Origin and Host headers.
+    """
+    if not origin:
+        return False
+    host = urlparse(origin).netloc
+    if not host:
+        return False
+    allowed = set(settings.trusted_origin_set)
+    if request_host:
+        allowed.add(request_host)
+    return host in allowed
+
 # Strict same-origin Content-Security-Policy. `script-src 'self'` carries NO
 # 'unsafe-inline'/'unsafe-eval' — the app ships the @alpinejs/csp build and all
 # JS is same-origin files (#77). `style-src` keeps 'unsafe-inline' only to allow
@@ -56,9 +75,9 @@ _PERMISSIONS_POLICY = ", ".join(
 def build_security_headers() -> dict[str, str]:
     """Security response headers emitted by the app on every HTTP response (#77).
 
-    The app is the single source of truth: nginx adds no security headers, so
-    this applies uniformly to Docker, Kubernetes, and local uvicorn. HSTS is
-    gated on ``dev_mode`` (the app sits behind a TLS-terminating proxy in prod).
+    The app is the single source of truth: the reverse proxy (Caddy) adds no
+    security headers, so this applies uniformly to Docker, Kubernetes, and local
+    uvicorn. HSTS is gated on ``dev_mode`` (the app sits behind TLS in prod).
     """
     headers = {
         "Content-Security-Policy": CONTENT_SECURITY_POLICY,
@@ -105,7 +124,7 @@ def client_ip(request: Request) -> str | None:
 
     uvicorn rewrites ``request.client`` from ``X-Forwarded-For`` **only** when the
     immediate peer is a trusted proxy (``--forwarded-allow-ips`` /
-    ``FORWARDED_ALLOW_IPS``). The app is reachable only through the nginx reverse
+    ``FORWARDED_ALLOW_IPS``). The app is reachable only through the Caddy reverse
     proxy, which appends the real client hop, so an untrusted client cannot spoof
     this value (the old hand-rolled leftmost-XFF parse trusted whatever the client
     sent). This IP feeds the audit ``source_ip`` and the login rate-limit key.
@@ -156,16 +175,7 @@ class CSRFOriginMiddleware:
 
     def _origin_allowed(self, request: Request) -> bool:
         source = request.headers.get("origin") or request.headers.get("referer")
-        if not source:
-            return False
-        host = urlparse(source).netloc
-        if not host:
-            return False
-        allowed = set(settings.trusted_origin_set)
-        request_host = request.headers.get("host")
-        if request_host:
-            allowed.add(request_host)
-        return host in allowed
+        return origin_allowed(source, request.headers.get("host"))
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":

@@ -91,11 +91,12 @@ As a facilitator, create a scenario and exercise. To try the app quickly, open S
 
 ## Docker Deployment
 
-A `docker-compose.yml` is provided for single-host deployments. It runs the app, PostgreSQL 17, and nginx as a reverse proxy.
+A `docker-compose.yml` is provided for single-host deployments. It runs the app, PostgreSQL 17, and **Caddy** as a reverse proxy with **automatic HTTPS**.
 
 ```bash
 # Copy and fill in secrets (POSTGRES_PASSWORD and SECRET_KEY are required)
 cp .env.example .env
+# For a public deployment, set SITE_ADDRESS to your domain (see below).
 
 # Build and start
 docker compose up -d
@@ -104,7 +105,7 @@ docker compose up -d
 docker compose ps
 ```
 
-The app will be available on port 80. nginx (the unprivileged image, running as a non-root user and listening on 8080 inside the container) serves static files directly and proxies everything else (including WebSocket upgrades at `/ws/`) to uvicorn.
+Caddy serves the app over **HTTPS on port 443** (and redirects `:80`). It serves compiled static files directly and proxies everything else (including WebSocket upgrades at `/ws/`) to uvicorn. Set `SITE_ADDRESS` in `.env` to your public domain for an automatic Let's Encrypt certificate; the default `localhost` uses Caddy's **internal self-signed CA**, so `docker compose up` works over HTTPS immediately for local testing (your browser will warn on the untrusted cert — expected).
 
 Create your first admin account once the stack is up:
 
@@ -112,7 +113,7 @@ Create your first admin account once the stack is up:
 docker compose exec app python -m app.bootstrap_admin --email you@example.com --name "You"
 ```
 
-> **TLS**: compose serves plain HTTP on `:80` for local use. In production, put a TLS-terminating proxy or load balancer in front — the app sets `Secure` auth cookies, which browsers won't send over plain HTTP. Never expose the auth flow over unencrypted HTTP.
+> **TLS**: Caddy terminates HTTPS itself. For a public deployment, point DNS at the host, set `SITE_ADDRESS=your.domain.com` in `.env`, and make sure ports 80 and 443 are reachable — Caddy provisions and renews a Let's Encrypt certificate automatically (certs persist in the `caddy_data` volume). Locally, the default `SITE_ADDRESS=localhost` issues an internal self-signed cert. The app sets `Secure` cookies, so always use HTTPS — only use `SITE_ADDRESS=:80` (plain HTTP) for throwaway testing behind your own TLS terminator.
 
 To stop without losing data:
 ```bash
@@ -131,10 +132,10 @@ kubectl apply -f k8s/secrets.yaml k8s/configmap.yaml
 # Before applying, replace placeholder values in k8s/secrets.yaml,
 # replace 'your-registry/iceberg-ttx:latest' in:
 #   k8s/app/deployment.yaml
-#   k8s/nginx/deployment.yaml
+#   k8s/caddy/deployment.yaml   (the copy-static initContainer uses the app image)
 # (pin by digest — image@sha256:… — in production for reproducible rollouts;
 #  Dependabot's docker updater keeps the base-image digests current), and set
-# the hostname/issuer/ingressClassName placeholders in k8s/nginx/ingress.yaml.
+# the hostname/issuer/ingressClassName placeholders in k8s/caddy/ingress.yaml.
 
 kubectl apply -f k8s/postgres/
 kubectl rollout status statefulset/postgres -n iceberg-ttx
@@ -142,8 +143,8 @@ kubectl rollout status statefulset/postgres -n iceberg-ttx
 kubectl apply -f k8s/app/
 kubectl rollout status deployment/iceberg-ttx-app -n iceberg-ttx
 
-kubectl apply -f k8s/nginx/          # Deployment + ClusterIP Service + TLS Ingress
-kubectl rollout status deployment/nginx -n iceberg-ttx
+kubectl apply -f k8s/caddy/          # Deployment + ClusterIP Service + TLS Ingress
+kubectl rollout status deployment/caddy -n iceberg-ttx
 
 # Confine east-west traffic (requires a NetworkPolicy-enforcing CNI):
 kubectl apply -f k8s/networkpolicy.yaml
@@ -153,7 +154,9 @@ kubectl exec -n iceberg-ttx deploy/iceberg-ttx-app -- \
     python -m app.bootstrap_admin --email you@example.com --name "You"
 ```
 
-> **TLS**: the nginx Service is `ClusterIP`; `k8s/nginx/ingress.yaml` terminates HTTPS (cert-manager annotation + `force-ssl-redirect`) and forwards to it. Fill in the hostname, `ingressClassName`, and issuer before applying. Do **not** switch nginx back to a `LoadBalancer` on `:80` — that serves auth over plaintext.
+> **TLS**: in Kubernetes, Caddy runs as a plain-HTTP (`:8080`) internal reverse proxy — TLS is terminated by the cluster **Ingress** (unchanged). The `caddy` Service is `ClusterIP`; `k8s/caddy/ingress.yaml` terminates HTTPS (cert-manager annotation + `force-ssl-redirect`) and forwards to it. Fill in the hostname, `ingressClassName`, and issuer before applying. Do **not** switch the `caddy` Service to a `LoadBalancer` on `:80` — that serves auth over plaintext. (Caddy's automatic-HTTPS mode is used only in the Docker Compose deployment, where it is the edge.)
+>
+> **Origin checks**: browser WebSocket auth verifies the upgrade's `Origin` against the request `Host` (plus `TRUSTED_ORIGINS`). This works out of the box because every hop preserves `Host` — but if you configure the Ingress or proxy chain to rewrite it, set `TRUSTED_ORIGINS` in `k8s/configmap.yaml` to your public hostname so live updates keep working.
 >
 > **Pod hardening**: all three workloads run non-root under a PSS-`restricted`-style `securityContext` (no privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp; app + init containers use a read-only root filesystem). The Postgres StatefulSet runs as uid 999 with `fsGroup: 999`, which needs a StorageClass that honours `fsGroup`.
 
@@ -451,9 +454,9 @@ static/fonts/        # Self-hosted Archivo · JetBrains Mono · Spectral (woff2)
 static/img/          # Iceberg brand marks (SVG)
 docs/                # README screenshots
 Dockerfile           # Multi-stage build (Tailwind compile + Python runtime)
-docker-compose.yml   # app + postgres:17 + nginx-unprivileged (non-root)
-docker/nginx.conf    # Reverse proxy config with WebSocket upgrade support
-k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, nginx)
+docker-compose.yml   # app + postgres:17 + caddy (auto-HTTPS, non-root)
+docker/Caddyfile     # Caddy reverse proxy (automatic HTTPS) + static serving
+k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, caddy)
 ```
 
 ## Quick Workflow

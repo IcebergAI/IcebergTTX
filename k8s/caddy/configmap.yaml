@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: caddy-config
+  namespace: iceberg-ttx
+  labels:
+    app.kubernetes.io/name: caddy
+    app.kubernetes.io/part-of: iceberg-ttx
+data:
+  Caddyfile: |
+    {
+        # Behind the cluster Ingress, which terminates TLS and forwards here over
+        # the private network. Trust its X-Forwarded-* headers so the app sees the
+        # real client IP + https scheme (#36) — the equivalent of nginx's
+        # $proxy_add_x_forwarded_for. Caddy terminates no TLS itself here.
+        servers {
+            trusted_proxies static private_ranges
+        }
+        auto_https off
+    }
+
+    # Listen plain HTTP on 8080 (unprivileged; no capability needed). TLS is
+    # terminated at the Ingress in front (see ingress.yaml).
+    :8080 {
+        request_body {
+            max_size 30MB
+        }
+
+        # Serve compiled static assets directly from the shared volume. Security
+        # headers come from the app's SecurityHeadersMiddleware (#77); Caddy adds
+        # only nosniff + 7-day immutable caching here. log_skip keeps asset
+        # fetches (and the /static readiness/liveness probes) out of the access
+        # log (nginx access_log-off parity).
+        handle_path /static/* {
+            root * /app/static
+            file_server
+            header Cache-Control "public, max-age=604800, immutable"
+            header X-Content-Type-Options nosniff
+            log_skip
+        }
+
+        # Everything else → the app. WebSocket upgrades are proxied transparently
+        # (streamed — response_header_timeout only bounds the upgrade/response
+        # headers, not the socket lifetime); X-Forwarded-* are set automatically.
+        # The transport timeouts bound a hung upstream so a stalled app worker
+        # returns 502 instead of holding client connections open indefinitely.
+        reverse_proxy iceberg-ttx-app:8000 {
+            transport http {
+                dial_timeout 10s
+                response_header_timeout 60s
+            }
+        }
+
+        # Strip the `token` query param from access logs — browser sockets auth via
+        # the httpOnly cookie so the JWT is never in the URL (#68); this scrubs the
+        # non-browser ?token= fallback as defence in depth.
+        log {
+            output stderr
+            format filter {
+                request>uri query {
+                    delete token
+                }
+            }
+        }
+    }

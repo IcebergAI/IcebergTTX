@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from httpx import AsyncClient
 from httpx_ws import WebSocketDisconnect, aconnect_ws
@@ -9,8 +11,25 @@ from app.services.auth_service import create_access_token, hash_password
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+# The app's ASGI test client uses base_url http://testserver, so a matching
+# Origin passes the CSWSH check (host == request Host == "testserver").
+SAME_ORIGIN = {"origin": "http://testserver"}
+
+
+def _cookie_headers(token: str, origin: str = "http://testserver") -> dict[str, str]:
+    """Upgrade headers for the browser cookie path: the access_token cookie plus an
+    Origin. (aconnect_ws does not replay the client cookie jar, so set it here.)"""
+    return {"origin": origin, "cookie": f"access_token={token}"}
+
+
 def _ws_url(exercise_id: int, token: str) -> str:
+    """URL with an explicit ?token= (the non-browser fallback path)."""
     return f"/ws/exercises/{exercise_id}?token={token}"
+
+
+def _ws_path(exercise_id: int) -> str:
+    """URL with no token — the browser cookie-auth path (#68)."""
+    return f"/ws/exercises/{exercise_id}"
 
 
 # ── Connection ────────────────────────────────────────────────────────────────
@@ -299,3 +318,61 @@ async def test_ws_facilitator_preview_derives_group_from_view_team(
             if c.user_id == facilitator.id
         ]
         assert mine and all(c.group_id == "legal" for c in mine)
+
+
+# ── Cookie-based handshake + CSWSH (#68) ────────────────────────────────────────
+
+async def test_ws_connect_via_cookie(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
+):
+    """A browser authenticates the socket from the httpOnly access_token cookie —
+    no token in the URL — as long as the Origin is trusted (#68)."""
+    async with aconnect_ws(
+        _ws_path(active_exercise.id), client, headers=_cookie_headers(facilitator_token)
+    ) as ws:
+        await ws.send_json({"type": "ping"})
+        msg = await ws.receive_json()
+    assert msg["type"] == "pong"
+    assert msg["exercise_id"] == active_exercise.id
+
+
+async def test_ws_cookie_foreign_origin_rejected(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
+):
+    """CSWSH: a cookie-authenticated upgrade from an untrusted Origin is refused
+    even though the cookie itself is valid."""
+    headers = _cookie_headers(facilitator_token, origin="https://evil.example")
+    with pytest.raises(WebSocketDisconnect):
+        async with aconnect_ws(_ws_path(active_exercise.id), client, headers=headers) as ws:
+            await ws.receive_json()
+
+
+async def test_ws_no_token_no_cookie_rejected(
+    client: AsyncClient, active_exercise: Exercise
+):
+    """No ?token= and no cookie → the handshake is closed (4001)."""
+    # The autouse fixture clears cookies; assert there is nothing to authenticate with.
+    assert "access_token" not in client.cookies
+    with pytest.raises(WebSocketDisconnect):
+        async with aconnect_ws(
+            _ws_path(active_exercise.id), client, headers=SAME_ORIGIN
+        ) as ws:
+            await ws.receive_json()
+
+
+async def test_ws_revoked_token_rejected(
+    client: AsyncClient,
+    session: AsyncSession,
+    active_exercise: Exercise,
+    facilitator: User,
+):
+    """The WS path now enforces token_valid_after revocation (#14) via the shared
+    resolver — a token issued before the user's cutoff is refused."""
+    facilitator.token_valid_after = datetime.now(UTC) + timedelta(hours=1)
+    session.add(facilitator)
+    await session.commit()
+
+    stale = create_access_token(subject=facilitator.email, role=facilitator.role.value)
+    with pytest.raises(WebSocketDisconnect):
+        async with aconnect_ws(_ws_url(active_exercise.id, stale), client) as ws:
+            await ws.receive_json()

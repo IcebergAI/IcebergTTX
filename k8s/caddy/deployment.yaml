@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: caddy
+  namespace: iceberg-ttx
+  labels:
+    app.kubernetes.io/name: caddy
+    app.kubernetes.io/part-of: iceberg-ttx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: caddy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: caddy
+        app.kubernetes.io/part-of: iceberg-ttx
+    spec:
+      automountServiceAccountToken: false
+      # Runs as a non-root uid; fsGroup lets the initContainer and Caddy share the
+      # static emptyDir. Caddy listens on 8080 (unprivileged) so no NET_BIND_SERVICE
+      # is needed here — TLS is terminated at the Ingress.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Copy compiled static assets from the app image into the local emptyDir.
+        # Caddy serves from this volume directly — no shared PVC required. Uses the
+        # same image as the app so static files always match the deployed version.
+        - name: copy-static
+          image: your-registry/iceberg-ttx:latest  # REPLACE — same tag as app
+          # cp -rL (not -a): runs as non-root, so it must not try to preserve the
+          # source files' ownership (uid 1000) — that chown would fail. Static
+          # assets stay world-readable, which is all Caddy needs.
+          command: ["/bin/sh", "-c", "cp -rL /app/static_src/. /app/static/"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: static-files
+              mountPath: /app/static
+      containers:
+        - name: caddy
+          # TLS is terminated at the Ingress in front (see ingress.yaml); Caddy
+          # listens plain HTTP on 8080 with no privileged-port bind. The caddy
+          # binary ships with the cap_net_bind_service FILE capability, so that
+          # cap must stay in the bounding set (add below) or exec of the setcap
+          # binary fails with EPERM under drop ALL — even though :8080 itself
+          # needs no capability.
+          image: caddy:2-alpine
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_BIND_SERVICE"]
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: caddyfile
+              mountPath: /etc/caddy/Caddyfile
+              subPath: Caddyfile
+            - name: static-files
+              mountPath: /app/static
+              readOnly: true
+            # Caddy's writable stores (XDG_DATA_HOME / XDG_CONFIG_HOME are /data and
+            # /config in the image) and /tmp — emptyDirs so the rootfs stays read-only.
+            - name: caddy-data
+              mountPath: /data
+            - name: caddy-run
+              mountPath: /config
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /static/css/output.css
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /static/css/output.css
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: caddyfile
+          configMap:
+            name: caddy-config
+        - name: static-files
+          emptyDir: {}
+        - name: caddy-data
+          emptyDir: {}
+        - name: caddy-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

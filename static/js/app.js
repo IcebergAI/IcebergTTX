@@ -230,6 +230,57 @@ const uiHelpers = {
   },
 };
 
+// ── Shared exercise WebSocket (#68) ──────────────────────────────────────
+// Auth rides on the httpOnly access_token cookie the browser sends on the
+// upgrade — no token in the URL, and no localStorage gate (SSO sessions have
+// the cookie but never a dt_token). Manages the component's ws / wsConnected /
+// pingInterval / reconnectTimeout fields so each page's destroy() teardown
+// works unchanged. Auth-refused closes (4001 invalid/expired/revoked token,
+// 4003 origin/access denied) are terminal: retrying can never succeed, and
+// each retry would emit a server-side audit event — so no reconnect loop.
+const WS_NO_RETRY_CODES = [4001, 4003];
+
+function connectExerciseWs(exerciseId, component, { viewParams = false, onMessage = null } = {}) {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const params = new URLSearchParams();
+  if (viewParams) {
+    const viewRole = localStorage.getItem('dt_view_role');
+    const viewTeam = localStorage.getItem('dt_view_team');
+    if (viewRole) params.set('view_role', viewRole);
+    if (viewTeam) params.set('view_team', viewTeam);
+  }
+  const qs = params.toString();
+  const ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}${qs ? '?' + qs : ''}`);
+  component.ws = ws;
+
+  ws.onopen = () => {
+    component.wsConnected = true;
+    component.pingInterval = setInterval(() => {
+      if (component.ws && component.ws.readyState === WebSocket.OPEN)
+        component.ws.send(JSON.stringify({ type: 'ping' }));
+    }, 30000);
+  };
+
+  ws.onclose = (ev) => {
+    component.wsConnected = false;
+    clearInterval(component.pingInterval);
+    component.pingInterval = null;
+    if (component.destroyed || WS_NO_RETRY_CODES.includes(ev.code)) return;
+    component.reconnectTimeout = setTimeout(
+      () => connectExerciseWs(exerciseId, component, { viewParams, onMessage }),
+      3000,
+    );
+  };
+
+  if (onMessage) {
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      onMessage(msg);
+    };
+  }
+}
+
 window.DT = {
   getToken,
   isAuthPage,
@@ -239,6 +290,7 @@ window.DT = {
   setPreferenceCookie,
   resolveTheme,
   applyTheme,
+  connectExerciseWs,
   uiHelpers,
 };
 

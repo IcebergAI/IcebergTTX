@@ -33,8 +33,13 @@ services:
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      # Trust proxied X-Forwarded-For only from nginx (the sole ingress). See #36.
+      # Trust proxied X-Forwarded-For only from Caddy (the sole ingress). See #36.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+      # Extra allowed origins for the CSRF and WebSocket CSWSH origin checks.
+      # Same-origin works without this (the request Host is always trusted);
+      # set it to the public origin as a safety net if any proxy hop rewrites
+      # the Host header.
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
       # SIEM forwarding (#24). The app forwards audit events itself (no sidecar);
       # these seed the admin-editable /admin/audit config. Outbound HTTP/syslog to
       # the collector works over the default bridge egress. SIEM_HTTP_TOKEN is a
@@ -82,7 +87,7 @@ services:
     networks:
       - iceberg_ttx_net
     # Copy static assets from the image-baked static_src/ into the shared
-    # volume on every start so nginx always serves the current image version.
+    # volume on every start so Caddy always serves the current image version.
     entrypoint:
       - /bin/sh
       - -c
@@ -113,31 +118,71 @@ services:
     tmpfs:
       - /tmp
 
-  nginx:
-    # Unprivileged image: runs as non-root (uid 101) and listens on 8080, so it
-    # needs no added capabilities. For production, terminate TLS in front of this
-    # (a TLS proxy / cloud LB) — do not serve the auth flow over plain HTTP.
-    image: nginxinc/nginx-unprivileged:alpine
-    restart: unless-stopped
-    depends_on:
-      app:
-        condition: service_healthy
-    ports:
-      - "80:8080"
+  caddy-init:
+    # One-shot: the named cert/config volumes initialise root-owned from the
+    # image, so chown them for the non-root caddy user below (k8s does the same
+    # job with fsGroup). Runs and exits before caddy starts.
+    image: caddy:2-alpine
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "chown -R 1000:1000 /data /config"]
     volumes:
-      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - static_files:/app/static:ro
-    networks:
-      - iceberg_ttx_net
+      - caddy_data:/data
+      - caddy_config:/config
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+    restart: "no"
+
+  caddy:
+    # Caddy terminates TLS itself with automatic HTTPS. Set SITE_ADDRESS to your
+    # domain for a real Let's Encrypt cert; the default `localhost` uses Caddy's
+    # internal self-signed CA so `docker compose up` works locally over HTTPS.
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # Non-root (the official image defaults to root): run as uid 1000. The caddy
+    # binary ships with the cap_net_bind_service file capability, so NET_BIND_SERVICE
+    # must stay in the bounding set (cap_add below) — both so exec of the setcap
+    # binary succeeds under cap_drop ALL and so the non-root process can bind :80/:443.
+    user: "1000:1000"
+    depends_on:
+      app:
+        condition: service_healthy
+      caddy-init:
+        condition: service_completed_successfully
+    environment:
+      # localhost (self-signed) | your.domain.com (Let's Encrypt) | :80 (plain HTTP)
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - static_files:/app/static:ro
+      - caddy_data:/data      # issued certs — persist across restarts (required)
+      - caddy_config:/config
+    networks:
+      - iceberg_ttx_net
+    # Read-only rootfs with the cert/config stores on volumes and a writable /tmp.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp
 
 volumes:
   postgres_data:
   uploads:
   static_files:
+  caddy_data:
+  caddy_config:
 
 networks:
   iceberg_ttx_net:

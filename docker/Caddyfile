@@ -1,0 +1,52 @@
+# IcebergTTX reverse proxy (Docker Compose) — Caddy with automatic HTTPS.
+#
+# SITE_ADDRESS selects the TLS behaviour:
+#   localhost (default) → Caddy's internal self-signed CA — for local `docker compose up`
+#   your.domain.com     → automatic Let's Encrypt cert (needs public :80 + :443 + DNS)
+#   :80  /  http://…    → plain HTTP only (put a TLS proxy in front; not recommended)
+{$SITE_ADDRESS:localhost} {
+	# Match the app's 25 MB attachment limit with headroom. The app enforces its
+	# own cap; this just rejects absurd bodies at the edge.
+	request_body {
+		max_size 30MB
+	}
+
+	# Serve compiled static assets directly from the shared volume, bypassing the
+	# app. Security headers (CSP, HSTS, X-Frame-Options, …) are emitted by the
+	# app's SecurityHeadersMiddleware — the single source of truth — so Caddy adds
+	# only nosniff (belt-and-braces) plus 7-day immutable caching here. log_skip
+	# keeps high-volume asset fetches out of the access log (nginx parity).
+	handle_path /static/* {
+		root * /app/static
+		file_server
+		header Cache-Control "public, max-age=604800, immutable"
+		header X-Content-Type-Options nosniff
+		log_skip
+	}
+
+	# Everything else → the app. Caddy proxies WebSocket upgrades transparently
+	# (streamed — response_header_timeout only bounds the upgrade/response
+	# headers, not the socket lifetime) and sets X-Forwarded-For / -Proto / -Host
+	# automatically for the app's client-IP and audit logic (#36). The transport
+	# timeouts bound a hung upstream so a stalled app worker returns 502 instead
+	# of holding client connections open indefinitely.
+	reverse_proxy app:8000 {
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 60s
+		}
+	}
+
+	# Access log to stderr with the `token` query param stripped. Browser sockets
+	# authenticate from the httpOnly cookie so the JWT is never in the URL (#68);
+	# this scrubs the token from the non-browser ?token= fallback as defence in
+	# depth so a bearer JWT can never land in a log line.
+	log {
+		output stderr
+		format filter {
+			request>uri query {
+				delete token
+			}
+		}
+	}
+}

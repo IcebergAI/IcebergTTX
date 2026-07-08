@@ -162,37 +162,15 @@ document.addEventListener('alpine:init', () => {
     },
 
     connectWs() {
-      const token = localStorage.getItem('dt_token');
-      if (!token) return;
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const params = new URLSearchParams({ token });
-      const viewRole = localStorage.getItem('dt_view_role');
-      const viewTeam = localStorage.getItem('dt_view_team');
-      if (viewRole) params.set('view_role', viewRole);
-      if (viewTeam) params.set('view_team', viewTeam);
-      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?${params}`);
-
-      this.ws.onopen = () => {
-        this.wsConnected = true;
-        this.pingInterval = setInterval(() => {
-          if (this.ws && this.ws.readyState === WebSocket.OPEN)
-            this.ws.send(JSON.stringify({ type: 'ping' }));
-        }, 30000);
-      };
-
-      this.ws.onclose = () => {
-        this.wsConnected = false;
-        clearInterval(this.pingInterval);
-        this.pingInterval = null;
-        if (!this.destroyed) this.reconnectTimeout = setTimeout(() => this.connectWs(), 3000);
-      };
-
-      this.ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'communication_received') {
-          this.upsertComm(msg.payload);
-        }
-      };
+      // Cookie-authenticated socket (#68) — shared lifecycle in app.js.
+      DT.connectExerciseWs(exerciseId, this, {
+        viewParams: true,
+        onMessage: (msg) => {
+          if (msg.type === 'communication_received') {
+            this.upsertComm(msg.payload);
+          }
+        },
+      });
     },
 
     destroy() {
