@@ -9,6 +9,13 @@ data:
   # sees the real client IP, not Caddy (#36). Narrow to the Caddy pod CIDR if the
   # app Service is ever exposed beyond the cluster-internal proxy.
   FORWARDED_ALLOW_IPS: "*"
+  # Extra allowed origins for the CSRF and WebSocket CSWSH origin checks (#68).
+  # Same-origin works without this because the request Host header is always
+  # trusted — but browser WebSocket auth depends on that Host matching the
+  # browser's Origin. Set this to the public origin (e.g. "ttx.example.com") as
+  # a safety net so sockets keep working if the Ingress or proxy chain is ever
+  # configured to rewrite the Host header.
+  TRUSTED_ORIGINS: ""
   # SIEM forwarding (#24) — non-secret routing that seeds the admin-editable
   # /admin/audit config. The app forwards audit events itself (no sidecar); the
   # HTTP/syslog sink reaches an external collector via the app's egress (left open

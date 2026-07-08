@@ -14,19 +14,28 @@
 	# Serve compiled static assets directly from the shared volume, bypassing the
 	# app. Security headers (CSP, HSTS, X-Frame-Options, …) are emitted by the
 	# app's SecurityHeadersMiddleware — the single source of truth — so Caddy adds
-	# only nosniff (belt-and-braces) plus long-lived immutable caching here.
+	# only nosniff (belt-and-braces) plus 7-day immutable caching here. log_skip
+	# keeps high-volume asset fetches out of the access log (nginx parity).
 	handle_path /static/* {
 		root * /app/static
 		file_server
-		header Cache-Control "public, immutable"
+		header Cache-Control "public, max-age=604800, immutable"
 		header X-Content-Type-Options nosniff
+		log_skip
 	}
 
 	# Everything else → the app. Caddy proxies WebSocket upgrades transparently
-	# (streamed, no idle-kill — no long read-timeout to configure) and sets
-	# X-Forwarded-For / -Proto / -Host automatically for the app's client-IP and
-	# audit logic (#36).
-	reverse_proxy app:8000
+	# (streamed — response_header_timeout only bounds the upgrade/response
+	# headers, not the socket lifetime) and sets X-Forwarded-For / -Proto / -Host
+	# automatically for the app's client-IP and audit logic (#36). The transport
+	# timeouts bound a hung upstream so a stalled app worker returns 502 instead
+	# of holding client connections open indefinitely.
+	reverse_proxy app:8000 {
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 60s
+		}
+	}
 
 	# Access log to stderr with the `token` query param stripped. Browser sockets
 	# authenticate from the httpOnly cookie so the JWT is never in the URL (#68);

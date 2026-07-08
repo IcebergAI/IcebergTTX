@@ -88,6 +88,13 @@ spec:
                 configMapKeyRef:
                   name: iceberg-ttx-config
                   key: FORWARDED_ALLOW_IPS
+            # Safety net for the WS CSWSH origin check (#68): set to the public
+            # origin in the ConfigMap if any hop rewrites the Host header.
+            - name: TRUSTED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: TRUSTED_ORIGINS
             # SIEM forwarding (#24) — non-secret routing from the ConfigMap; the
             # HTTP bearer token comes from the Secret. The app forwards audit
             # events itself (no sidecar).

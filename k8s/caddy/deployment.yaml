@@ -49,13 +49,18 @@ spec:
       containers:
         - name: caddy
           # TLS is terminated at the Ingress in front (see ingress.yaml); Caddy
-          # listens plain HTTP on 8080 with no privileged-port bind.
+          # listens plain HTTP on 8080 with no privileged-port bind. The caddy
+          # binary ships with the cap_net_bind_service FILE capability, so that
+          # cap must stay in the bounding set (add below) or exec of the setcap
+          # binary fails with EPERM under drop ALL — even though :8080 itself
+          # needs no capability.
           image: caddy:2-alpine
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+              add: ["NET_BIND_SERVICE"]
           ports:
             - containerPort: 8080
               name: http

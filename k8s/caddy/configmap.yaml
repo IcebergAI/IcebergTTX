@@ -28,17 +28,28 @@ data:
 
         # Serve compiled static assets directly from the shared volume. Security
         # headers come from the app's SecurityHeadersMiddleware (#77); Caddy adds
-        # only nosniff + immutable caching here.
+        # only nosniff + 7-day immutable caching here. log_skip keeps asset
+        # fetches (and the /static readiness/liveness probes) out of the access
+        # log (nginx access_log-off parity).
         handle_path /static/* {
             root * /app/static
             file_server
-            header Cache-Control "public, immutable"
+            header Cache-Control "public, max-age=604800, immutable"
             header X-Content-Type-Options nosniff
+            log_skip
         }
 
         # Everything else → the app. WebSocket upgrades are proxied transparently
-        # (streamed, no idle-kill); X-Forwarded-* are set automatically.
-        reverse_proxy iceberg-ttx-app:8000
+        # (streamed — response_header_timeout only bounds the upgrade/response
+        # headers, not the socket lifetime); X-Forwarded-* are set automatically.
+        # The transport timeouts bound a hung upstream so a stalled app worker
+        # returns 502 instead of holding client connections open indefinitely.
+        reverse_proxy iceberg-ttx-app:8000 {
+            transport http {
+                dial_timeout 10s
+                response_header_timeout 60s
+            }
+        }
 
         # Strip the `token` query param from access logs — browser sockets auth via
         # the httpOnly cookie so the JWT is never in the URL (#68); this scrubs the

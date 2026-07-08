@@ -48,8 +48,9 @@ async def resolve_user_from_token(
 
     email: str | None = payload.get("sub")
     if email is None:
+        # Not a decode failure — the token verified but lacks a subject claim.
         audit_service.emit(
-            "auth.token_invalid", result="fail", reason="decode error", severity="warning"
+            "auth.token_invalid", result="fail", reason="missing sub claim", severity="warning"
         )
         return None
 
