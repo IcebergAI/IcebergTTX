@@ -25,26 +25,33 @@ def _extract_token(
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
 
-async def get_current_user(
-    token: Annotated[str, Depends(_extract_token)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-    view_role: Annotated[str | None, Cookie(alias="dt_view_role")] = None,
-    view_team: Annotated[str | None, Cookie(alias="dt_view_team")] = None,
-) -> User:
-    credentials_exc = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-    )
+async def resolve_user_from_token(
+    token: str,
+    session: AsyncSession,
+    view_role: str | None = None,
+    view_team: str | None = None,
+) -> User | None:
+    """Decode a JWT and return the active, non-revoked user (role preview applied).
+
+    Returns ``None`` on any failure — bad/expired token, missing ``sub``, unknown
+    or inactive user, or a token revoked by ``token_valid_after`` (#14). This lets
+    non-HTTP callers (the WebSocket handshake) close with an appropriate code;
+    ``get_current_user`` wraps it and raises 401 for HTTP requests instead.
+    """
     try:
         payload = decode_access_token(token)
-        email: str | None = payload.get("sub")
-        if email is None:
-            raise credentials_exc
     except PyJWTError:
         audit_service.emit(
             "auth.token_invalid", result="fail", reason="decode error", severity="warning"
         )
-        raise credentials_exc
+        return None
+
+    email: str | None = payload.get("sub")
+    if email is None:
+        audit_service.emit(
+            "auth.token_invalid", result="fail", reason="decode error", severity="warning"
+        )
+        return None
 
     user = (await session.exec(select(User).where(User.email == email))).first()
     if user is None or not user.is_active:
@@ -55,13 +62,13 @@ async def get_current_user(
             reason="unknown or inactive user",
             severity="warning",
         )
-        raise credentials_exc
+        return None
 
     # Token revocation (#14): reject tokens issued before the user's cutoff. A
     # missing `iat` on a token is treated as revoked when a cutoff is set.
     if user.token_valid_after is not None:
         iat = payload.get("iat")
-        # A non-numeric/out-of-range iat falls through to the revoked branch (401)
+        # A non-numeric/out-of-range iat falls through to the revoked branch
         # rather than raising from fromtimestamp() and surfacing as a 500.
         issued_at = datetime.fromtimestamp(iat, UTC) if isinstance(iat, int | float) else None
         if issued_at is None or issued_at < user.token_valid_after:
@@ -72,9 +79,24 @@ async def get_current_user(
                 reason="revoked",
                 severity="warning",
             )
-            raise credentials_exc
+            return None
 
     return apply_role_preview(user, view_role, view_team)
+
+
+async def get_current_user(
+    token: Annotated[str, Depends(_extract_token)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    view_role: Annotated[str | None, Cookie(alias="dt_view_role")] = None,
+    view_team: Annotated[str | None, Cookie(alias="dt_view_team")] = None,
+) -> User:
+    user = await resolve_user_from_token(token, session, view_role, view_team)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+        )
+    return user
 
 
 async def get_current_actual_user(

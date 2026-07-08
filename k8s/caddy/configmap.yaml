@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: caddy-config
+  namespace: iceberg-ttx
+  labels:
+    app.kubernetes.io/name: caddy
+    app.kubernetes.io/part-of: iceberg-ttx
+data:
+  Caddyfile: |
+    {
+        # Behind the cluster Ingress, which terminates TLS and forwards here over
+        # the private network. Trust its X-Forwarded-* headers so the app sees the
+        # real client IP + https scheme (#36) — the equivalent of nginx's
+        # $proxy_add_x_forwarded_for. Caddy terminates no TLS itself here.
+        servers {
+            trusted_proxies static private_ranges
+        }
+        auto_https off
+    }
+
+    # Listen plain HTTP on 8080 (unprivileged; no capability needed). TLS is
+    # terminated at the Ingress in front (see ingress.yaml).
+    :8080 {
+        request_body {
+            max_size 30MB
+        }
+
+        # Serve compiled static assets directly from the shared volume. Security
+        # headers come from the app's SecurityHeadersMiddleware (#77); Caddy adds
+        # only nosniff + immutable caching here.
+        handle_path /static/* {
+            root * /app/static
+            file_server
+            header Cache-Control "public, immutable"
+            header X-Content-Type-Options nosniff
+        }
+
+        # Everything else → the app. WebSocket upgrades are proxied transparently
+        # (streamed, no idle-kill); X-Forwarded-* are set automatically.
+        reverse_proxy iceberg-ttx-app:8000
+
+        # Strip the `token` query param from access logs — browser sockets auth via
+        # the httpOnly cookie so the JWT is never in the URL (#68); this scrubs the
+        # non-browser ?token= fallback as defence in depth.
+        log {
+            output stderr
+            format filter {
+                request>uri query {
+                    delete token
+                }
+            }
+        }
+    }

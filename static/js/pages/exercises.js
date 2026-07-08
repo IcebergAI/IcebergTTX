@@ -186,12 +186,16 @@ document.addEventListener('alpine:init', () => {
       const token = localStorage.getItem('dt_token');
       if (!token) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const params = new URLSearchParams({ token });
+      // Auth rides on the httpOnly access_token cookie the browser sends on the
+      // upgrade — the JWT is no longer placed in the URL (#68). Only the
+      // non-secret role-preview hints go in the query string.
+      const params = new URLSearchParams();
       const viewRole = localStorage.getItem('dt_view_role');
       const viewTeam = localStorage.getItem('dt_view_team');
       if (viewRole) params.set('view_role', viewRole);
       if (viewTeam) params.set('view_team', viewTeam);
-      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?${params}`);
+      const qs = params.toString();
+      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}${qs ? '?' + qs : ''}`);
 
       this.ws.onopen = () => {
         this.wsConnected = true;
@@ -501,7 +505,8 @@ document.addEventListener('alpine:init', () => {
       const token = localStorage.getItem('dt_token');
       if (!token) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}?token=${token}`);
+      // Auth via the httpOnly access_token cookie (#68) — no token in the URL.
+      this.ws = new WebSocket(`${proto}://${location.host}/ws/exercises/${exerciseId}`);
 
       this.ws.onopen = () => {
         this.wsConnected = true;

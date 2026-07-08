@@ -2,18 +2,17 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
-from app.models.user import User, UserRole
+from app.dependencies import resolve_user_from_token
+from app.middleware import origin_allowed
+from app.models.user import UserRole
 from app.services.access_control import (
     exercise_member_for_user,
     is_actual_facilitator,
     require_exercise_access,
 )
-from app.services.auth_service import decode_access_token
-from app.services.role_preview import apply_role_preview
 from app.services.ws_manager import manager
 
 router = APIRouter()
@@ -26,26 +25,31 @@ async def exercise_ws(
     ws: WebSocket,
     exercise_id: int,
     session: SessionDep,
-    token: Annotated[str, Query()],
+    token: Annotated[str | None, Query()] = None,
     view_role: Annotated[str | None, Query()] = None,
     view_team: Annotated[str | None, Query()] = None,
 ):
-    try:
-        payload = decode_access_token(token)
-    except Exception:
+    # Auth source (#68): browsers can't set headers on a WS upgrade, so they rely
+    # on the httpOnly `access_token` cookie the browser already sends — keeping the
+    # JWT out of the URL (and out of proxy access logs). An explicit `?token=` is a
+    # fallback for non-browser clients. The cookie path is ambient, so it gets a
+    # CSWSH Origin check (mirroring CSRFOriginMiddleware); the explicit-token path,
+    # like a Bearer header, is exempt.
+    if token:
+        auth_token = token
+    elif cookie_token := ws.cookies.get("access_token"):
+        if not origin_allowed(ws.headers.get("origin"), ws.headers.get("host")):
+            await ws.close(code=4003)
+            return
+        auth_token = cookie_token
+    else:
         await ws.close(code=4001)
         return
 
-    email: str | None = payload.get("sub")
-    if not email:
+    user = await resolve_user_from_token(auth_token, session, view_role, view_team)
+    if user is None:
         await ws.close(code=4001)
         return
-
-    user = (await session.exec(select(User).where(User.email == email))).first()
-    if not user or not user.is_active:
-        await ws.close(code=4001)
-        return
-    user = apply_role_preview(user, view_role, view_team)
     try:
         await require_exercise_access(session, exercise_id, user)
     except Exception:

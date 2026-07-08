@@ -38,7 +38,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         # Populate the shared emptyDir with compiled static assets from the
-        # image so nginx (which has its own copy) can serve them directly.
+        # image so Caddy (which has its own copy) can serve them directly.
         - name: copy-static
           image: your-registry/iceberg-ttx:latest  # REPLACE with actual image
           command: ["/bin/sh", "-c", "cp -a /app/static_src/. /app/static/"]

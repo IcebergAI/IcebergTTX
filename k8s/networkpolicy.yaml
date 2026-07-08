@@ -1,7 +1,7 @@
 # Ingress NetworkPolicies (#IaC-review: flat-namespace finding).
 #
 # Default-deny ingress for the namespace, then allow only the required hops:
-#   ingress-controller → nginx:8080 → app:8000 → postgres:5432
+#   ingress-controller → caddy:8080 → app:8000 → postgres:5432
 # This confines lateral movement after any single-pod compromise. Requires a CNI
 # that enforces NetworkPolicy (Calico, Cilium, …); on a CNI that ignores them
 # these are a harmless no-op. Egress is intentionally left open so the app can
@@ -16,17 +16,17 @@ spec:
   policyTypes:
     - Ingress
 ---
-# nginx is the entry point: allow ingress on 8080 from the ingress controller
+# caddy is the entry point: allow ingress on 8080 from the ingress controller
 # (any source, since the controller's namespace/labels vary by install).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-nginx-ingress
+  name: allow-caddy-ingress
   namespace: iceberg-ttx
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: nginx
+      app.kubernetes.io/name: caddy
   policyTypes:
     - Ingress
   ingress:
@@ -34,11 +34,11 @@ spec:
         - protocol: TCP
           port: 8080
 ---
-# The app accepts traffic only from nginx.
+# The app accepts traffic only from caddy.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-app-from-nginx
+  name: allow-app-from-caddy
   namespace: iceberg-ttx
 spec:
   podSelector:
@@ -50,7 +50,7 @@ spec:
     - from:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: nginx
+              app.kubernetes.io/name: caddy
       ports:
         - protocol: TCP
           port: 8000

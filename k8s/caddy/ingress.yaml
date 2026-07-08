@@ -1,9 +1,9 @@
 # TLS termination for IcebergTTX (#IaC-review: no-TLS finding).
 #
-# Terminates HTTPS at the ingress controller and forwards to the nginx Service
-# over the cluster-internal network. Serving the auth flow over plaintext HTTP
-# leaks credentials and the JWT cookie (and the app sets Secure cookies, so auth
-# breaks over plain HTTP anyway).
+# Terminates HTTPS at the cluster's ingress controller and forwards to the caddy
+# Service over the cluster-internal network. Serving the auth flow over plaintext
+# HTTP leaks credentials and the JWT cookie (and the app sets Secure cookies, so
+# auth breaks over plain HTTP anyway).
 #
 # Prerequisites — REPLACE before applying:
 #   - A running ingress controller (ingress-nginx, Traefik, cloud LB ingress …);
@@ -40,6 +40,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: nginx
+                name: caddy
                 port:
                   number: 80

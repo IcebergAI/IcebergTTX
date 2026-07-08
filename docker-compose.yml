@@ -33,7 +33,7 @@ services:
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      # Trust proxied X-Forwarded-For only from nginx (the sole ingress). See #36.
+      # Trust proxied X-Forwarded-For only from Caddy (the sole ingress). See #36.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
       # SIEM forwarding (#24). The app forwards audit events itself (no sidecar);
       # these seed the admin-editable /admin/audit config. Outbound HTTP/syslog to
@@ -82,7 +82,7 @@ services:
     networks:
       - iceberg_ttx_net
     # Copy static assets from the image-baked static_src/ into the shared
-    # volume on every start so nginx always serves the current image version.
+    # volume on every start so Caddy always serves the current image version.
     entrypoint:
       - /bin/sh
       - -c
@@ -113,31 +113,47 @@ services:
     tmpfs:
       - /tmp
 
-  nginx:
-    # Unprivileged image: runs as non-root (uid 101) and listens on 8080, so it
-    # needs no added capabilities. For production, terminate TLS in front of this
-    # (a TLS proxy / cloud LB) — do not serve the auth flow over plain HTTP.
-    image: nginxinc/nginx-unprivileged:alpine
+  caddy:
+    # Caddy terminates TLS itself with automatic HTTPS. Set SITE_ADDRESS to your
+    # domain for a real Let's Encrypt cert; the default `localhost` uses Caddy's
+    # internal self-signed CA so `docker compose up` works locally over HTTPS.
+    image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       app:
         condition: service_healthy
+    environment:
+      # localhost (self-signed) | your.domain.com (Let's Encrypt) | :80 (plain HTTP)
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
     ports:
-      - "80:8080"
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
     volumes:
-      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
       - static_files:/app/static:ro
+      - caddy_data:/data      # issued certs — persist across restarts (required)
+      - caddy_config:/config
     networks:
       - iceberg_ttx_net
+    # Drop all caps except the one needed to bind :80/:443 as a non-root process;
+    # read-only rootfs with the cert/config stores on volumes and a writable /tmp.
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp
 
 volumes:
   postgres_data:
   uploads:
   static_files:
+  caddy_data:
+  caddy_config:
 
 networks:
   iceberg_ttx_net:

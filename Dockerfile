@@ -43,7 +43,7 @@ COPY --from=tailwind-builder /app/static/ static/
 
 # static_src/ is never overridden by a volume mount — used by the entrypoint
 # (and k8s init containers) to populate shared static volumes at startup so
-# nginx always serves assets matching the running image version.
+# Caddy always serves assets matching the running image version.
 RUN cp -a static/ static_src/ && \
     mkdir -p uploads/inject_attachments && \
     chown -R appuser:appgroup /app
@@ -53,7 +53,7 @@ USER appuser
 EXPOSE 8000
 
 # Trust X-Forwarded-For/Proto from the reverse proxy so request.client.host is the
-# real client, not nginx (#36). The app port is never exposed outside the private
+# real client, not Caddy (#36). The app port is never exposed outside the private
 # proxy→app network, so trusting any peer is safe; override FORWARDED_ALLOW_IPS to
 # a specific proxy range if the app is ever reachable directly. uvicorn reads this
 # env var natively.
