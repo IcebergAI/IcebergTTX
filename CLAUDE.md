@@ -139,32 +139,12 @@ revised/             # Claude Design prototype (static reference, not served)
 
 ## Build Status
 
-| Phase | Status |
-|-------|--------|
-| 1 — Foundation (auth, config, DB) | ✅ Complete |
-| 2 — Scenarios (CRUD, import/export, branching) | ✅ Complete |
-| 3 — Exercises + Members | ✅ Complete |
-| 4 — Injects + WebSocket | ✅ Complete |
-| 5 — Responses + Branching | ✅ Complete |
-| 6 — Communications | ✅ Complete |
-| 7 — Polish (Tailwind CLI, CI, exports) | ✅ Complete |
-| 8 — LLM Integration (Claude API) | ✅ Complete |
-| 9 — UI Redesign (warm stone palette, sidebar, IBM Plex) | ✅ Complete |
-| 10 — Expected actions on injects (schema + editor + LLM rubric) | ✅ Complete |
-| 11 — Participant communications (outbound send from inbox) | ✅ Complete |
-| 12 — Group-scoped injects + file attachments | ✅ Complete |
-| 13 — Dark mode + role preview + settings page + sample scenarios | ✅ Complete |
-| 14 — Containerized deployment (Docker Compose + Kubernetes + Postgres + nginx) | ✅ Complete |
-| 15 — Linear inject flows + team comment threads | ✅ Complete |
-| 16 — Security hardening (P0/P1: #8 reg roles, #9 secret validation, #10 cookie/CSRF, #11 login rate limit, #23 audit logging) | ✅ Complete |
-| 17 — Async migration (asyncpg/AsyncSession, Postgres-only, response models, FastAPI-skill alignment) | ✅ Complete |
-| 18 — Tech-debt cleanup (#17 logging config, #18 iterative cycle detection, #19 Alembic, #20 task lifecycle, #21/#31 payload/role-preview DRY, #30 WS team-spoof fix, #32 nits) | ✅ Complete |
-| 19 — Security hardening (P2: #13 password policy, #14 token revocation, #15 sample-loader path traversal, #16 attachment content-type allowlist + nosniff) | ✅ Complete |
-| 20 — Facilitator ownership scoping (#12: per-exercise `created_by` access, co-facilitator membership, `User.is_admin` global override) | ✅ Complete |
-| 21 — SIEM audit forwarding (#24: app-as-forwarder file/syslog/http sinks, admin-editable `AuditSettings` + `/admin/audit` UI, env-only HTTP token) | ✅ Complete |
-| 22 — Strict CSP (#77: `@alpinejs/csp` build + `Alpine.data()` registries, all inline JS externalised, app-level `SecurityHeadersMiddleware`, nginx/k8s headers removed) | ✅ Complete |
-| 23 — OIDC / SSO (#25: adapter-based Authorization-Code+PKCE via Authlib, Entra + Authentik + Auth0 + Okta adapters, JIT provisioning, `auth_mode` local/oidc/both) | ✅ Complete |
-| 24 — Caddy reverse proxy + WS cookie auth (#68: nginx→Caddy, compose auto-HTTPS, k8s TLS-at-Ingress; WS authenticates via httpOnly cookie + CSWSH Origin check, token out of the URL) | ✅ Complete |
+All **24 build phases complete**: foundation/auth → scenarios → exercises/members →
+injects + WebSocket → responses/branching → communications → LLM integration →
+UI/design-system alignment → containerized deployment → async (asyncpg) migration →
+security hardening (#8–#16, #23) → facilitator ownership scoping (#12) → SIEM
+forwarding (#24) → strict CSP (#77) → OIDC/SSO (#25) → Caddy reverse proxy + WS
+cookie auth (#68). Per-phase detail lives in git history / merged PRs.
 
 Current test count: **317 passing** (1 skipped).
 
@@ -190,4 +170,4 @@ Schema changes: edit the models, then `alembic revision --autogenerate -m "descr
 Write tests for critical functionality in Pytest (async — `asyncio_mode = "auto"`). One test file per resource; fixtures in `tests/conftest.py`. The suite runs against a real **Postgres** spun up by `testcontainers` (`postgres:17`) before the app is imported, so `app.database.engine` and the test session share the same DB; set `DATABASE_URL_OVERRIDE_FOR_TESTS` to point at an external Postgres instead. Tests use `httpx.AsyncClient` (+ `httpx-ws` `aconnect_ws` for WebSockets) over `ASGIWebSocketTransport`, not Starlette's `TestClient`. Per-test isolation is transaction-rollback (`AsyncSession` joined to an outer transaction with `join_transaction_mode="create_savepoint"`); the `client` is session-scoped (one cookie jar — the autouse `_override_session` fixture clears cookies and wires the per-test session). The engine uses `NullPool` and tests run on one session-scoped event loop. **Parallel by default**: `addopts = -n auto` (pytest-xdist) runs the suite across CPU cores; each worker is a separate process that spins up its **own** Postgres testcontainer + app engine, so there's no shared DB or in-memory state to collide (safe because `conftest.py` starts the container and reassigns `app.database.engine` at import, per process). A single-test debug loop can opt out with `pytest -n0 …`.
 
 ## Maintenance
-Keep README.md, CLAUDE.md, and PLAN.md up to date. Update the Build Status table above when phases complete. Record any significant dependency or architectural decisions here.
+Keep README.md, CLAUDE.md, and PLAN.md up to date. Update the Build Status summary above when phases complete. Record any significant dependency or architectural decisions here.
