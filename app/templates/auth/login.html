@@ -57,7 +57,7 @@
       </div>
     {% endif %}
 
-    {% if local_auth %}
+    {% if local_auth and registration_enabled %}
     <p class="mt-5 text-[13px] text-center text-muted">
       No account?
       <a href="/register" class="text-ink-soft font-medium hover:underline">Register</a>

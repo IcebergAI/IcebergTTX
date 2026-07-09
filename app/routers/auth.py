@@ -19,7 +19,7 @@ from app.schemas.auth import (
 )
 from app.services import audit_service
 from app.services.auth_service import create_access_token, hash_password, verify_password
-from app.services.rate_limit import login_rate_limiter
+from app.services.rate_limit import login_rate_limiter, registration_rate_limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -49,9 +49,49 @@ def _require_local_auth() -> None:
         )
 
 
+def _require_registration_enabled() -> None:
+    """Guard self-service registration when it is turned off (#67)."""
+    if not settings.registration_enabled:
+        audit_service.emit(
+            "auth.register",
+            result="deny",
+            reason="registration disabled",
+            severity="warning",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Self-registration is disabled.",
+        )
+
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, session: Annotated[AsyncSession, Depends(get_session)]):
+async def register(
+    body: RegisterRequest,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
     _require_local_auth()
+    _require_registration_enabled()
+    # Per-IP flood cap (#67): every attempt counts (not just failures), so a host
+    # cannot mass-create accounts. Keyed by IP alone — the email is the thing being
+    # created, so it can't be part of the key.
+    ip = client_ip(request) or "unknown"
+    if registration_rate_limiter.is_limited(ip):
+        retry_after = registration_rate_limiter.retry_after(ip)
+        audit_service.emit(
+            "auth.register",
+            result="deny",
+            actor_email=body.email,
+            reason="rate limited",
+            severity="warning",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many registration attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    registration_rate_limiter.record_failure(ip)
+
     if (await session.exec(select(User).where(User.email == body.email))).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 

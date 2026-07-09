@@ -54,6 +54,39 @@ async def test_register_ignores_observer_role(client: AsyncClient):
     assert resp.json()["role"] == "participant"
 
 
+async def test_register_disabled_returns_403(client: AsyncClient, monkeypatch):
+    """#67: REGISTRATION_ENABLED=false closes self-service registration."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "registration_enabled", False)
+    resp = await client.post("/api/auth/register", json={
+        "email": "nope@example.com",
+        "display_name": "Nope",
+        "password": "secret123456",
+    })
+    assert resp.status_code == 403
+
+
+async def test_register_rate_limited(client: AsyncClient):
+    """#67: over REGISTRATION_MAX_ATTEMPTS from one IP returns 429 + Retry-After."""
+    from app.config import settings
+
+    for i in range(settings.registration_max_attempts):
+        resp = await client.post("/api/auth/register", json={
+            "email": f"user{i}@example.com",
+            "display_name": f"User {i}",
+            "password": "secret123456",
+        })
+        assert resp.status_code == 201, resp.text
+    resp = await client.post("/api/auth/register", json={
+        "email": "overflow@example.com",
+        "display_name": "Overflow",
+        "password": "secret123456",
+    })
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) > 0
+
+
 async def test_login_success(client: AsyncClient, facilitator: User):
     resp = await client.post("/api/auth/login", json={
         "email": facilitator.email,

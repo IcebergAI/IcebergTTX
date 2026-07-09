@@ -90,3 +90,9 @@ class RateLimiter:
 login_rate_limiter = RateLimiter(
     settings.login_max_attempts, settings.login_lockout_seconds
 )
+
+# Registration flood protection (#67), keyed per source IP (every attempt counts,
+# not just failures) — caps mass account creation from one host.
+registration_rate_limiter = RateLimiter(
+    settings.registration_max_attempts, settings.registration_lockout_seconds
+)

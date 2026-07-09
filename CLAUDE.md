@@ -51,7 +51,9 @@ API-first architecture.
 
 **Startup secret validation**: `validate_settings()` (`config.py`) is called from the lifespan startup and aborts the app if `secret_key` is unset, equal to the well-known default, or shorter than 32 chars — unless `DEV_MODE=true`. This prevents silently signing JWTs with a publicly-known key (#9). `dev_mode` also relaxes the Secure-cookie requirement for local HTTP. Tests set `DEV_MODE=true` in `conftest.py` before app import.
 
-**Self-registration is participant-only**: `RegisterRequest` no longer accepts `role` — `POST /api/auth/register` always creates a `participant` (#8). Privileged roles are assigned out-of-band (seeded or via a future admin endpoint); extra body fields are ignored by pydantic. The register template no longer offers a role selector.
+**Self-registration is participant-only**: `RegisterRequest` no longer accepts `role` — `POST /api/auth/register` always creates a `participant` (#8). Privileged roles are assigned out-of-band (seeded or via the admin create-user endpoint below); extra body fields are ignored by pydantic. The register template no longer offers a role selector.
+
+**Registration controls (#67)**: `REGISTRATION_ENABLED` (default `true`) gates self-service registration. When `false`, `_require_registration_enabled()` (`auth.py`) makes `POST /api/auth/register` return `403` (with an `auth.register` `deny` audit event), the `/register` UI route redirects to `/login`, and the login page hides the "Register" link (`_auth_context()` passes `registration_enabled` to the template). Independently of the toggle, registration is flood-protected by a **second `RateLimiter` singleton** `registration_rate_limiter` (`rate_limit.py`), keyed **per source IP** and counting **every** attempt (not just failures — the email is what's being created, so it can't be part of the key); over `REGISTRATION_MAX_ATTEMPTS` (5) within `REGISTRATION_LOCKOUT_SECONDS` (3600, deliberately longer than login's 300 — this throttles account creation, not password guessing) the route returns `429` + `Retry-After`. The admin path is `POST /api/users` (`users.py`, `require_admin`): an admin provisions an account with any `role`/`is_admin` (schema `AdminCreateUserRequest`), bypassing both the toggle and the rate limit, audited as `admin.user_create`. Same single-process constraint as the login limiter; tests clear both via the conftest autouse fixture.
 
 **Cookie security & CSRF**: the auth cookie is set with `Secure` (gated on `settings.cookies_secure`, default `not dev_mode`; override with `COOKIE_SECURE`). `CSRFOriginMiddleware` (`app/middleware.py`) verifies `Origin`/`Referer` for cookie-authenticated state-changing requests under `/api/` (#10). Bearer-`Authorization` requests and `/api/auth/*` are exempt — the app's own fetch calls use the localStorage Bearer token, so the cookie is effectively navigation-only. Extra allowed origins via `TRUSTED_ORIGINS`.
 
@@ -146,7 +148,7 @@ security hardening (#8–#16, #23) → facilitator ownership scoping (#12) → S
 forwarding (#24) → strict CSP (#77) → OIDC/SSO (#25) → Caddy reverse proxy + WS
 cookie auth (#68). Per-phase detail lives in git history / merged PRs.
 
-Current test count: **317 passing** (1 skipped).
+Current test count: **323 passing** (1 skipped).
 
 ---
 

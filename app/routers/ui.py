@@ -23,6 +23,7 @@ def _auth_context() -> dict:
     oidc_service.ensure_registered()
     return {
         "local_auth": settings.local_auth_enabled,
+        "registration_enabled": settings.registration_enabled,
         "oidc_providers": [(p.key, p.display_name) for p in oidc_service.registered_providers()],
     }
 
@@ -127,8 +128,9 @@ def register_page(request: Request, user: UserContext):
     if user:
         return RedirectResponse("/dashboard")
     # Self-registration is a local-auth affordance; redirect to /login when
-    # local auth is off (OIDC-only) so there's no dead form.
-    if not settings.local_auth_enabled:
+    # local auth is off (OIDC-only) or self-registration is disabled (#67) so
+    # there's no dead form.
+    if not settings.local_auth_enabled or not settings.registration_enabled:
         return RedirectResponse("/login")
     return templates.TemplateResponse(request, "auth/register.html", _auth_context())
 
