@@ -7,12 +7,31 @@ icon: material/file-tree
 
 # Scenario authoring
 
-Scenarios are imported and exported as **JSON**. Build one in the inject-tree editor
-(**Scenarios → New scenario**) or import a pre-built file with **Import JSON**. Each
-inject has a title, content, optional target teams, and branch options that point to
-the next inject.
+Scenarios are built in the **visual scenario builder** (**Scenarios → New
+scenario**) — no JSON editing required. JSON is the **interchange format**:
+import a pre-built scenario file with **Import JSON**, and export any scenario
+from its detail page to share it or version it.
 
-## Top-level structure
+## The builder
+
+The builder is a three-pane workspace:
+
+- **Outline** (left) — switch between the **Scenario brief** (title, description,
+  author, estimated duration, tags, start inject, debrief notes), **Participant
+  teams** (the routing groups injects can target), and the list of **injects**,
+  each badged as *start*, *branch*, *linear*, or *end*.
+- **Editor** (centre) — the selected inject: its ID, title, and content; whether
+  participants may submit a **free-text response**; **target teams** (chips —
+  leave all unchecked for a shared inject); **progression** (branch options, or a
+  linear *next inject* when there are no options); and **expected actions** —
+  evaluator cues shown in the facilitator console.
+- **Readiness** (right) — inject/branch/targeting counts, a live **validation**
+  list (blocking issues disable saving), and a **flow preview** of the path from
+  the start inject plus any disconnected nodes.
+
+## JSON format
+
+### Top-level structure
 
 ```json title="scenario.json"
 {
@@ -20,6 +39,7 @@ the next inject.
   "title": "Ransomware incident",
   "description": "A simulated ransomware attack affecting core infrastructure.",
   "tags": ["cyber", "ransomware"],
+  "metadata": { "author": "IcebergTTX", "estimated_duration_minutes": 90 },
   "participant_teams": [
     { "id": "it_ops", "label": "IT Operations" },
     { "id": "legal",  "label": "Legal & Compliance" }
@@ -30,7 +50,7 @@ the next inject.
 }
 ```
 
-## An inject
+### An inject
 
 ```json
 {
@@ -45,14 +65,14 @@ the next inject.
     { "id": "opt_isolate", "label": "Isolate affected systems immediately", "next_inject_id": "inject_02a" },
     { "id": "opt_monitor", "label": "Monitor and gather more information",  "next_inject_id": "inject_02b" }
   ],
+  "expected_actions": ["Notify CISO immediately", "Preserve forensic evidence"],
   "triggers_communications": [
     {
       "direction": "inbound",
       "external_entity": "NCSC",
       "subject": "Ransomware advisory",
       "body": "We have been made aware of a campaign targeting...",
-      "delay_seconds": 120,
-      "visible_to_teams": ["it_ops"]
+      "delay_after_release_seconds": 120
     }
   ]
 }
@@ -73,15 +93,20 @@ the next inject.
     submits a free-text response, then the facilitator releases the next inject.
     This chains injects into a straight-line sequence.
 
+`expected_actions`
+:   Evaluator cues shown alongside responses in the facilitator console (and used
+    by the LLM assessment when enabled).
+
 `triggers_communications`
 :   Messages automatically injected into the comms inbox when this inject is
-    released. `delay_seconds` staggers delivery.
+    released, visible to all teams. `delay_after_release_seconds` staggers
+    delivery.
 
 !!! note "Validation"
-    The editor validates that every `next_inject_id` reference exists, and the
-    scenario detail page shows a live validation sidebar. Node-level and per-option
-    `next_inject_id` edges are also checked for **cycles** — linear chains can't
-    loop. Fix any issues before running an exercise.
+    The builder's readiness pane validates as you type, and blocking issues
+    disable saving; the scenario detail page shows the same validation sidebar.
+    Every `next_inject_id` reference must exist, and node-level and per-option
+    `next_inject_id` edges are checked for **cycles** — linear chains can't loop.
 
 ## Branching model — "pull, not push"
 
@@ -94,7 +119,7 @@ keeps a human in the loop rather than auto-advancing the scenario.
 When enabled on an exercise (and `ANTHROPIC_API_KEY` is set), Claude evaluates each
 participant response and produces:
 
-- a **decision-quality rating** — strong, acceptable, or poor;
+- a **decision-quality rating** — good, adequate, or poor;
 - a brief assessment of the reasoning;
 - a **suggested follow-up inject** the facilitator can approve and queue.
 
@@ -104,7 +129,8 @@ rated as poor.
 
 ## Running an exercise
 
-1. **Create or import a scenario** — build an inject tree, or load a JSON file.
+1. **Create or import a scenario** — build it in the scenario builder, or load a
+   JSON file.
 2. **Create an exercise** — give it a title, select a scenario, optionally enable
    LLM assessment.
 3. **Add participants** — search registered users in the Participants panel and
@@ -115,8 +141,8 @@ rated as poor.
 5. **Inject communications** — from **Communications**, click *Inject inbound* to
    simulate a message from an external entity (ICO, NCSC, CEO…) targeted at specific
    teams.
-6. **Complete and export** — close the exercise, then export the transcript (JSON),
-   responses (CSV), or AI assessments (JSON).
+6. **Complete and export** — close the exercise, then export the full transcript
+   (JSON — injects, responses, comments, members) or the responses table (CSV).
 
 !!! tip "Scenario packs"
     Scenarios can be exported from the detail page and re-imported into a different
