@@ -1,0 +1,290 @@
+/* ==========================================================================
+ *  IcebergTTX docs — Iceberg design system mapped onto the Material theme.
+ *
+ *  Strategy: define the Iceberg oklch tokens per colour scheme, then point
+ *  Material's --md-* variables at them so the whole theme recolours. The
+ *  header is the app's dark command-center "rail" in BOTH schemes; links and
+ *  interactive accents are the fixed glacial-cyan.
+ *
+ *  Token source of truth: deep_thought/static/css/iceberg.css.
+ * ========================================================================== */
+
+/* ---- Fonts (self-hosted; @font-face rules live in fonts.css) ------------- */
+:root {
+  --md-text-font: "Archivo";
+  --md-code-font: "JetBrains Mono";
+}
+
+/* ==========================================================================
+ *  LIGHT scheme
+ * ========================================================================== */
+[data-md-color-scheme="default"] {
+  /* Iceberg tokens (light) */
+  --paper:        oklch(0.984 0.006 240);
+  --surface:      oklch(1 0 0);
+  --surface-2:    oklch(0.972 0.008 240);
+  --surface-ink:  oklch(0.22 0.026 256);
+  --ink:          oklch(0.26 0.026 262);
+  --ink-soft:     oklch(0.44 0.022 260);
+  --muted:        oklch(0.58 0.017 258);
+  --faint:        oklch(0.70 0.012 258);
+  --line:         oklch(0.915 0.008 248);
+  --line-strong:  oklch(0.855 0.012 248);
+
+  --accent:       oklch(0.66 0.118 226);
+  --accent-ink:   oklch(0.50 0.115 234);
+  --accent-deep:  oklch(0.42 0.10 238);
+  --accent-soft:  oklch(0.955 0.028 226);
+  --accent-line:  oklch(0.86 0.055 226);
+  --accent-glow:  oklch(0.66 0.118 226 / 0.16);
+
+  --rail:         oklch(0.225 0.024 256);
+  --rail-2:       oklch(0.285 0.026 256);
+  --rail-line:    oklch(0.34 0.022 256);
+  --rail-ink:     oklch(0.80 0.02 250);
+
+  /* Material mapping */
+  --md-default-bg-color:            var(--paper);
+  --md-default-bg-color--light:     color-mix(in oklch, var(--paper), transparent 30%);
+  --md-default-fg-color:            var(--ink);
+  --md-default-fg-color--light:     var(--ink-soft);
+  --md-default-fg-color--lighter:   var(--muted);
+  --md-default-fg-color--lightest:  var(--line);
+
+  --md-primary-fg-color:            var(--rail);      /* header background */
+  --md-primary-fg-color--light:     var(--rail-2);
+  --md-primary-fg-color--dark:      var(--surface-ink);
+  --md-primary-bg-color:            oklch(0.97 0.01 250);
+  --md-primary-bg-color--light:     var(--rail-ink);
+
+  --md-accent-fg-color:             var(--accent-ink);
+  --md-accent-fg-color--transparent: var(--accent-glow);
+
+  --md-typeset-a-color:             var(--accent-ink);
+  --md-typeset-mark-color:          var(--accent-glow);
+
+  --md-code-bg-color:               var(--surface-2);
+  --md-code-fg-color:               var(--ink);
+
+  --md-footer-bg-color:             var(--surface-ink);
+  --md-footer-bg-color--dark:       oklch(0.15 0.02 256);
+  --md-footer-fg-color:             oklch(0.82 0.02 250);
+  --md-footer-fg-color--light:      oklch(0.62 0.018 252);
+  --md-footer-fg-color--lighter:    oklch(0.50 0.016 254);
+}
+
+/* ==========================================================================
+ *  DARK (slate) scheme
+ * ========================================================================== */
+[data-md-color-scheme="slate"] {
+  --paper:        oklch(0.185 0.02 256);
+  --surface:      oklch(0.23 0.022 256);
+  --surface-2:    oklch(0.27 0.024 256);
+  --surface-ink:  oklch(0.15 0.02 256);
+  --ink:          oklch(0.93 0.012 250);
+  --ink-soft:     oklch(0.80 0.015 252);
+  --muted:        oklch(0.66 0.016 255);
+  --faint:        oklch(0.55 0.014 256);
+  --line:         oklch(0.32 0.018 256);
+  --line-strong:  oklch(0.40 0.022 256);
+
+  --accent:       oklch(0.72 0.12 226);
+  --accent-ink:   oklch(0.80 0.11 226);
+  --accent-deep:  oklch(0.86 0.085 226);
+  --accent-soft:  oklch(0.30 0.05 232);
+  --accent-line:  oklch(0.44 0.07 230);
+  --accent-glow:  oklch(0.72 0.12 226 / 0.22);
+
+  --rail:         oklch(0.16 0.018 256);
+  --rail-2:       oklch(0.235 0.022 256);
+  --rail-line:    oklch(0.30 0.02 256);
+  --rail-ink:     oklch(0.82 0.02 250);
+
+  --md-default-bg-color:            var(--paper);
+  --md-default-bg-color--light:     color-mix(in oklch, var(--paper), transparent 30%);
+  --md-default-fg-color:            var(--ink);
+  --md-default-fg-color--light:     var(--ink-soft);
+  --md-default-fg-color--lighter:   var(--muted);
+  --md-default-fg-color--lightest:  var(--line);
+
+  --md-primary-fg-color:            var(--rail);
+  --md-primary-fg-color--light:     var(--rail-2);
+  --md-primary-fg-color--dark:      var(--surface-ink);
+  --md-primary-bg-color:            var(--ink);
+  --md-primary-bg-color--light:     var(--rail-ink);
+
+  --md-accent-fg-color:             var(--accent-ink);
+  --md-accent-fg-color--transparent: var(--accent-glow);
+
+  --md-typeset-a-color:             var(--accent-ink);
+  --md-typeset-mark-color:          var(--accent-glow);
+
+  --md-code-bg-color:               var(--surface-ink);
+  --md-code-fg-color:               var(--ink);
+
+  --md-footer-bg-color:             var(--surface-ink);
+  --md-footer-bg-color--dark:       oklch(0.12 0.018 256);
+  --md-footer-fg-color:             var(--rail-ink);
+  --md-footer-fg-color--light:      var(--muted);
+  --md-footer-fg-color--lighter:    var(--faint);
+}
+
+/* ==========================================================================
+ *  Chrome
+ * ========================================================================== */
+
+/* 3px glacial-cyan brandbar strip pinned above the (dark) header */
+.md-header {
+  border-top: 3px solid var(--accent);
+  box-shadow: 0 1px 0 var(--rail-line);
+}
+.md-tabs {
+  background-color: var(--md-primary-fg-color--dark);
+}
+
+/* Search field: darker well on the dark header */
+.md-search__form {
+  background-color: color-mix(in oklch, var(--rail-2), transparent 10%);
+}
+.md-search__form:hover {
+  background-color: var(--rail-2);
+}
+
+/* Links: cyan, with an accent underline on hover */
+.md-typeset a {
+  text-decoration-color: var(--accent-line);
+}
+.md-typeset a:hover {
+  color: var(--accent);
+}
+
+/* ==========================================================================
+ *  Typography — Spectral (serif) for the editorial layer
+ * ========================================================================== */
+.md-typeset h1 {
+  font-family: "Spectral", Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.md-typeset blockquote {
+  font-family: "Spectral", Georgia, serif;
+  border-left: 3px solid var(--accent);
+  color: var(--ink-soft);
+}
+
+/* Mono eyebrow / small-caps kicker used on pages */
+.md-typeset .eyebrow {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+
+/* Inline code + code blocks pick up token surfaces */
+.md-typeset code {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+/* ==========================================================================
+ *  Hero (landing page) — dark command-center panel
+ * ========================================================================== */
+.iceberg-hero {
+  margin: -1rem 0 2.5rem;
+  padding: 3rem 2.5rem 3.25rem;
+  border-radius: 14px;
+  border: 1px solid var(--rail-line);
+  background:
+    radial-gradient(120% 140% at 100% 0%, oklch(0.34 0.06 232 / 0.55), transparent 55%),
+    linear-gradient(160deg, var(--rail-2), var(--surface-ink));
+  color: oklch(0.93 0.012 250);
+  box-shadow: 0 20px 48px -24px oklch(0.15 0.03 256 / 0.7);
+}
+.iceberg-hero img.hero-wordmark {
+  height: 3.1rem;
+  width: auto;
+  margin: 0 0 1.25rem;
+}
+.iceberg-hero .eyebrow {
+  color: var(--accent-deep);
+  margin-bottom: 0.75rem;
+}
+.iceberg-hero p.tagline {
+  font-family: "Spectral", Georgia, serif;
+  font-size: 1.28rem;
+  line-height: 1.5;
+  max-width: 44ch;
+  color: oklch(0.86 0.015 252);
+  margin: 0.25rem 0 1.75rem;
+}
+.iceberg-hero .hero-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+/* Primary/ghost buttons (Material .md-button) tuned to the cyan accent */
+.md-typeset .md-button {
+  border-radius: 8px;
+  border-color: var(--accent-line);
+  color: var(--accent-deep);
+  transition: background-color .15s, color .15s, border-color .15s;
+}
+.md-typeset .md-button:focus,
+.md-typeset .md-button:hover {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: oklch(0.16 0.02 256);
+}
+.md-typeset .md-button--primary {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: oklch(0.16 0.02 256);
+}
+.md-typeset .md-button--primary:hover {
+  background-color: var(--accent-ink);
+  border-color: var(--accent-ink);
+  color: oklch(0.98 0.01 250);
+}
+.iceberg-hero .md-button {
+  border-color: color-mix(in oklch, var(--accent), transparent 40%);
+  color: oklch(0.9 0.02 232);
+}
+
+/* ==========================================================================
+ *  Grid cards — surface panels with an accent hover
+ * ========================================================================== */
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid > .card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background-color: var(--surface);
+  box-shadow: 0 1px 2px oklch(0.45 0.03 256 / 0.05);
+  transition: border-color .15s, box-shadow .15s, transform .15s;
+}
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid > .card:hover {
+  border-color: var(--accent-line);
+  box-shadow: 0 10px 26px -14px oklch(0.4 0.04 256 / 0.35);
+  transform: translateY(-2px);
+}
+.md-typeset .grid.cards > ul > li > hr {
+  border-bottom-color: var(--line);
+}
+
+/* Screenshots: framed with the token line + soft lift */
+.md-typeset img.shot {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px -18px oklch(0.4 0.04 256 / 0.4);
+}
+
+/* Admonitions: accent the "note/info" flavour to cyan */
+.md-typeset .admonition.note,
+.md-typeset .admonition.info,
+.md-typeset details.note,
+.md-typeset details.info {
+  border-left-color: var(--accent);
+}
