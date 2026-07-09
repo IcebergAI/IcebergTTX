@@ -1,0 +1,50 @@
+name: CodeQL
+
+# Static analysis (SAST) via GitHub CodeQL (#80). Committed + SHA-pinned per
+# CICD-SEC-3, like ci.yml / docs.yml. The elevated security-events: write scope
+# lives only in this job — ci.yml stays least-privilege (contents: read).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # weekly (Mon 06:00 UTC) — catches new advisories in merged code
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+      actions: read # read workflow run metadata for the matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      # Source (no-build) extraction for both languages — nothing to compile,
+      # and the Python extractor does not need dependencies installed.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@02c5e83432fe5497fd85b873b6c9f16a8578e1d9 # v3
+        with:
+          languages: ${{ matrix.language }}
+          # Default (security) query suite. Promote to "security-extended" later
+          # if the extra queries prove worthwhile after triage.
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@02c5e83432fe5497fd85b873b6c9f16a8578e1d9 # v3
+        with:
+          category: "/language:${{ matrix.language }}"
