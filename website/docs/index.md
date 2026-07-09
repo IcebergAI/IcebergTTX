@@ -44,8 +44,9 @@ server-rendered UI, and ships with Docker Compose and Kubernetes manifests.
 
     ---
 
-    Build or import JSON scenario files with branching inject trees or linear
-    chained flows. Every `next_inject_id` reference is validated before you run.
+    Build branching inject trees or linear chained flows in the visual scenario
+    builder, or import them as JSON. Every branch reference is validated live
+    before you run.
 
     [:octicons-arrow-right-24: Scenario authoring](scenarios.md)
 

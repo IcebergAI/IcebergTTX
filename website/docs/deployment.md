@@ -65,7 +65,7 @@ Manifests live in `k8s/`. Apply in order:
 
 ```bash
 kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/secrets.yaml k8s/configmap.yaml
+kubectl apply -f k8s/secrets.yaml -f k8s/configmap.yaml
 
 kubectl apply -f k8s/postgres/
 kubectl rollout status statefulset/postgres -n iceberg-ttx

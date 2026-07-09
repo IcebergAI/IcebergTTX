@@ -248,9 +248,24 @@
   border-color: var(--accent-ink);
   color: oklch(0.98 0.01 250);
 }
+/* The hero panel is dark in BOTH schemes, so its buttons use fixed colours.
+ * The theme's plain .md-button carries a --line background, which is
+ * near-white in the light scheme — the light hero text would vanish on it. */
 .iceberg-hero .md-button {
+  background-color: oklch(1 0 0 / 0.08);
   border-color: color-mix(in oklch, var(--accent), transparent 40%);
   color: oklch(0.9 0.02 232);
+}
+.iceberg-hero .md-button--primary {
+  background-color: oklch(0.66 0.118 226);
+  border-color: oklch(0.66 0.118 226);
+  color: oklch(0.16 0.02 256);
+}
+.iceberg-hero .md-button--primary:focus,
+.iceberg-hero .md-button--primary:hover {
+  background-color: oklch(0.78 0.10 226);
+  border-color: oklch(0.78 0.10 226);
+  color: oklch(0.16 0.02 256);
 }
 
 /* ==========================================================================

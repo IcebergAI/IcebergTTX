@@ -22,7 +22,7 @@ ships with Docker Compose and Kubernetes deployment manifests.
 
 ## Features
 
-- **Scenario library** — build or import JSON scenario files with branching inject trees (or linear chained flows)
+- **Scenario library** — build branching inject trees (or linear chained flows) in the visual scenario builder, or import/export them as JSON
 - **Live exercises** — facilitator releases injects in real time via WebSocket push
 - **Participant responses** — free-text and multiple-choice, driving scenario branches
 - **Team comment threads** — participants discuss released injects in group-scoped comment threads
@@ -32,7 +32,7 @@ ships with Docker Compose and Kubernetes deployment manifests.
 - **Role preview** — facilitators can view the app as a participant or observer without changing accounts
 - **Security hardening** — enforced SECRET_KEY at startup, Secure cookie + CSRF origin checks, login rate limiting, and structured audit logging with off-host SIEM forwarding (syslog / HTTP / file)
 - **Sample templates** — optional bundled scenarios can be loaded from Settings; the database stays empty by default
-- **Export** — transcript (JSON), responses (CSV), and AI assessments (JSON)
+- **Export** — full exercise transcript (JSON) or responses table (CSV)
 
 ## Screenshots
 
@@ -127,7 +127,7 @@ Manifests are in `k8s/`. Apply in order:
 
 ```bash
 kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/secrets.yaml k8s/configmap.yaml
+kubectl apply -f k8s/secrets.yaml -f k8s/configmap.yaml
 
 # Before applying, replace placeholder values in k8s/secrets.yaml,
 # replace 'your-registry/iceberg-ttx:latest' in:
