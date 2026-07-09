@@ -55,6 +55,19 @@ class RegisterRequest(EmailMixin):
     # out-of-band/admin operation (#8). Extra fields are ignored by pydantic.
 
 
+class AdminCreateUserRequest(EmailMixin):
+    """Admin-provisioned account (#67). Unlike self-registration this may set any
+    role and the admin flag — it is the out-of-band path used when
+    REGISTRATION_ENABLED is off. Guarded by require_admin, never by the register
+    route, so accepting role/is_admin here is not self-elevation (#8)."""
+
+    display_name: str
+    password: Password
+    role: UserRole = UserRole.participant
+    team: str | None = None
+    is_admin: bool = False
+
+
 class LoginRequest(EmailMixin):
     password: str
 

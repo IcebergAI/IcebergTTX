@@ -82,12 +82,14 @@ def seed_playwright_users():
 
 @pytest.fixture(autouse=True)
 def _reset_login_rate_limiter():
-    """Isolate the in-memory login limiter between tests (#11)."""
-    from app.services.rate_limit import login_rate_limiter
+    """Isolate the in-memory login/registration limiters between tests (#11, #67)."""
+    from app.services.rate_limit import login_rate_limiter, registration_rate_limiter
 
     login_rate_limiter.clear()
+    registration_rate_limiter.clear()
     yield
     login_rate_limiter.clear()
+    registration_rate_limiter.clear()
 
 
 @pytest.fixture(scope="session", autouse=True)

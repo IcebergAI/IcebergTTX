@@ -67,6 +67,16 @@ class Settings(BaseSettings):
     login_max_attempts: int = 5
     login_lockout_seconds: int = 300
 
+    # Registration controls (#67). registration_enabled gates self-service
+    # POST /api/auth/register; when False the register page/link are hidden and
+    # the API returns 403. The rate limit is per source IP and applies regardless
+    # of the toggle (the window is deliberately longer than login's — it throttles
+    # account creation, not password guessing). Admins provision accounts
+    # out-of-band via POST /api/users.
+    registration_enabled: bool = True
+    registration_max_attempts: int = 5
+    registration_lockout_seconds: int = 3600
+
     # Audit logging (#23). When True, audit events are also persisted to the
     # AuditEvent table (they are always emitted to the `iceberg_ttx.audit`
     # logger regardless).
