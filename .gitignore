@@ -48,5 +48,9 @@ static/css/output.css
 node_modules/
 uploads/
 
+# Zensical docs site build output
+website/site/
+.zensical/
+
 #Claude
 .claude/
