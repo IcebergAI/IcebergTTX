@@ -22,6 +22,7 @@ function clearAuthState() {
   document.cookie = 'access_token=; Max-Age=0; path=/';
   document.cookie = 'dt_view_role=; Max-Age=0; path=/';
   document.cookie = 'dt_view_team=; Max-Age=0; path=/';
+  document.cookie = 'dt_current_exercise=; Max-Age=0; path=/';
 }
 
 async function apiFetch(path, options = {}) {
@@ -57,6 +58,11 @@ async function readJson(resp, fallback = null) {
 
 function setPreferenceCookie(name, value) {
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
+}
+
+function getCookie(name) {
+  const m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 function resolveTheme(theme) {
@@ -288,6 +294,7 @@ window.DT = {
   apiFetch,
   readJson,
   setPreferenceCookie,
+  getCookie,
   resolveTheme,
   applyTheme,
   connectExerciseWs,
@@ -300,7 +307,10 @@ document.addEventListener('alpine:init', () => {
   Alpine.data('sidebarNav', () => ({
     ...uiHelpers,
     user: null,
-    liveExercise: null,
+    // Every active exercise the user can see (#96) — more than one may run at a time.
+    liveExercises: [],
+    // The user's explicit pick, persisted across pages. Validated on read, never trusted.
+    selectedId: null,
     scenarioCount: null,
     currentPath: window.location.pathname,
 
@@ -308,18 +318,21 @@ document.addEventListener('alpine:init', () => {
       document.addEventListener('dt:soft-navigated', (event) => {
         this.currentPath = event.detail.path;
       });
+      // sidebarNav lives outside #app-main, so the soft-nav engine never re-runs init().
+      // Pages that change an exercise's lifecycle announce it, and only then do we refetch
+      // — navigating alone is not a lifecycle change, and the page is already fetching.
+      document.addEventListener('dt:exercises-changed', () => {
+        this.refreshExercises();
+      });
       if (isAuthPage()) return;
       const token = getToken();
       if (!token) return;
-      const [mr, er] = await Promise.all([
+      this.selectedId = Number(getCookie('dt_current_exercise')) || null;
+      const [mr] = await Promise.all([
         apiFetch('/auth/me'),
-        apiFetch('/exercises'),
+        this.refreshExercises(),
       ]);
       this.user = await readJson(mr);
-      if (er && er.ok) {
-        const exs = await readJson(er, []);
-        this.liveExercise = exs.find(e => e.state === 'active') || null;
-      }
       if (this.user?.role === 'facilitator') {
         const sr = await apiFetch('/scenarios');
         const scenarios = await readJson(sr, []);
@@ -327,6 +340,18 @@ document.addEventListener('alpine:init', () => {
       } else {
         this.scenarioCount = null;
       }
+    },
+
+    async refreshExercises() {
+      const er = await apiFetch('/exercises');
+      if (!er || !er.ok) return;
+      const exs = await readJson(er, []);
+      this.liveExercises = exs.filter(e => e.state === 'active');
+    },
+
+    selectExercise(id) {
+      this.selectedId = id;
+      setPreferenceCookie('dt_current_exercise', id);
     },
 
     get initials() {
@@ -358,17 +383,45 @@ document.addEventListener('alpine:init', () => {
       return this.user ? 'Previewing as ' + this.user.role : '';
     },
 
+    // The single validation point for the persisted selection: a stale id (the exercise
+    // completed, or the user lost access, so it isn't in liveExercises) simply isn't found
+    // and we fall back to the first — the list is deterministically ordered server-side,
+    // so "first" is stable. Links can therefore never point at a dead exercise.
+    get currentExercise() {
+      return this.liveExercises.find(e => e.id === this.selectedId) || this.liveExercises[0] || null;
+    },
+
+    get currentExerciseId() {
+      return this.currentExercise ? this.currentExercise.id : null;
+    },
+
+    get currentExerciseTitle() {
+      return this.currentExercise ? this.currentExercise.title : '';
+    },
+
+    get hasLiveExercises() {
+      return this.liveExercises.length > 0;
+    },
+
+    get hasMultipleLive() {
+      return this.liveExercises.length > 1;
+    },
+
+    get liveCountLabel() {
+      return this.liveExercises.length > 1 ? this.liveExercises.length + ' live' : 'live';
+    },
+
     get commsHref() {
-      return this.liveExercise ? '/exercises/' + this.liveExercise.id + '/communications' : '/communications';
+      return this.currentExercise ? '/exercises/' + this.currentExercise.id + '/communications' : '/communications';
     },
 
     get liveHref() {
-      if (!this.liveExercise) return '/exercises';
-      return '/exercises/' + this.liveExercise.id + (this.isFacilitator ? '/facilitate' : '/participate');
+      if (!this.currentExercise) return '/exercises';
+      return '/exercises/' + this.currentExercise.id + (this.isFacilitator ? '/facilitate' : '/participate');
     },
 
     get liveSub() {
-      return this.liveExercise ? 'Live · EX-' + this.padId(this.liveExercise.id, 2) : '';
+      return this.currentExercise ? 'Live · EX-' + this.padId(this.currentExercise.id, 3) : '';
     },
 
     get exercisesActive() {

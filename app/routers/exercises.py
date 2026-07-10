@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
@@ -14,6 +14,7 @@ from app.models.exercise import Exercise, ExerciseMember, ExerciseState
 from app.models.inject import Inject
 from app.models.inject_comment import InjectComment
 from app.models.response import Response
+from app.models.scenario import Scenario
 from app.models.user import User, UserRole
 from app.schemas.api import ExercisePublic, MemberPublic
 from app.services import audit_service
@@ -41,6 +42,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 # ── Request schemas ───────────────────────────────────────────────────────────
 
+
 class CreateExerciseRequest(BaseModel):
     scenario_id: int
     title: str
@@ -63,8 +65,20 @@ class UpdateMemberRequest(BaseModel):
 
 # ── Serialisation helpers ─────────────────────────────────────────────────────
 
-def _exercise_out(ex: Exercise) -> dict:
-    return ExercisePublic.from_model(ex).model_dump(mode="json")
+
+def _exercise_out(ex: Exercise, scenario_title: str | None = None) -> dict:
+    return ExercisePublic.from_model(ex, scenario_title).model_dump(mode="json")
+
+
+async def _scenario_titles(session: AsyncSession, exercises: list[Exercise]) -> dict[int, str]:
+    """id → title for the scenarios behind ``exercises`` — one query, not N+1."""
+    scenario_ids = {ex.scenario_id for ex in exercises}
+    if not scenario_ids:
+        return {}
+    rows = await session.exec(
+        select(Scenario.id, Scenario.title).where(col(Scenario.id).in_(scenario_ids))
+    )
+    return dict(rows.all())
 
 
 def _member_out(m: ExerciseMember) -> dict:
@@ -72,6 +86,7 @@ def _member_out(m: ExerciseMember) -> dict:
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
+
 
 @router.get("", response_model=list[ExercisePublic])
 async def list_exercises(current_user: CurrentUserDep, session: SessionDep):
@@ -84,12 +99,18 @@ async def list_exercises(current_user: CurrentUserDep, session: SessionDep):
         member_ids = select(ExerciseMember.exercise_id).where(
             ExerciseMember.user_id == current_user.id
         )
-        q = q.where(
-            (Exercise.created_by == current_user.id) | Exercise.id.in_(member_ids)
-        )
+        q = q.where((Exercise.created_by == current_user.id) | Exercise.id.in_(member_ids))
     else:
         q = q.join(ExerciseMember).where(ExerciseMember.user_id == current_user.id)
-    return [_exercise_out(ex) for ex in (await session.exec(q)).all()]
+    # Deterministic order (#96). Without it Postgres returns heap order, which shifts
+    # whenever a row is rewritten (every start/pause/resume UPDATEs the row) — so the
+    # client's "first active exercise" could change with no user action. Most-recently
+    # started first; drafts (started_at IS NULL) sink below anything that has ever run;
+    # id DESC is a total-order tiebreaker so equal timestamps can never swap.
+    q = q.order_by(col(Exercise.started_at).desc().nulls_last(), col(Exercise.id).desc())
+    exercises = list((await session.exec(q)).all())
+    titles = await _scenario_titles(session, exercises)
+    return [_exercise_out(ex, titles.get(ex.scenario_id)) for ex in exercises]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=ExercisePublic)
@@ -155,14 +176,13 @@ async def delete_exercise(exercise_id: int, current_user: FacilitatorDep, sessio
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
+
 async def _transition(
     exercise_id: int, current_user: User, session: AsyncSession, target: ExerciseState, action: str
 ) -> dict:
     ex = await require_exercise_owner(session, exercise_id, current_user)
     result = await transition_state(session, ex, target)
-    audit_service.emit(
-        action, actor=current_user, target_type="exercise", target_id=exercise_id
-    )
+    audit_service.emit(action, actor=current_user, target_type="exercise", target_id=exercise_id)
     return _exercise_out(result)
 
 
@@ -196,13 +216,12 @@ async def complete(exercise_id: int, current_user: FacilitatorDep, session: Sess
 
 # ── Members ───────────────────────────────────────────────────────────────────
 
+
 @router.get("/{exercise_id}/members", response_model=list[MemberPublic])
 async def list_members(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
     await require_exercise_access(session, exercise_id, current_user)
     members = (
-        await session.exec(
-            select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id)
-        )
+        await session.exec(select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id))
     ).all()
     return [_member_out(m) for m in members]
 
@@ -271,6 +290,7 @@ async def delete_member(
 # a data dump, not the live API shape. Kept as named helpers so the projection is
 # explicit and stays consistent across the JSON and CSV exports.
 
+
 def _export_inject_row(i: Inject) -> dict:
     return {
         "id": i.id,
@@ -307,9 +327,7 @@ def _export_comment_row(c: InjectComment) -> dict:
 
 async def _build_export(session: AsyncSession, exercise_id: int, current_user: User) -> dict:
     ex = await require_exercise_owner(session, exercise_id, current_user)
-    injects = (
-        await session.exec(select(Inject).where(Inject.exercise_id == exercise_id))
-    ).all()
+    injects = (await session.exec(select(Inject).where(Inject.exercise_id == exercise_id))).all()
     responses = (
         await session.exec(select(Response).where(Response.exercise_id == exercise_id))
     ).all()
@@ -362,14 +380,16 @@ async def export_csv(exercise_id: int, current_user: FacilitatorDep, session: Se
     writer.writerow(cols)
     inject_map = {i["id"]: i["title"] for i in data["injects"]}
     for r in data["responses"]:
-        writer.writerow([
-            r["inject_id"],
-            inject_map.get(r["inject_id"], ""),
-            r["user_id"],
-            r["selected_option"] or "",
-            r["content"],
-            r["submitted_at"],
-        ])
+        writer.writerow(
+            [
+                r["inject_id"],
+                inject_map.get(r["inject_id"], ""),
+                r["user_id"],
+                r["selected_option"] or "",
+                r["content"],
+                r["submitted_at"],
+            ]
+        )
     buf.seek(0)
     return StreamingResponse(
         iter([buf.getvalue()]),

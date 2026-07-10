@@ -66,6 +66,8 @@ document.addEventListener('alpine:init', () => {
         const updated = await r.json();
         const idx = this.exercises.findIndex(e => e.id === ex.id);
         if (idx !== -1) this.exercises[idx] = updated;
+        // The rail caches the live set and never re-inits on soft-nav (#96).
+        document.dispatchEvent(new CustomEvent('dt:exercises-changed'));
       }
     },
 
@@ -530,6 +532,8 @@ document.addEventListener('alpine:init', () => {
       if (r && r.ok) {
         this.exercise = await r.json();
         this._startElapsed();
+        // The rail caches the live set and never re-inits on soft-nav (#96).
+        document.dispatchEvent(new CustomEvent('dt:exercises-changed'));
       }
     },
 
