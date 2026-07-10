@@ -83,6 +83,9 @@ async def reset_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot reset the password of an SSO account.",
         )
+    # Capture the PK for the audit event before the object is touched by any
+    # credential-derived value, so nothing password-shaped can reach the log.
+    target_id = target.id
     target.hashed_password = hash_password(body.password)
     # Revoke all previously-issued tokens (#14). Truncated to whole seconds so a
     # token minted at this instant (iat is second-precision) isn't self-rejected.
@@ -95,8 +98,8 @@ async def reset_password(
         "admin.password_reset",
         actor=admin,
         target_type="user",
-        target_id=target.id,
-        reason=f"must_change={body.must_change_password}",
+        target_id=target_id,
+        reason="temporary password set by admin",
         severity="warning",
     )
     return _user_out(target)
