@@ -9,10 +9,20 @@ document.addEventListener('alpine:init', () => {
     isF: false,
     canManageScenarios: false,
     liveElapsedInterval: null,
-    liveElapsed: '—',
+    // Bumped every 10s. One interval drives every card's elapsed value — see elapsedFor().
+    liveTick: 0,
 
-    get liveExercise() {
-      return this.exercises.find(e => e.state === 'active') || null;
+    // More than one exercise can be active at a time (#96) — render them all.
+    get liveExercises() {
+      return this.exercises.filter(e => e.state === 'active');
+    },
+
+    elapsedFor(ex) {
+      // The bare read of liveTick is load-bearing: it registers liveTick as an Alpine
+      // dependency of this call, so bumping it re-evaluates every card's elapsed value.
+      // fmtElapsed reads Date.now() internally. Removing this line freezes all timers.
+      this.liveTick;
+      return this.fmtElapsed(ex.started_at);
     },
 
     async init() {
@@ -32,12 +42,7 @@ document.addEventListener('alpine:init', () => {
       }
       this.loading = false;
 
-      if (this.liveExercise) {
-        this.liveElapsed = this.fmtElapsed(this.liveExercise.started_at);
-        this.liveElapsedInterval = setInterval(() => {
-          if (this.liveExercise) this.liveElapsed = this.fmtElapsed(this.liveExercise.started_at);
-        }, 10000);
-      }
+      this.liveElapsedInterval = setInterval(() => { this.liveTick++; }, 10000);
     },
 
     destroy() {

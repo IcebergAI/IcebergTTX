@@ -7,7 +7,7 @@
   <div class="page-head">
     <div>
       <h1 class="page-title">Home</h1>
-      <p class="text-[13.5px] text-muted mt-1">Start from the one exercise that needs attention.</p>
+      <p class="text-[13.5px] text-muted mt-1">Start from the exercises that need attention.</p>
     </div>
     <div class="flex items-center gap-2" x-show="canManageScenarios">
       <a href="/scenarios/new" class="btn btn-ghost h-8 px-3 text-[13px]">Scenario</a>
@@ -15,28 +15,30 @@
     </div>
   </div>
 
-  <!-- Live exercise focus card -->
-  <template x-if="liveExercise">
-    <div class="surface p-5 mb-8">
+  <!-- Live exercise focus cards — one per active exercise (#96) -->
+  <div class="space-y-4 mb-8" x-show="liveExercises.length > 0">
+  <template x-for="ex in liveExercises" :key="ex.id">
+    <div class="surface p-5">
       <div class="flex items-center gap-6">
         <div class="min-w-0 flex-1">
           <div class="smallcaps" style="color: var(--accent-d);">Live exercise</div>
-          <h2 class="text-[21px] font-semibold mt-1 tracking-tight" x-text="liveExercise.title"></h2>
+          <h2 class="text-[21px] font-semibold mt-1 tracking-tight" x-text="ex.title"></h2>
           <p class="text-muted text-[13.5px] mt-0.5"
-             x-text="(liveExercise.scenario_title || '') + (liveExercise.started_at ? ' · started ' + fmtTime(liveExercise.started_at) : '')"></p>
+             x-text="(ex.scenario_title || '') + (ex.started_at ? ' · started ' + fmtTime(ex.started_at) : '')"></p>
           <div class="flex items-center gap-4 mt-4 text-[12.5px] text-muted">
-            <span><span class="mono text-ink" x-text="liveElapsed"></span> elapsed</span>
-            <span x-show="liveExercise.current_node_id">Current node <span class="mono text-ink" x-text="liveExercise.current_node_id"></span></span>
+            <span><span class="mono text-ink" x-text="elapsedFor(ex)"></span> elapsed</span>
+            <span x-show="ex.current_node_id">Current node <span class="mono text-ink" x-text="ex.current_node_id"></span></span>
           </div>
         </div>
-        <a :href="isF ? '/exercises/' + liveExercise.id + '/facilitate' : '/exercises/' + liveExercise.id + '/participate'"
+        <a :href="isF ? '/exercises/' + ex.id + '/facilitate' : '/exercises/' + ex.id + '/participate'"
            class="btn btn-primary h-9 px-4 text-[13px] shrink-0">Open</a>
       </div>
     </div>
   </template>
+  </div>
 
   <!-- No live exercise placeholder -->
-  <template x-if="!liveExercise && !loading">
+  <template x-if="liveExercises.length === 0 && !loading">
     <div class="surface p-5 mb-8">
       <p class="text-muted text-[13.5px]">No active exercise. <a href="/exercises" class="underline hover:text-ink-soft">Create or open an exercise.</a></p>
     </div>

@@ -72,7 +72,9 @@
           </a>
           <a href="/exercises" class="rail-link" :class="exercisesActive && 'is-active'">
             <span class="rail-dot"></span><span class="rail-link-label">Exercises</span>
-            <template x-if="liveExercise"><span class="rail-link-meta mono">live</span></template>
+            <template x-if="hasLiveExercises">
+              <span class="rail-link-meta mono" x-text="liveCountLabel"></span>
+            </template>
           </a>
           <a :href="commsHref"
              class="rail-link" :class="currentPath.includes('/communications') && 'is-active'">
@@ -100,12 +102,25 @@
           </a>
         </div>
 
-        <!-- Live-now widget -->
-        <template x-if="liveExercise">
-          <a :href="liveHref" class="rail-live">
-            <div class="rail-live-title" x-text="liveExercise.title"></div>
-            <div class="rail-live-sub" x-text="liveSub"></div>
-          </a>
+        <!-- Live-now widget. More than one exercise can be active (#96): the switcher
+             below picks which one the rail's Exercise/Comms links point at. -->
+        <template x-if="hasLiveExercises">
+          <div class="rail-live">
+            <a :href="liveHref" class="rail-live-main">
+              <div class="rail-live-title" x-text="currentExerciseTitle"></div>
+              <div class="rail-live-sub" x-text="liveSub"></div>
+            </a>
+            <template x-if="hasMultipleLive">
+              <div class="rail-live-switch">
+                <template x-for="ex in liveExercises" :key="ex.id">
+                  <button type="button" class="rail-live-opt"
+                          :class="ex.id === currentExerciseId && 'is-current'"
+                          @click="selectExercise(ex.id)"
+                          x-text="ex.title"></button>
+                </template>
+              </div>
+            </template>
+          </div>
         </template>
       </nav>
 

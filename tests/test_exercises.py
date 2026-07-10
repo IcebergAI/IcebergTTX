@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
 from sqlmodel import select
@@ -26,7 +27,9 @@ def _authz_denials(caplog) -> list[dict]:
                 pass
     return [e for e in events if e.get("action") == "authz.denied" and e.get("result") == "deny"]
 
+
 # ── CRUD ──────────────────────────────────────────────────────────────────────
+
 
 async def test_create_exercise(client: AsyncClient, facilitator_token: str, sample_scenario):
     r = await client.post(
@@ -88,9 +91,7 @@ async def test_create_exercise_seeds_shared_and_group_injects(
         title="Grouped Exercise",
         created_by=facilitator.id,
     )
-    injects = (await session.exec(
-        select(Inject).where(Inject.exercise_id == exercise.id)
-    )).all()
+    injects = (await session.exec(select(Inject).where(Inject.exercise_id == exercise.id))).all()
 
     shared = [i for i in injects if i.scenario_node_id == "shared"]
     targeted = [i for i in injects if i.scenario_node_id == "targeted"]
@@ -140,6 +141,92 @@ async def test_participant_sees_enrolled_exercise(
     r = await client.get("/api/exercises", headers={"Authorization": f"Bearer {participant_token}"})
     assert r.status_code == 200
     assert [ex["id"] for ex in r.json()] == [active_exercise.id]
+
+
+# ── Multiple concurrent active exercises (#96) ────────────────────────────────
+
+
+async def _make_active(
+    session: AsyncSession, facilitator: User, scenario, title: str, started_at: datetime
+) -> Exercise:
+    """An active exercise with an explicit started_at, so ordering is deterministic
+    rather than dependent on wall-clock proximity."""
+    from app.services.exercise_service import create_exercise, transition_state
+
+    ex = await create_exercise(
+        session, scenario_id=scenario.id, title=title, created_by=facilitator.id
+    )
+    ex = await transition_state(session, ex, ExerciseState.active)
+    ex.started_at = started_at
+    session.add(ex)
+    await session.commit()
+    await session.refresh(ex)
+    return ex
+
+
+async def test_list_exercises_two_simultaneously_active(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    facilitator: User,
+    sample_scenario,
+):
+    """The backend permits N active exercises; the list must return the whole set,
+    not collapse it to one (#96)."""
+    now = datetime.now(UTC)
+    await _make_active(session, facilitator, sample_scenario, "A", now - timedelta(hours=2))
+    await _make_active(session, facilitator, sample_scenario, "B", now - timedelta(hours=1))
+
+    r = await client.get("/api/exercises", headers=_bearer(facilitator_token))
+    assert r.status_code == 200
+    active = [e for e in r.json() if e["state"] == "active"]
+    assert len(active) == 2
+    assert {e["title"] for e in active} == {"A", "B"}
+
+
+async def test_list_exercises_ordered_most_recently_started_first(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    facilitator: User,
+    sample_scenario,
+):
+    now = datetime.now(UTC)
+    older = await _make_active(
+        session, facilitator, sample_scenario, "older", now - timedelta(hours=2)
+    )
+    newer = await _make_active(
+        session, facilitator, sample_scenario, "newer", now - timedelta(hours=1)
+    )
+
+    r = await client.get("/api/exercises", headers=_bearer(facilitator_token))
+    assert [e["id"] for e in r.json()] == [newer.id, older.id]
+
+
+async def test_list_exercises_drafts_sort_after_started(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    facilitator: User,
+    sample_scenario,
+    draft_exercise: Exercise,
+):
+    """Drafts have started_at IS NULL — NULLS LAST puts them below anything that ran."""
+    started = await _make_active(
+        session, facilitator, sample_scenario, "started", datetime.now(UTC) - timedelta(hours=1)
+    )
+    r = await client.get("/api/exercises", headers=_bearer(facilitator_token))
+    ids = [e["id"] for e in r.json()]
+    assert ids.index(started.id) < ids.index(draft_exercise.id)
+
+
+async def test_list_exercises_includes_scenario_title(
+    client: AsyncClient, facilitator_token: str, draft_exercise: Exercise, sample_scenario
+):
+    """The dashboard binds scenario_title; it must actually be populated."""
+    r = await client.get("/api/exercises", headers=_bearer(facilitator_token))
+    row = next(e for e in r.json() if e["id"] == draft_exercise.id)
+    assert row["scenario_title"] == sample_scenario.title
 
 
 async def test_participant_can_list_exercise_team_labels(
@@ -262,6 +349,7 @@ async def test_delete_active_exercise_forbidden(
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
+
 async def test_start_exercise(client: AsyncClient, facilitator_token: str, draft_exercise):
     r = await client.post(
         f"/api/exercises/{draft_exercise.id}/start",
@@ -373,6 +461,7 @@ async def test_lifecycle_participant_forbidden(
 
 # ── Members ───────────────────────────────────────────────────────────────────
 
+
 async def test_enrol_member(
     client: AsyncClient, facilitator_token: str, draft_exercise, participant: User
 ):
@@ -424,10 +513,12 @@ async def test_enrol_member_idempotent(
     )
     assert r.status_code == 201
 
-    members = (await client.get(
-        f"/api/exercises/{draft_exercise.id}/members",
-        headers={"Authorization": f"Bearer {facilitator_token}"},
-    )).json()
+    members = (
+        await client.get(
+            f"/api/exercises/{draft_exercise.id}/members",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+    ).json()
     assert sum(1 for m in members if m["user_id"] == participant.id) == 1
 
 
@@ -478,10 +569,12 @@ async def test_remove_member(
     )
     assert r.status_code == 204
 
-    members = (await client.get(
-        f"/api/exercises/{draft_exercise.id}/members",
-        headers={"Authorization": f"Bearer {facilitator_token}"},
-    )).json()
+    members = (
+        await client.get(
+            f"/api/exercises/{draft_exercise.id}/members",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+    ).json()
     assert not any(m["user_id"] == participant.id for m in members)
 
 
@@ -508,6 +601,7 @@ async def test_enrol_member_participant_forbidden(
 
 # ── #12: per-exercise facilitator ownership scoping ───────────────────────────
 
+
 async def test_other_facilitator_denied_read(
     client: AsyncClient, second_facilitator_token: str, draft_exercise, participant: User, caplog
 ):
@@ -525,15 +619,17 @@ async def test_other_facilitator_denied_mutations(
 ):
     h = _bearer(second_facilitator_token)
     eid = draft_exercise.id
-    assert (await client.put(
-        f"/api/exercises/{eid}", json={"title": "hijack"}, headers=h
-    )).status_code == 403
+    assert (
+        await client.put(f"/api/exercises/{eid}", json={"title": "hijack"}, headers=h)
+    ).status_code == 403
     assert (await client.delete(f"/api/exercises/{eid}", headers=h)).status_code == 403
     assert (await client.post(f"/api/exercises/{eid}/start", headers=h)).status_code == 403
     assert (await client.get(f"/api/exercises/{eid}/members", headers=h)).status_code == 403
-    assert (await client.post(
-        f"/api/exercises/{eid}/members", json={"user_id": participant.id}, headers=h
-    )).status_code == 403
+    assert (
+        await client.post(
+            f"/api/exercises/{eid}/members", json={"user_id": participant.id}, headers=h
+        )
+    ).status_code == 403
     assert (await client.get(f"/api/exercises/{eid}/export", headers=h)).status_code == 403
     assert (await client.get(f"/api/exercises/{eid}/export.csv", headers=h)).status_code == 403
 
@@ -544,9 +640,9 @@ async def test_owner_facilitator_still_allowed(
     h = _bearer(facilitator_token)
     eid = draft_exercise.id
     assert (await client.get(f"/api/exercises/{eid}", headers=h)).status_code == 200
-    assert (await client.put(
-        f"/api/exercises/{eid}", json={"title": "renamed"}, headers=h
-    )).status_code == 200
+    assert (
+        await client.put(f"/api/exercises/{eid}", json={"title": "renamed"}, headers=h)
+    ).status_code == 200
     assert (await client.get(f"/api/exercises/{eid}/export", headers=h)).status_code == 200
 
 
@@ -568,20 +664,18 @@ async def test_cofacilitator_member_gains_access(
     # Now the co-facilitator can read and mutate.
     h = _bearer(second_facilitator_token)
     assert (await client.get(f"/api/exercises/{eid}", headers=h)).status_code == 200
-    assert (await client.put(
-        f"/api/exercises/{eid}", json={"title": "co-edited"}, headers=h
-    )).status_code == 200
+    assert (
+        await client.put(f"/api/exercises/{eid}", json={"title": "co-edited"}, headers=h)
+    ).status_code == 200
 
 
-async def test_admin_has_global_access(
-    client: AsyncClient, admin_token: str, draft_exercise
-):
+async def test_admin_has_global_access(client: AsyncClient, admin_token: str, draft_exercise):
     h = _bearer(admin_token)
     eid = draft_exercise.id
     assert (await client.get(f"/api/exercises/{eid}", headers=h)).status_code == 200
-    assert (await client.put(
-        f"/api/exercises/{eid}", json={"title": "admin-touch"}, headers=h
-    )).status_code == 200
+    assert (
+        await client.put(f"/api/exercises/{eid}", json={"title": "admin-touch"}, headers=h)
+    ).status_code == 200
 
 
 async def test_list_exercises_scoped_per_facilitator(
@@ -592,17 +686,18 @@ async def test_list_exercises_scoped_per_facilitator(
     draft_exercise,
 ):
     eid = draft_exercise.id
-    owner_ids = [e["id"] for e in (
-        await client.get("/api/exercises", headers=_bearer(facilitator_token))
-    ).json()]
+    owner_ids = [
+        e["id"]
+        for e in (await client.get("/api/exercises", headers=_bearer(facilitator_token))).json()
+    ]
     assert eid in owner_ids
 
     other = (await client.get("/api/exercises", headers=_bearer(second_facilitator_token))).json()
     assert other == []
 
-    admin_ids = [e["id"] for e in (
-        await client.get("/api/exercises", headers=_bearer(admin_token))
-    ).json()]
+    admin_ids = [
+        e["id"] for e in (await client.get("/api/exercises", headers=_bearer(admin_token))).json()
+    ]
     assert eid in admin_ids
 
 
@@ -614,6 +709,6 @@ async def test_participant_member_is_read_only(
     eid = active_exercise.id
     assert (await client.get(f"/api/exercises/{eid}", headers=h)).status_code == 200
     # …but mutation is still blocked (require_role facilitator).
-    assert (await client.put(
-        f"/api/exercises/{eid}", json={"title": "nope"}, headers=h
-    )).status_code == 403
+    assert (
+        await client.put(f"/api/exercises/{eid}", json={"title": "nope"}, headers=h)
+    ).status_code == 403

@@ -170,9 +170,26 @@ a:hover { color: var(--accent-deep); }
   background: var(--rail-2); border-radius: 8px;
   box-shadow: inset 2px 0 0 var(--accent);
 }
-.rail-live:hover { filter: brightness(1.12); }
+/* Hover lives on the link, not the whole widget — the widget may also hold the
+   exercise switcher (#96), which brightens its own rows. */
+.rail-live-main { display: block; }
+.rail-live-main:hover { filter: brightness(1.12); }
 .rail-live-title { font-size: 13px; font-weight: 600; color: #fff; }
 .rail-live-sub { font-family: var(--fs-mono); font-size: 10.5px; color: var(--rail-faint); margin-top: 2px; }
+/* Switcher, shown only when more than one exercise is active (#96). Rail-scoped: the
+   light-surface .quiet-row and the .rail-link-only .is-active rules don't apply here. */
+.rail-live-switch {
+  margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--rail-line);
+  display: flex; flex-direction: column; gap: 1px;
+}
+.rail-live-opt {
+  width: 100%; text-align: left; padding: 4px 6px; border-radius: 6px;
+  font-size: 12px; color: var(--rail-ink); background: transparent; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: background .12s, color .12s;
+}
+.rail-live-opt:hover { background: var(--rail); color: #fff; }
+.rail-live-opt.is-current { color: var(--accent); font-weight: 600; }
 .rail-foot { margin-top: auto; padding: 12px; border-top: 1px solid var(--rail-line); }
 .rail-id { display: flex; align-items: center; gap: 10px; padding: 4px 4px 2px; }
 .rail-avatar {

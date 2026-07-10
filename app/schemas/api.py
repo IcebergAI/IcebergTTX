@@ -37,6 +37,9 @@ class ExercisePublic(BaseModel):
     id: int
     scenario_id: int
     title: str
+    # Denormalised for list views (the dashboard renders it beside the exercise title).
+    # Only the list route populates it; single-exercise routes leave it None.
+    scenario_title: str | None = None
     state: ExerciseState
     current_node_id: str | None = None
     llm_enabled: bool
@@ -46,11 +49,12 @@ class ExercisePublic(BaseModel):
     created_at: str
 
     @classmethod
-    def from_model(cls, ex: Exercise) -> ExercisePublic:
+    def from_model(cls, ex: Exercise, scenario_title: str | None = None) -> ExercisePublic:
         return cls(
             id=ex.id,
             scenario_id=ex.scenario_id,
             title=ex.title,
+            scenario_title=scenario_title,
             state=ex.state,
             current_node_id=ex.current_node_id,
             llm_enabled=ex.llm_enabled,
