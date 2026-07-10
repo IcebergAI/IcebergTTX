@@ -58,6 +58,8 @@ The UI ships with a light/dark theme toggle (system-aware):
 
 ## Setup
 
+_*Note that this is deprecated and would require a local instance of Postgres, use Docker*_
+
 ```bash
 # Create and activate a virtual environment
 python -m venv .venv
