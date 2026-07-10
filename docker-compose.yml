@@ -152,6 +152,10 @@ services:
       - ALL
     cap_add:
       - CHOWN
+      # Caddy creates data/caddy/{certificates,locks,pki} mode 0700 owned by uid
+      # 1000. Root cannot descend into them without its DAC bypass, which cap_drop
+      # ALL removed — so on every run after the first, chown -R fails EPERM.
+      - DAC_READ_SEARCH
     restart: "no"
 
   caddy:
