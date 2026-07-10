@@ -29,7 +29,9 @@ async def test_validate_settings_allows_default_in_dev_mode():
 
 
 async def test_validate_settings_allows_strong_key_in_production():
-    s = Settings(dev_mode=False, secret_key="a" * 48)
+    # llm_provider="none" keeps this focused on the SECRET_KEY concern; the default
+    # provider (anthropic) would otherwise require an API key in production (#26).
+    s = Settings(dev_mode=False, secret_key="a" * 48, llm_provider="none")
     validate_settings(s)  # must not raise
 
 

@@ -1,6 +1,8 @@
-"""Tests for Phase 8 LLM integration (assess_response, suggest_inject, suggested-injects CRUD).
+"""Tests for the LLM pipeline (assess_response, suggest_inject, suggested-injects CRUD).
 
-All Anthropic API calls are mocked — no real network requests are made.
+The active AI provider is mocked at the ``active_provider`` seam — no provider SDK
+is constructed and no real network requests are made. Per-provider adapter/config
+behaviour is covered in test_llm_providers.py.
 """
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -35,13 +37,19 @@ async def _submit(client, token, exercise_id, inject_id, content="We isolated th
     )
 
 
-def _make_anthropic_response(text: str):
-    """Build a minimal mock matching anthropic.types.Message structure."""
-    content_block = MagicMock()
-    content_block.text = text
-    msg = MagicMock()
-    msg.content = [content_block]
-    return msg
+def _fake_provider(*texts: str, label: str = "test:model"):
+    """A stand-in LLMProvider whose ``complete`` returns the given text(s).
+
+    One text → every call returns it; multiple → consumed in order (side_effect),
+    for the assess-then-suggest sequence in the pipeline test.
+    """
+    provider = MagicMock()
+    provider.llm_model_label = label
+    if len(texts) == 1:
+        provider.complete = AsyncMock(return_value=texts[0])
+    else:
+        provider.complete = AsyncMock(side_effect=list(texts))
+    return provider
 
 
 def _assessment_json():
@@ -98,12 +106,8 @@ async def test_assess_response_stores_assessment(
     definition = export_definition(scenario)
 
     with patch(
-        "app.services.llm_service._async_client",
-        return_value=MagicMock(
-            messages=MagicMock(
-                create=AsyncMock(return_value=_make_anthropic_response(_assessment_json()))
-            )
-        ),
+        "app.services.llm_service.active_provider",
+        return_value=_fake_provider(_assessment_json()),
     ):
         assessment = await assess_response(session, response, inject, definition)
 
@@ -153,12 +157,8 @@ async def test_suggest_inject_stores_suggestion(
     definition = export_definition(scenario)
 
     with patch(
-        "app.services.llm_service._async_client",
-        return_value=MagicMock(
-            messages=MagicMock(
-                create=AsyncMock(return_value=_make_anthropic_response(_suggestion_json()))
-            )
-        ),
+        "app.services.llm_service.active_provider",
+        return_value=_fake_provider(_suggestion_json()),
     ):
         suggested = await suggest_inject(session, response, inject, active_exercise, definition)
 
@@ -205,14 +205,8 @@ async def test_assess_response_handles_invalid_json(
     definition = export_definition(scenario)
 
     with patch(
-        "app.services.llm_service._async_client",
-        return_value=MagicMock(
-            messages=MagicMock(
-                create=AsyncMock(
-                    return_value=_make_anthropic_response("Plain text, not JSON.")
-                )
-            )
-        ),
+        "app.services.llm_service.active_provider",
+        return_value=_fake_provider("Plain text, not JSON."),
     ):
         assessment = await assess_response(session, response, inject, definition)
 
@@ -466,17 +460,8 @@ async def test_run_llm_pipeline_broadcasts_to_facilitator(
 
     with (
         _patch(
-            "app.services.llm_service._async_client",
-            return_value=MagicMock(
-                messages=MagicMock(
-                    create=AsyncMock(
-                        side_effect=[
-                            _make_anthropic_response(_assessment_json()),
-                            _make_anthropic_response(_suggestion_json()),
-                        ]
-                    )
-                )
-            ),
+            "app.services.llm_service.active_provider",
+            return_value=_fake_provider(_assessment_json(), _suggestion_json()),
         ),
         _patch("app.services.llm_service.engine", test_engine),
         _patch("app.services.ws_manager.manager") as mock_manager,

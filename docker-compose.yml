@@ -32,7 +32,25 @@ services:
       DATABASE_URL: postgresql://iceberg_ttx:${POSTGRES_PASSWORD}@db:5432/iceberg_ttx
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+      # Pluggable AI provider (#26). LLM_PROVIDER selects the active backend
+      # (anthropic | bedrock | openai | ollama | gemini | none); the image bundles
+      # every provider SDK. Set only the vars for the provider you pick (all
+      # optional here — default anthropic, empty key ⇒ set LLM_PROVIDER=none to
+      # start without the LLM). Note egress: reaching a hosted provider (Anthropic,
+      # OpenAI, Gemini, Bedrock) needs outbound internet; Ollama is typically local.
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-600}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+      BEDROCK_MODEL: ${BEDROCK_MODEL:-anthropic.claude-opus-4-8}
+      BEDROCK_AWS_REGION: ${BEDROCK_AWS_REGION:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434/v1}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
       # Trust proxied X-Forwarded-For only from Caddy (the sole ingress). See #36.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
       # Extra allowed origins for the CSRF and WebSocket CSWSH origin checks.

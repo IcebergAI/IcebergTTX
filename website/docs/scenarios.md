@@ -114,9 +114,10 @@ When a participant responds, the service resolves which inject IDs are valid nex
 steps, but the **facilitator manually reviews and releases** the chosen branch. This
 keeps a human in the loop rather than auto-advancing the scenario.
 
-## LLM assessment
+## AI assessment
 
-When enabled on an exercise (and `ANTHROPIC_API_KEY` is set), Claude evaluates each
+When enabled on an exercise (and an AI provider is configured via `LLM_PROVIDER` —
+Anthropic, Amazon Bedrock, OpenAI, Ollama, or Gemini), the model evaluates each
 participant response and produces:
 
 - a **decision-quality rating** — good, adequate, or poor;
@@ -132,7 +133,7 @@ rated as poor.
 1. **Create or import a scenario** — build it in the scenario builder, or load a
    JSON file.
 2. **Create an exercise** — give it a title, select a scenario, optionally enable
-   LLM assessment.
+   AI assessment.
 3. **Add participants** — search registered users in the Participants panel and
    enrol them; each is assigned a team. Share `/exercises/{id}/participate`.
 4. **Start and release injects** — press **Release** to push an inject; participants

@@ -16,6 +16,36 @@ AUTH_MODE_BOTH = "both"
 # app/services/oidc maps these to adapter implementations.
 OIDC_PROVIDER_KEYS = ("entra", "authentik")
 
+# Pluggable AI backend. LLM_PROVIDER selects the single active provider for the
+# whole app (the AI analog of AUTH_MODE). "" / "none" disables the LLM pipeline.
+# Each key maps to an adapter *family* in app/services/llm: "anthropic" (direct
+# Anthropic + Bedrock, same messages.create surface) and "openai" (OpenAI, Ollama,
+# and Gemini, all via the OpenAI-compatible Chat Completions surface).
+LLM_PROVIDER_KEYS = ("anthropic", "bedrock", "openai", "ollama", "gemini")
+LLM_DISABLED_KEYS = ("", "none", "disabled")
+OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434/v1"
+GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+@dataclass(frozen=True)
+class LLMProviderConfig:
+    """Resolved config for the active AI provider (built from flat env vars).
+
+    ``adapter`` is the family key registered in app/services/llm ("anthropic" |
+    "openai"); ``backend`` disambiguates within the anthropic family ("api" |
+    "bedrock"). Secrets (``api_key``) are env-only — never a DB column, never logged.
+    """
+
+    key: str
+    display_name: str
+    adapter: str
+    model: str
+    api_key: str = ""
+    base_url: str = ""
+    aws_region: str = ""
+    max_tokens: int = 600
+    backend: str = "api"
+
 
 @dataclass(frozen=True)
 class OIDCProviderConfig:
@@ -49,7 +79,27 @@ class Settings(BaseSettings):
     secret_key: str = DEFAULT_SECRET_KEY
     access_token_expire_minutes: int = 480
     algorithm: str = "HS256"
-    anthropic_api_key: str = ""
+
+    # Pluggable AI backend. llm_provider selects the active provider (see
+    # LLM_PROVIDER_KEYS); "" / "none" disables LLM assessment + inject suggestion.
+    # Model IDs and endpoints are operator-overridable; provider secrets are
+    # env-only (never a DB column, never logged), same rule as OIDC/SIEM.
+    # Bedrock model IDs MUST carry the "anthropic." prefix; direct Anthropic must
+    # not. Ollama needs no key; Gemini/OpenAI route through the OpenAI SDK.
+    llm_provider: str = "anthropic"
+    llm_max_tokens: int = 600
+    anthropic_api_key: str = ""  # SECRET
+    anthropic_model: str = "claude-opus-4-8"
+    bedrock_model: str = "anthropic.claude-opus-4-8"
+    bedrock_aws_region: str = ""
+    openai_api_key: str = ""  # SECRET
+    openai_model: str = "gpt-5"
+    openai_base_url: str = ""  # "" ⇒ SDK default (api.openai.com)
+    ollama_model: str = "llama3.1"
+    ollama_base_url: str = OLLAMA_DEFAULT_BASE_URL
+    gemini_api_key: str = ""  # SECRET
+    gemini_model: str = "gemini-2.0-flash"
+    gemini_base_url: str = GEMINI_OPENAI_BASE_URL
 
     # Operational mode. dev_mode relaxes production safety checks (the insecure
     # default SECRET_KEY and the Secure cookie flag) for local HTTP development.
@@ -191,6 +241,66 @@ class Settings(BaseSettings):
     def oidc_auth_enabled(self) -> bool:
         return self.auth_mode in (AUTH_MODE_OIDC, AUTH_MODE_BOTH)
 
+    def active_llm_provider(self) -> LLMProviderConfig | None:
+        """Build the config for the active AI provider, or None when disabled.
+
+        The AI analog of enabled_oidc_providers(): flat env vars → a resolved
+        LLMProviderConfig for the single provider named by LLM_PROVIDER. An unknown
+        key returns None here (validate_settings() fails fast on it at startup).
+        """
+        key = self.llm_provider.strip().lower()
+        if key in LLM_DISABLED_KEYS:
+            return None
+        if key == "anthropic":
+            return LLMProviderConfig(
+                key="anthropic",
+                display_name="Anthropic",
+                adapter="anthropic",
+                model=self.anthropic_model,
+                api_key=self.anthropic_api_key,
+                max_tokens=self.llm_max_tokens,
+            )
+        if key == "bedrock":
+            return LLMProviderConfig(
+                key="bedrock",
+                display_name="Amazon Bedrock",
+                adapter="anthropic",
+                backend="bedrock",
+                model=self.bedrock_model,
+                aws_region=self.bedrock_aws_region,
+                max_tokens=self.llm_max_tokens,
+            )
+        if key == "openai":
+            return LLMProviderConfig(
+                key="openai",
+                display_name="OpenAI",
+                adapter="openai",
+                model=self.openai_model,
+                api_key=self.openai_api_key,
+                base_url=self.openai_base_url,
+                max_tokens=self.llm_max_tokens,
+            )
+        if key == "ollama":
+            return LLMProviderConfig(
+                key="ollama",
+                display_name="Ollama",
+                adapter="openai",
+                model=self.ollama_model,
+                base_url=self.ollama_base_url or OLLAMA_DEFAULT_BASE_URL,
+                max_tokens=self.llm_max_tokens,
+            )
+        if key == "gemini":
+            return LLMProviderConfig(
+                key="gemini",
+                display_name="Google Gemini",
+                adapter="openai",
+                model=self.gemini_model,
+                api_key=self.gemini_api_key,
+                base_url=self.gemini_base_url or GEMINI_OPENAI_BASE_URL,
+                max_tokens=self.llm_max_tokens,
+            )
+        return None
+
     def enabled_oidc_providers(self) -> list[OIDCProviderConfig]:
         """Build the config for every enabled OIDC provider (#25).
 
@@ -291,6 +401,13 @@ def validate_settings(s: Settings | None = None) -> None:
         raise RuntimeError(
             f"AUTH_MODE must be one of local|oidc|both, got {s.auth_mode!r}."
         )
+    llm_key = s.llm_provider.strip().lower()
+    if llm_key not in (*LLM_DISABLED_KEYS, *LLM_PROVIDER_KEYS):
+        raise RuntimeError(
+            "LLM_PROVIDER must be one of "
+            f"{'|'.join(LLM_PROVIDER_KEYS)} (or empty to disable), got "
+            f"{s.llm_provider!r}."
+        )
     if s.dev_mode:
         return
     if s.secret_key_is_insecure:
@@ -340,6 +457,19 @@ def validate_settings(s: Settings | None = None) -> None:
             "AUTH_MODE=oidc but no OIDC provider is enabled/configured; users would "
             "have no way to sign in."
         )
+    # The active AI provider must carry the credentials its backend needs. Set
+    # LLM_PROVIDER=none to run without the LLM (assessment/inject suggestion).
+    llm = s.active_llm_provider()
+    if llm is not None:
+        if llm.key in ("anthropic", "openai", "gemini") and not llm.api_key:
+            raise RuntimeError(
+                f"LLM_PROVIDER={llm.key} is set but its API key "
+                f"({llm.key.upper()}_API_KEY) is empty. Set it, or LLM_PROVIDER=none."
+            )
+        if llm.key == "bedrock" and not llm.aws_region:
+            raise RuntimeError(
+                "LLM_PROVIDER=bedrock is set but BEDROCK_AWS_REGION is empty."
+            )
 
 
 settings = Settings()

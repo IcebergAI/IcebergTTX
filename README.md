@@ -54,7 +54,7 @@ The UI ships with a light/dark theme toggle (system-aware):
 - **Frontend**: Jinja2 templates, Tailwind CSS v4 (CLI-compiled), Alpine.js
 - **Real-time**: WebSockets (FastAPI native)
 - **Auth**: JWT tokens (httpOnly cookie + localStorage)
-- **LLM**: Anthropic Claude API (`anthropic>=0.40`, async with prompt caching)
+- **LLM**: pluggable AI backend — Anthropic (direct), Amazon Bedrock, OpenAI, Ollama, or Gemini, selected by `LLM_PROVIDER` (async; prompt caching on the Anthropic path)
 
 ## Setup
 
@@ -63,16 +63,25 @@ The UI ships with a light/dark theme toggle (system-aware):
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-# Install dependencies
+# Install dependencies. The dev extra bundles every AI-provider SDK, so all
+# LLM_PROVIDER options work locally out of the box.
 pip install -e ".[dev]"
+# For a production install (`pip install -e .`, no dev), no LLM SDK is included by
+# default — add the extra matching your LLM_PROVIDER (all providers are equal here):
+#   pip install -e ".[llm-anthropic]"   # anthropic (direct)
+#   pip install -e ".[llm-bedrock]"     # bedrock (pulls boto3)
+#   pip install -e ".[llm-openai]"      # openai | ollama | gemini
+#   pip install -e ".[llm-all]"         # every provider SDK
 
 # Configure environment
 cp .env.example .env
 # Edit .env:
-#   SECRET_KEY        required — generate: python -c "import secrets; print(secrets.token_hex(32))"
-#   DEV_MODE=true     for local HTTP development (relaxes the SECRET_KEY check and the Secure cookie flag)
-#   ANTHROPIC_API_KEY optional — enables LLM features
-# Outside DEV_MODE the app refuses to start if SECRET_KEY is unset, the default, or shorter than 32 chars.
+#   SECRET_KEY     required — generate: python -c "import secrets; print(secrets.token_hex(32))"
+#   DEV_MODE=true  for local HTTP development (relaxes the SECRET_KEY check and the Secure cookie flag)
+#   LLM_PROVIDER   anthropic (default) | bedrock | openai | ollama | gemini | none — see .env.example
+#                  for the per-provider key/model/endpoint vars
+# Outside DEV_MODE the app refuses to start if SECRET_KEY is unset/weak, or if the selected
+# LLM_PROVIDER is missing its credentials (set LLM_PROVIDER=none to run without the LLM).
 
 # Run the development server
 uvicorn app.main:app --reload

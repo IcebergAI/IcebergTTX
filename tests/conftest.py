@@ -92,6 +92,17 @@ def _reset_login_rate_limiter():
     registration_rate_limiter.clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_llm_provider_cache():
+    """Drop the cached active AI provider so tests that monkeypatch LLM_PROVIDER /
+    settings see a freshly-built provider (#26)."""
+    from app.services.llm.service import reset_provider_cache
+
+    reset_provider_cache()
+    yield
+    reset_provider_cache()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _create_schema():
     # The test suite builds a throwaway schema directly from the models rather

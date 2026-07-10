@@ -5,7 +5,8 @@
 # This confines lateral movement after any single-pod compromise. Requires a CNI
 # that enforces NetworkPolicy (Calico, Cilium, …); on a CNI that ignores them
 # these are a harmless no-op. Egress is intentionally left open so the app can
-# reach the Anthropic API and cluster DNS.
+# reach the configured AI provider's API (Anthropic, OpenAI, Gemini, or Bedrock;
+# #26), any SIEM/OIDC endpoints, and cluster DNS.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

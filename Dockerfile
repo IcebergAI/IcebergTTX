@@ -25,10 +25,13 @@ WORKDIR /app
 RUN addgroup --system --gid 1000 appgroup && \
     adduser --system --uid 1000 --gid 1000 --no-create-home appuser
 
-# Install Python dependencies (asyncpg is a core dependency)
+# Install Python dependencies (asyncpg is a core dependency). No LLM SDK is a core
+# dependency; the `llm-all` extra bundles every provider SDK so any LLM_PROVIDER
+# (anthropic/bedrock/openai/ollama/gemini) works in the image. Narrow this to a
+# single extra (e.g. `.[llm-anthropic]`) to slim the image, or drop it for none.
 COPY pyproject.toml .
 COPY app/__init__.py app/__init__.py
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e ".[llm-all]"
 
 # Copy application source
 COPY app/ app/

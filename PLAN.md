@@ -388,6 +388,14 @@ Tailwind CLI build, observer read-only view, exercise JSON/CSV export, error mid
 ### Phase 8 — LLM Integration
 Implement `llm_service.py` using the Anthropic SDK. Add `anthropic>=0.40` to dependencies.
 
+> **Post-launch (#26 — pluggable AI providers):** the AI backend is now provider-pluggable
+> via an adapter/registry (`app/services/llm/`) mirroring the OIDC pattern. `LLM_PROVIDER`
+> selects one of `anthropic` | `bedrock` | `openai` | `ollama` | `gemini` | `none`; two
+> adapter families (Anthropic/Bedrock via `messages.create`; OpenAI/Ollama/Gemini via the
+> OpenAI Chat Completions surface) cover all five. Every provider SDK is an opt-in extra —
+> none is a core dependency (`.[llm-anthropic]`, `.[llm-bedrock]`, `.[llm-openai]`,
+> `.[llm-all]`). See CLAUDE.md → "LLM integration".
+
 **Response assessment** (auto, background async task):
 - Fires after `response_service.submit_response()` when `exercise.llm_enabled == True`
 - Cached prompt prefix = scenario context + inject content (same for all responses to a given inject → high cache hit rate)

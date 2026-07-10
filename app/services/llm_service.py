@@ -2,15 +2,12 @@ import json
 import logging
 from datetime import UTC, datetime
 
-import anthropic
-
 from app.config import settings
 from app.database import engine
 from app.schemas.api import AssessmentPublic, SuggestedInjectPublic
+from app.services.llm.service import active_provider
 
 logger = logging.getLogger(__name__)
-
-_MODEL = "claude-sonnet-4-6"
 
 _ASSESSMENT_SYSTEM = (
     "You are an expert tabletop exercise facilitator. "
@@ -23,10 +20,6 @@ _SUGGESTION_SYSTEM = (
     "Suggest realistic, challenging follow-up injects that build on participant decisions. "
     "Reply only with valid JSON."
 )
-
-
-def _async_client() -> anthropic.AsyncAnthropic:
-    return anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 
 def _scenario_summary(definition) -> str:
@@ -47,36 +40,19 @@ def _inject_summary(inject, node) -> str:
     return "\n".join(lines)
 
 
-async def _call(system: str, cached_context: str, user_prompt: str) -> str:
-    client = _async_client()
-    msg = await client.messages.create(
-        model=_MODEL,
-        max_tokens=600,
-        system=system,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": cached_context,
-                        "cache_control": {"type": "ephemeral"},
-                    },
-                    {"type": "text", "text": user_prompt},
-                ],
-            }
-        ],
-        extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
+async def _call(provider, system: str, cached_context: str, user_prompt: str) -> str:
+    """Delegate one completion to the active provider (provider-agnostic)."""
+    return await provider.complete(
+        system, cached_context, user_prompt, settings.llm_max_tokens
     )
-    for block in msg.content:
-        text = getattr(block, "text", None)
-        if text is not None:
-            return text
-    return ""
 
 
 async def assess_response(session, response, inject, definition):
     from app.models.assessment import ResponseAssessment
+
+    provider = active_provider()
+    if provider is None:
+        return None
 
     node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
     cached = _scenario_summary(definition) + "\n\n" + _inject_summary(inject, node)
@@ -92,7 +68,7 @@ async def assess_response(session, response, inject, definition):
         "\"recommended_branch_option_id\" (option id string or null)."
     )
 
-    text = await _call(_ASSESSMENT_SYSTEM, cached, user_prompt)
+    text = await _call(provider, _ASSESSMENT_SYSTEM, cached, user_prompt)
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
@@ -104,7 +80,7 @@ async def assess_response(session, response, inject, definition):
 
     assessment = ResponseAssessment(
         response_id=response.id,
-        llm_model=_MODEL,
+        llm_model=provider.llm_model_label,
         assessment_text=data.get("assessment_text", text),
         decision_quality=data.get("decision_quality"),
         recommended_branch_option_id=data.get("recommended_branch_option_id"),
@@ -123,6 +99,10 @@ async def assess_response(session, response, inject, definition):
 async def suggest_inject(session, response, inject, exercise, definition):
     from app.models.suggested_inject import SuggestedInject
 
+    provider = active_provider()
+    if provider is None:
+        return None
+
     node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
     cached = _scenario_summary(definition) + "\n\n" + _inject_summary(inject, node)
 
@@ -137,7 +117,7 @@ async def suggest_inject(session, response, inject, exercise, definition):
         "\"target_teams\" (list of team id strings from the scenario, or null for all teams)."
     )
 
-    text = await _call(_SUGGESTION_SYSTEM, cached, user_prompt)
+    text = await _call(provider, _SUGGESTION_SYSTEM, cached, user_prompt)
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
@@ -150,7 +130,7 @@ async def suggest_inject(session, response, inject, exercise, definition):
         title=data.get("title", "Follow-up inject"),
         content=data.get("content", text),
         target_teams=target_teams or None,
-        llm_model=_MODEL,
+        llm_model=provider.llm_model_label,
     )
     session.add(suggested)
     await session.commit()
@@ -168,6 +148,10 @@ async def run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) -
 
 
 async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) -> None:
+    if active_provider() is None:
+        logger.info("LLM pipeline skipped: no AI provider configured (LLM_PROVIDER)")
+        return
+
     from sqlmodel.ext.asyncio.session import AsyncSession
 
     from app.models.exercise import Exercise

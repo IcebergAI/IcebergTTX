@@ -16,7 +16,7 @@ Rehearse your response before the incident is real.
 <p class="tagline" markdown>
 IcebergTTX runs facilitated, scenario-driven tabletop exercises for cyber
 incidents and business-resilience events — branching injects, live participant
-responses, simulated regulator and press comms, and optional Claude-assisted
+responses, simulated regulator and press comms, and optional AI-assisted
 assessment.
 </p>
 
@@ -34,9 +34,10 @@ A **facilitator** builds or imports a branching scenario, then releases injects 
 **participants** in real time over WebSocket. Participants record decisions and
 free-text reasoning that drive the scenario down different branches, while
 **observers** follow along read-only. The platform simulates incident
-communications (regulators, press, executives) and can use the Claude API to assess
-decisions and suggest follow-up injects. It is API-first (FastAPI) with a
-server-rendered UI, and ships with Docker Compose and Kubernetes manifests.
+communications (regulators, press, executives) and can use a pluggable AI provider
+(Anthropic, Amazon Bedrock, OpenAI, Ollama, or Gemini) to assess decisions and
+suggest follow-up injects. It is API-first (FastAPI) with a server-rendered UI, and
+ships with Docker Compose and Kubernetes manifests.
 
 <div class="grid cards" markdown>
 
@@ -71,12 +72,13 @@ server-rendered UI, and ships with Docker Compose and Kubernetes manifests.
     A two-pane inbox/outbox for regulatory, press, and executive comms — seed
     inbound messages or let the scenario trigger them on a delay.
 
--   :material-robot: __LLM assessment__
+-   :material-robot: __AI assessment__
 
     ---
 
-    With an `ANTHROPIC_API_KEY` set, Claude rates each decision and suggests a
-    follow-up inject the facilitator can approve and queue.
+    With an AI provider configured (`LLM_PROVIDER` — Anthropic, Bedrock, OpenAI,
+    Ollama, or Gemini), the model rates each decision and suggests a follow-up
+    inject the facilitator can approve and queue.
 
 -   :material-shield-lock: __Security-hardened__
 
