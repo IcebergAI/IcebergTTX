@@ -12,6 +12,14 @@
   </div>
 
   <div class="space-y-5">
+    <section class="surface p-5 border-l-4 border-amber-400" x-show="mustChangePassword" x-cloak>
+      <h2 class="text-[14px] font-medium">Set a new password</h2>
+      <p class="text-[13px] text-muted mt-1">
+        You're signed in with a temporary password set by an administrator.
+        Choose a new password below to continue using IcebergTTX.
+      </p>
+    </section>
+
     <section class="surface p-5">
       <div class="section-title mb-4">
         <h2 class="smallcaps text-muted">Profile</h2>
@@ -26,6 +34,26 @@
         </button>
       </div>
       <p class="text-[12.5px] text-muted mt-2" x-text="profileMessage"></p>
+    </section>
+
+    <section class="surface p-5">
+      <div class="section-title mb-4">
+        <h2 class="smallcaps text-muted">Password</h2>
+      </div>
+      <div class="grid gap-3 max-w-md">
+        <input type="password" x-model="newPassword" autocomplete="new-password"
+               class="ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
+               placeholder="New password (min 12 characters)" />
+        <input type="password" x-model="confirmPassword" autocomplete="new-password"
+               class="ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
+               placeholder="Confirm new password" />
+        <button @click="changePassword()" :disabled="savingPassword"
+                class="btn btn-primary h-9 px-4 text-[13px] justify-center disabled:opacity-50">
+          <span x-text="savingPassword ? 'Saving…' : 'Change password'"></span>
+        </button>
+      </div>
+      <p class="text-[12.5px] text-muted mt-2" x-text="passwordMessage"></p>
+      <p class="text-[12.5px] text-muted mt-1">Changing your password signs out all other sessions.</p>
     </section>
 
     <section class="surface p-5">

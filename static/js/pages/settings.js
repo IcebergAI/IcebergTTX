@@ -6,6 +6,10 @@ document.addEventListener('alpine:init', () => {
     displayName: '',
     savingProfile: false,
     profileMessage: '',
+    newPassword: '',
+    confirmPassword: '',
+    savingPassword: false,
+    passwordMessage: '',
     theme: localStorage.getItem('dt_theme') || 'system',
     viewRole: localStorage.getItem('dt_view_role') || 'facilitator',
     viewTeam: localStorage.getItem('dt_view_team') || 'it_ops',
@@ -15,6 +19,9 @@ document.addEventListener('alpine:init', () => {
     sampleMessage: '',
 
     get canSwitch() { return !!this.me?.can_switch_roles; },
+    // Admin set a temporary password (#66) — the user is held on this page until
+    // they set their own. app.js redirects them here.
+    get mustChangePassword() { return !!this.me?.must_change_password; },
     get previewTeamOptions() {
       const teams = new Map();
       const addTeam = (team) => {
@@ -59,6 +66,40 @@ document.addEventListener('alpine:init', () => {
       });
       this.savingProfile = false;
       this.profileMessage = resp && resp.ok ? 'Saved.' : 'Could not save name.';
+    },
+
+    async changePassword() {
+      this.passwordMessage = '';
+      if (this.newPassword.length < 12) {
+        this.passwordMessage = 'Password must be at least 12 characters.';
+        return;
+      }
+      if (this.newPassword !== this.confirmPassword) {
+        this.passwordMessage = 'Passwords do not match.';
+        return;
+      }
+      this.savingPassword = true;
+      const resp = await apiFetch('/auth/me', {
+        method: 'PUT',
+        body: JSON.stringify({ password: this.newPassword }),
+      });
+      this.savingPassword = false;
+      if (resp && resp.ok) {
+        this.newPassword = '';
+        this.confirmPassword = '';
+        // The change revoked our old bearer token, but update_me re-issued a fresh
+        // httpOnly cookie. Drop the now-stale localStorage token so apiFetch falls
+        // back to that cookie (never expose the token to JS) instead of 401ing.
+        localStorage.removeItem('dt_token');
+        const wasForced = this.mustChangePassword;
+        if (this.me) this.me.must_change_password = false;
+        this.passwordMessage = 'Password changed.';
+        // A forced (temp-password) change unblocks the app — reload so the shell
+        // re-bootstraps from the fresh cookie and the /settings gate lifts.
+        window.location.href = wasForced ? '/dashboard' : '/settings';
+      } else {
+        this.passwordMessage = 'Could not change password.';
+      }
     },
 
     setTheme(value) {

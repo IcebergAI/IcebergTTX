@@ -44,7 +44,7 @@ API-first architecture.
 **Single-replica constraint**: `ws_manager`, `rate_limit`, and the `SiemConfig`/`ProxyConfig` caches are all in-memory — the app must run as one replica until Redis pub/sub is added (k8s enforces `replicas: 1` + `strategy: Recreate`). The same applies to `triggers_communications`, which fire via `asyncio.create_task(asyncio.sleep(...))` and would need a task queue (Celery/ARQ) for multi-process.
 
 **Subsystem deep-dives live in [PLAN.md](PLAN.md) § Subsystem Decisions** — read the relevant entry before touching that subsystem:
-- *Security & auth*: startup secret validation (#9), self-registration (#8), password policy (#13), token revocation (#14), registration controls (#67), cookie security & CSRF (#10), security headers (#77), login brute-force (#11), trusted-proxy client IP (#36), WebSocket auth (#68), facilitator ownership scoping (#12).
+- *Security & auth*: startup secret validation (#9), self-registration (#8), password policy (#13), token revocation (#14), admin password reset (#66), registration controls (#67), cookie security & CSRF (#10), security headers (#77), login brute-force (#11), trusted-proxy client IP (#36), WebSocket auth (#68), facilitator ownership scoping (#12).
 - *Observability & egress*: audit logging (#23), SIEM forwarding (#24), outbound proxy (#97), OIDC/SSO (#25), LLM providers (#26).
 - *Features*: inject comment threads, group-scoped injects, file attachments (#39, #16), communications state guards (#40), role preview, dark mode, sample scenarios (#15).
 - *Deployment*: containerized deployment (Docker/Caddy/k8s, hardened non-root).
@@ -112,7 +112,7 @@ forwarding (#24) → strict CSP (#77) → OIDC/SSO (#25) → Caddy reverse proxy
 cookie auth (#68) → pluggable AI providers (#26) → outbound proxy (#97). Per-phase
 detail lives in git history / merged PRs.
 
-Current test count: **392 passing** (1 skipped).
+Current test count: **400 passing** (1 skipped).
 
 ---
 

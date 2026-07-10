@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Users — IcebergTTX{% endblock %}
+
+{% block content %}
+<div x-data="adminUsers()" class="workspace max-w-[1040px]">
+
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Users</h1>
+      <p class="text-[13.5px] text-muted mt-1">
+        Review accounts and reset a user's password. A reset revokes their existing sessions.
+      </p>
+    </div>
+  </div>
+
+  <p class="text-[12.5px] text-muted mb-3" x-show="message" x-cloak x-text="message"></p>
+
+  <section class="surface p-0 overflow-hidden">
+    <template x-if="loading">
+      <p class="p-5 text-[13px] text-muted">Loading users…</p>
+    </template>
+    <template x-if="loadError">
+      <p class="p-5 text-[13px] text-red-500" x-text="loadError"></p>
+    </template>
+
+    <div class="overflow-x-auto" x-show="!loading && !loadError">
+      <table class="w-full text-[13px]">
+        <thead>
+          <tr class="text-left smallcaps text-muted border-b rule">
+            <th class="px-4 py-2.5 font-normal">User</th>
+            <th class="px-4 py-2.5 font-normal">Role</th>
+            <th class="px-4 py-2.5 font-normal">Team</th>
+            <th class="px-4 py-2.5 font-normal">Status</th>
+            <th class="px-4 py-2.5 font-normal"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="u in users" :key="u.id">
+            <tr class="border-b rule last:border-0">
+              <td class="px-4 py-3">
+                <div class="font-medium" x-text="u.display_name"></div>
+                <div class="mono text-[11.5px] text-faint" x-text="u.email"></div>
+              </td>
+              <td class="px-4 py-3 capitalize" x-text="u.role"></td>
+              <td class="px-4 py-3 mono text-[12px]" x-text="u.team || '—'"></td>
+              <td class="px-4 py-3">
+                <span class="pill" x-show="!u.is_active" x-cloak>Disabled</span>
+                <span class="pill" x-show="u.must_change_password" x-cloak>Must change password</span>
+                <span class="text-faint" x-show="u.is_active && !u.must_change_password">Active</span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <button @click="openReset(u)" class="btn btn-ghost h-8 px-3 text-[12.5px]">
+                  Reset password
+                </button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+
+      <p class="p-5 text-[13px] text-muted" x-show="users.length === 0">No users found.</p>
+    </div>
+  </section>
+
+  <!-- Reset password modal -->
+  <div x-show="resetTarget" x-cloak
+       class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+       @keydown.escape.window="closeReset()">
+    <div class="paper ring-rule rounded-xl w-full max-w-md p-6 shadow-xl" @click.stop>
+      <h2 class="text-[18px] font-semibold mb-1">Reset password</h2>
+      <p class="text-[13px] text-muted mb-4" x-text="resetTargetLabel"></p>
+
+      <div x-show="resetError" x-cloak
+           class="mb-4 rounded-md px-3 py-2.5 text-[13px]"
+           style="background:#fee2e2; color:#b91c1c;"
+           x-text="resetError"></div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block smallcaps text-muted mb-1">Temporary password</label>
+          <input type="text" x-model="resetPassword" autocomplete="off"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
+                 placeholder="Min 12 characters" />
+        </div>
+        <div class="flex items-center gap-2.5">
+          <input type="checkbox" id="reset_must_change" x-model="resetMustChange"
+                 class="rounded accent-accent-ink" />
+          <label for="reset_must_change" class="text-[13px] text-ink-soft">
+            Require the user to change it on next login
+          </label>
+        </div>
+      </div>
+
+      <div class="flex gap-3 mt-5">
+        <button @click="submitReset()" :disabled="resetting"
+                class="btn btn-primary h-9 px-5 text-[13px] disabled:opacity-50">
+          <span x-text="resetting ? 'Resetting…' : 'Reset password'"></span>
+        </button>
+        <button @click="closeReset()" class="btn btn-ghost h-9 px-4 text-[13px]">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

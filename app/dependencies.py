@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Cookie, Depends, Header, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from jwt import PyJWTError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -85,7 +85,39 @@ async def resolve_user_from_token(
     return apply_role_preview(user, view_role, view_team)
 
 
+# Safe (non-mutating) HTTP methods stay reachable while a password change is
+# pending, so the frontend shell can still read /auth/me and load enough to
+# funnel the user to /settings (#66).
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _enforce_password_change(user: User, request: Request) -> None:
+    """Server-side backstop for the admin-set temporary-password flag (#66).
+
+    While ``must_change_password`` is set, block state-changing requests to
+    everything except the auth namespace (``/api/auth/*`` — so the user can view
+    and change their own account and log out). Reads are left alone; the UI
+    redirect to /settings is the primary funnel, this just stops a user from
+    ignoring it and driving the app via the API on a password the admin knows.
+    """
+    if not getattr(user, "must_change_password", False):
+        return
+    if request.method in _SAFE_METHODS or request.url.path.startswith("/api/auth/"):
+        return
+    audit_service.emit(
+        "authz.denied",
+        result="deny",
+        actor=user,
+        reason="password change required",
+        severity="warning",
+    )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail="Password change required"
+    )
+
+
 async def get_current_user(
+    request: Request,
     token: Annotated[str, Depends(_extract_token)],
     session: Annotated[AsyncSession, Depends(get_session)],
     view_role: Annotated[str | None, Cookie(alias="dt_view_role")] = None,
@@ -97,14 +129,16 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
         )
+    _enforce_password_change(user, request)
     return user
 
 
 async def get_current_actual_user(
+    request: Request,
     token: Annotated[str, Depends(_extract_token)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> User:
-    user = await get_current_user(token, session, view_role=None, view_team=None)
+    user = await get_current_user(request, token, session, view_role=None, view_team=None)
     object.__setattr__(user, "actual_role", user.role)
     object.__setattr__(user, "actual_team", user.team)
     object.__setattr__(user, "can_switch_roles", user.role == UserRole.facilitator)

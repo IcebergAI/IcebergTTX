@@ -35,6 +35,10 @@ class User(SQLModel, table=True):
     # for oversight/support, bypassing per-exercise ownership scoping. Assigned
     # out-of-band (seeded / DB), like the facilitator role — never via registration.
     is_admin: bool = Field(default=False)
+    # Temporary-password flag (#66): set when an admin resets this user's password,
+    # cleared when the user next changes it via PUT /auth/me. Enforced UI-side at
+    # login (the frontend redirects to /settings until the password is changed).
+    must_change_password: bool = Field(default=False)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )

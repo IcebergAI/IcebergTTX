@@ -214,6 +214,11 @@ def settings_page(request: Request, user: LoggedInUser):
     return templates.TemplateResponse(request, "settings.html", {"user": user})
 
 
+@router.get("/admin/users", response_class=HTMLResponse)
+def admin_users_page(request: Request, user: AdminUser):
+    return templates.TemplateResponse(request, "admin/users.html", {"user": user})
+
+
 @router.get("/admin/audit", response_class=HTMLResponse)
 def admin_audit_page(request: Request, user: AdminUser):
     return templates.TemplateResponse(request, "admin/audit.html", {"user": user})

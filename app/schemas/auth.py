@@ -68,6 +68,15 @@ class AdminCreateUserRequest(EmailMixin):
     is_admin: bool = False
 
 
+class AdminResetPasswordRequest(BaseModel):
+    """Admin-driven password reset (#66). The admin supplies the new (temporary)
+    password; must_change_password defaults on so the user is prompted to set their
+    own on next login. Guarded by require_admin."""
+
+    password: Password
+    must_change_password: bool = True
+
+
 class LoginRequest(EmailMixin):
     password: str
 
@@ -84,6 +93,7 @@ class UserResponse(BaseModel):
     role: UserRole
     team: str | None
     is_admin: bool = False
+    must_change_password: bool = False
     actual_role: UserRole | None = None
     actual_team: str | None = None
     can_switch_roles: bool = False

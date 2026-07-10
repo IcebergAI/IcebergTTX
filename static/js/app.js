@@ -325,14 +325,22 @@ document.addEventListener('alpine:init', () => {
         this.refreshExercises();
       });
       if (isAuthPage()) return;
-      const token = getToken();
-      if (!token) return;
+      // No localStorage-token gate: shell pages are only served to an authenticated
+      // request (ui.py redirects anonymous visitors to /login server-side), so the
+      // httpOnly cookie is always present here — this also covers cookie-only
+      // sessions (SSO, or right after a password change dropped the stale token).
       this.selectedId = Number(getCookie('dt_current_exercise')) || null;
       const [mr] = await Promise.all([
         apiFetch('/auth/me'),
         this.refreshExercises(),
       ]);
       this.user = await readJson(mr);
+      // Temp-password gate (#66): an admin-reset user must set their own password
+      // before doing anything else. Enforced UI-side — hold them on /settings.
+      if (this.user?.must_change_password && window.location.pathname !== '/settings') {
+        window.location.href = '/settings';
+        return;
+      }
       if (this.user?.role === 'facilitator') {
         const sr = await apiFetch('/scenarios');
         const scenarios = await readJson(sr, []);
