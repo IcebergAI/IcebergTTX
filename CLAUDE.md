@@ -71,7 +71,7 @@ API-first architecture.
 
 **Facilitator ownership scoping (#12)**: facilitator access to **exercises** is scoped per-exercise, not global. `require_exercise_access` (read gate) and `require_exercise_owner` (mutation gate) in `access_control.py` grant access only to: the creator (`Exercise.created_by`), a **co-facilitator** (a facilitator enrolled as an `ExerciseMember` — reuses the existing membership mechanism, no new field), or a **global admin** (`User.is_admin`, assigned out-of-band like the facilitator role — never via registration). Any other facilitator gets `403` + an `authz.denied` audit event. This scopes every exercise read route (via the shared `require_exercise_access` used by injects/responses/communications/inject-comments/ws) plus all mutation/lifecycle/member/export routes in `exercises.py`; `GET /exercises` is filtered to owned-or-member (admins see all). **Scenarios remain a shared library** (any facilitator lists/reads/edits/exports — intentional, they're reusable templates), and `GET /users` stays facilitator-wide (it's the member-enrolment picker). `is_admin` is a real column so it survives role-preview `model_copy` and is unspoofable.
 
-**LLM integration**: Uses `anthropic>=0.40` (`AsyncAnthropic`). Prompt caching applied via the `anthropic-beta: prompt-caching-2024-07-31` header — scenario context + inject content is the cached prefix; participant response text is the non-cached suffix. `run_llm_pipeline` is a background async task (fired via `asyncio.create_task`) that opens its own `AsyncSession(engine)` directly (same pattern as `_delayed_comm`). The `Exercise.llm_enabled` flag gates LLM calls per exercise. Set `ANTHROPIC_API_KEY` in `.env` to enable. All API calls are mocked in `tests/test_llm.py` — no real network requests.
+**LLM integration (pluggable providers, #26)**: The AI backend is pluggable via an adapter/registry that mirrors the OIDC pattern (`app/services/llm/`). `LLM_PROVIDER` selects the single active provider for the whole app (the AI analog of `AUTH_MODE`): `anthropic` | `bedrock` | `openai` | `ollama` | `gemini` | `none`. `base.py` holds the `LLMProvider` Protocol (`key`, `model`, `llm_model_label`, `async complete(system, cached_context, user_prompt, max_tokens)`) + a family registry (`register_adapter`/`get_adapter`); two adapters cover all five providers — `AnthropicFamilyAdapter` (`anthropic_provider.py`, family `"anthropic"`) handles direct Anthropic **and** Bedrock (same `messages.create` surface; differ only in client construction — `AsyncAnthropic` vs `AsyncAnthropicBedrock` — and the `anthropic.`-prefixed Bedrock model ID), and `OpenAICompatAdapter` (`openai_provider.py`, family `"openai"`) handles OpenAI, Ollama, and Gemini (all via the OpenAI Chat Completions surface, differing only by `base_url`/model/key). **Prompt caching** (`cache_control` block + `anthropic-beta` header) is applied **only** on the direct-Anthropic path; Bedrock omits it and the OpenAI-compat adapter concatenates the cached context into the user message. `service.py` force-imports the adapter modules (registration side-effects), then `active_provider()` builds/caches the provider from `settings.active_llm_provider()`. `config.py` resolves flat env vars (`ANTHROPIC_*`/`BEDROCK_*`/`OPENAI_*`/`OLLAMA_*`/`GEMINI_*`, `LLM_MAX_TOKENS`) into an `LLMProviderConfig`; `validate_settings()` rejects an unknown `LLM_PROVIDER` and (outside dev) a selected provider missing its credentials. Every provider's SDK is a **lazy-imported optional extra** — no LLM SDK is a core dependency, so all providers are on equal footing (`pip install '.[llm-anthropic]'` for direct Anthropic, `'.[llm-bedrock]'` pulls boto3, `'.[llm-openai]'` covers openai/ollama/gemini; `'.[llm-all]'` bundles all, and the `dev` extra includes them). An unconfigured provider never needs its SDK; the adapters raise a clear "install extra X" error if the selected provider's SDK is absent. `llm_service.py` is now provider-agnostic: `run_llm_pipeline` (a background async task opening its own `AsyncSession(engine)`, same pattern as `_delayed_comm`, gated by `Exercise.llm_enabled`) calls `active_provider().complete(...)` and stamps `ResponseAssessment.llm_model`/`SuggestedInject.llm_model` with `provider.llm_model_label` (e.g. `"anthropic:claude-opus-4-8"`). Tests mock at the `active_provider` seam (`tests/test_llm.py`) plus per-adapter/config coverage (`tests/test_llm_providers.py`) — no real network requests.
 
 **Tailwind**: CLI-compiled `static/css/output.css`. `static/css/input.css` is `@import "tailwindcss"` + `@import "./iceberg.css"` + `@source` lines for the component JS + an `@theme inline` block mapping Tailwind colour/font utilities (`bg-surface`, `text-ink`, `border-line`, `font-mono`, …) onto the shared token CSS variables. Rebuild after template/CSS/JS changes: `tailwindcss -i static/css/input.css -o static/css/output.css`. Tailwind v4 auto-scans `app/templates/**/*.html`; the explicit `@source "../js/app.js"` + `@source "../js/pages"` cover utility classes now emitted from the Alpine component JS (e.g. `teamColor()`'s `bg-sky-100/70 …` strings, #77) — no config file needed. The Dockerfile's tailwind stage copies the whole `static/` tree (so the `iceberg.css` import resolves and the fonts propagate to the runtime image).
 
@@ -109,7 +109,7 @@ app/
 ├── models/          # SQLModel table definitions (incl. audit.AuditEvent)
 ├── schemas/         # Pydantic schemas (auth, scenario_json)
 ├── routers/         # One router per resource + ui.py for Jinja2 pages
-├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control, audit_service, rate_limit)
+├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm_service, llm/ provider adapters, ws_manager, access_control, audit_service, rate_limit)
 └── templates/       # Jinja2 HTML
     │   base.html            # App shell (brandbar/rail/topbar) + sidebarNav() Alpine + shared JS; design tokens in static/css/iceberg.css
     │   dashboard.html       # Command center (live exercise hero card + exercises/scenarios lists)
@@ -141,14 +141,15 @@ revised/             # Claude Design prototype (static reference, not served)
 
 ## Build Status
 
-All **24 build phases complete**: foundation/auth → scenarios → exercises/members →
+All **25 build phases complete**: foundation/auth → scenarios → exercises/members →
 injects + WebSocket → responses/branching → communications → LLM integration →
 UI/design-system alignment → containerized deployment → async (asyncpg) migration →
 security hardening (#8–#16, #23) → facilitator ownership scoping (#12) → SIEM
 forwarding (#24) → strict CSP (#77) → OIDC/SSO (#25) → Caddy reverse proxy + WS
-cookie auth (#68). Per-phase detail lives in git history / merged PRs.
+cookie auth (#68) → pluggable AI providers (#26). Per-phase detail lives in git
+history / merged PRs.
 
-Current test count: **323 passing** (1 skipped).
+Current test count: **342 passing** (1 skipped).
 
 ---
 

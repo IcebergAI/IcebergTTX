@@ -5,6 +5,22 @@ metadata:
   namespace: iceberg-ttx
 data:
   ACCESS_TOKEN_EXPIRE_MINUTES: "480"
+  # Pluggable AI provider (#26) — non-secret routing. LLM_PROVIDER selects the
+  # active backend (anthropic | bedrock | openai | ollama | gemini | none); provider
+  # API keys are Secrets (ANTHROPIC/OPENAI/GEMINI_API_KEY), never here. Set only the
+  # model/endpoint vars for the provider you pick. Reaching a hosted provider uses
+  # the app's egress (left open in k8s/networkpolicy.yaml); Ollama is typically an
+  # in-cluster service (point OLLAMA_BASE_URL at it).
+  LLM_PROVIDER: "anthropic"
+  LLM_MAX_TOKENS: "600"
+  ANTHROPIC_MODEL: "claude-opus-4-8"
+  BEDROCK_MODEL: "anthropic.claude-opus-4-8"
+  BEDROCK_AWS_REGION: ""
+  OPENAI_MODEL: "gpt-5"
+  OPENAI_BASE_URL: ""
+  OLLAMA_MODEL: "llama3.1"
+  OLLAMA_BASE_URL: "http://localhost:11434/v1"
+  GEMINI_MODEL: "gemini-2.0-flash"
   # Trust X-Forwarded-For only from the Caddy proxy (the sole ingress) so the app
   # sees the real client IP, not Caddy (#36). Narrow to the Caddy pod CIDR if the
   # app Service is ever exposed beyond the cluster-internal proxy.
@@ -19,7 +35,7 @@ data:
   # SIEM forwarding (#24) — non-secret routing that seeds the admin-editable
   # /admin/audit config. The app forwards audit events itself (no sidecar); the
   # HTTP/syslog sink reaches an external collector via the app's egress (left open
-  # in k8s/networkpolicy.yaml for the Anthropic API). The bearer token is a Secret
+  # in k8s/networkpolicy.yaml). The bearer token is a Secret
   # (SIEM_HTTP_TOKEN), never here. Enable + change methods live from /admin/audit.
   SIEM_ENABLED: "false"
   SIEM_METHODS: "stdout"

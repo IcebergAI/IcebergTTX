@@ -73,11 +73,74 @@ spec:
                 secretKeyRef:
                   name: iceberg-ttx-secrets
                   key: SECRET_KEY
+            # Pluggable AI provider (#26). LLM_PROVIDER + model/endpoint routing
+            # come from the ConfigMap; provider API keys from the Secret. Only the
+            # vars for the selected provider need real values.
+            - name: LLM_PROVIDER
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: LLM_PROVIDER
+            - name: LLM_MAX_TOKENS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: LLM_MAX_TOKENS
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: iceberg-ttx-secrets
                   key: ANTHROPIC_API_KEY
+            - name: ANTHROPIC_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: ANTHROPIC_MODEL
+            - name: BEDROCK_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: BEDROCK_MODEL
+            - name: BEDROCK_AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: BEDROCK_AWS_REGION
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: iceberg-ttx-secrets
+                  key: OPENAI_API_KEY
+            - name: OPENAI_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OPENAI_MODEL
+            - name: OPENAI_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OPENAI_BASE_URL
+            - name: OLLAMA_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OLLAMA_MODEL
+            - name: OLLAMA_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: OLLAMA_BASE_URL
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: iceberg-ttx-secrets
+                  key: GEMINI_API_KEY
+            - name: GEMINI_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: GEMINI_MODEL
             - name: ACCESS_TOKEN_EXPIRE_MINUTES
               valueFrom:
                 configMapKeyRef:
