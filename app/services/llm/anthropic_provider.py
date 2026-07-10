@@ -15,12 +15,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx
+
+from app.services import proxy
 from app.services.llm.base import register_adapter
 
 if TYPE_CHECKING:
     from app.config import LLMProviderConfig
 
 _PROMPT_CACHING_BETA = "prompt-caching-2024-07-31"
+
+ANTHROPIC_API_BASE = "https://api.anthropic.com"
+_BEDROCK_HOST = "https://bedrock-runtime.{region}.amazonaws.com"
 
 
 class AnthropicFamilyAdapter:
@@ -33,6 +39,25 @@ class AnthropicFamilyAdapter:
         self.llm_model_label = f"{cfg.key}:{cfg.model}"
         self._client = None
 
+    def api_base(self) -> str:
+        """The URL the SDK actually dials — what the no-proxy list is matched against.
+
+        Bedrock talks to a regional AWS endpoint, not the Anthropic API, so the
+        bypass decision must key off that host.
+        """
+        if self.cfg.backend == "bedrock" and self.cfg.aws_region:
+            return _BEDROCK_HOST.format(region=self.cfg.aws_region)
+        return ANTHROPIC_API_BASE
+
+    def _http_client(self) -> httpx.AsyncClient | None:
+        """A proxied httpx client, or None to let the SDK build its own default.
+
+        Resolved once here, against the provider's base URL, because the SDK client
+        is long-lived; a proxy change invalidates it via ``reset_provider_cache()``.
+        """
+        proxy_kwargs = proxy.resolve_kwargs(self.api_base())
+        return httpx.AsyncClient(**proxy_kwargs) if proxy_kwargs else None
+
     def _get_client(self):
         if self._client is not None:
             return self._client
@@ -44,10 +69,11 @@ class AnthropicFamilyAdapter:
                 f"LLM_PROVIDER={self.key} requires the Anthropic extra: "
                 f"`pip install '.[{extra}]'`."
             ) from exc
+        http_client = self._http_client()
         if self.cfg.backend == "bedrock":
             try:
                 self._client = anthropic.AsyncAnthropicBedrock(
-                    aws_region=self.cfg.aws_region or None
+                    aws_region=self.cfg.aws_region or None, http_client=http_client
                 )
             except (ImportError, AttributeError) as exc:
                 raise RuntimeError(
@@ -55,7 +81,9 @@ class AnthropicFamilyAdapter:
                     "`pip install '.[llm-bedrock]'`."
                 ) from exc
         else:
-            self._client = anthropic.AsyncAnthropic(api_key=self.cfg.api_key)
+            self._client = anthropic.AsyncAnthropic(
+                api_key=self.cfg.api_key, http_client=http_client
+            )
         return self._client
 
     async def complete(

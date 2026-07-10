@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -155,6 +156,24 @@ class Settings(BaseSettings):
     siem_http_endpoint: str = ""
     siem_http_verify_tls: bool = True
     siem_http_token: str = ""  # SECRET: env-only, never persisted or logged
+
+    # Outbound proxy (#97). These *seed* the admin-editable ProxySettings row on
+    # first read; routing is changed at runtime via /admin/proxy thereafter.
+    # Modes: system (honour HTTP(S)_PROXY/NO_PROXY env — the default, and what
+    # httpx already did implicitly) | none (always direct) | explicit (use
+    # proxy_url, bypassing the no-proxy list). Applies to LLM, SIEM-HTTP and OIDC
+    # egress; the raw-socket syslog sink cannot be proxied.
+    # The default no-proxy list covers loopback/private ranges, so Ollama's
+    # default base URL (http://localhost:11434/v1) never traverses the proxy.
+    # proxy_username/proxy_password are SECRETS — env-only, never a DB column,
+    # never logged; injected into the proxy URL at call time.
+    proxy_mode: str = "system"  # system | none | explicit
+    proxy_url: str = ""
+    proxy_no_proxy: str = (
+        "localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,::1"
+    )
+    proxy_username: str = ""  # SECRET: env-only, never persisted or logged
+    proxy_password: str = ""  # SECRET: env-only, never persisted or logged
 
     # OIDC / SSO (#25). auth_mode selects local | oidc | both. Each provider is
     # enabled independently and, if enabled, contributes a login button. Client
@@ -394,6 +413,30 @@ def _parse_role_map(raw: str) -> dict[str, str]:
     return result
 
 
+PROXY_MODES = ("none", "system", "explicit")
+PROXY_URL_SCHEMES = ("http", "https", "socks5", "socks5h")
+
+
+def _validate_proxy_settings(s: Settings) -> None:
+    """Validate outbound-proxy config (#97). Runs in dev too — a malformed proxy
+    fails the same way everywhere. Never logs the URL (it may carry credentials in
+    a hand-rolled env var)."""
+    mode = s.proxy_mode.strip().lower()
+    if mode not in PROXY_MODES:
+        raise RuntimeError(
+            f"PROXY_MODE must be one of {'|'.join(PROXY_MODES)}, got {s.proxy_mode!r}."
+        )
+    if mode == "explicit" and not s.proxy_url.strip():
+        raise RuntimeError("PROXY_MODE=explicit requires PROXY_URL to be set.")
+    if s.proxy_url.strip():
+        parsed = urlsplit(s.proxy_url.strip())
+        if parsed.scheme not in PROXY_URL_SCHEMES or not parsed.hostname:
+            raise RuntimeError(
+                "PROXY_URL must be an absolute URL with scheme "
+                f"{'|'.join(PROXY_URL_SCHEMES)} and a host (e.g. http://proxy.corp:3128)."
+            )
+
+
 def validate_settings(s: Settings | None = None) -> None:
     """Fail fast on insecure production configuration. Called at startup."""
     s = s or settings
@@ -408,6 +451,7 @@ def validate_settings(s: Settings | None = None) -> None:
             f"{'|'.join(LLM_PROVIDER_KEYS)} (or empty to disable), got "
             f"{s.llm_provider!r}."
         )
+    _validate_proxy_settings(s)
     if s.dev_mode:
         return
     if s.secret_key_is_insecure:

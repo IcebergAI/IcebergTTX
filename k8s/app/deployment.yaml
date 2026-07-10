@@ -206,6 +206,33 @@ spec:
                 secretKeyRef:
                   name: iceberg-ttx-secrets
                   key: SIEM_HTTP_TOKEN
+            # Outbound proxy (#97) — non-secret routing from the ConfigMap; the proxy
+            # credentials come from the Secret. Seeds the admin-editable /admin/proxy row.
+            - name: PROXY_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: PROXY_MODE
+            - name: PROXY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: PROXY_URL
+            - name: PROXY_NO_PROXY
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: PROXY_NO_PROXY
+            - name: PROXY_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: iceberg-ttx-secrets
+                  key: PROXY_USERNAME
+            - name: PROXY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: iceberg-ttx-secrets
+                  key: PROXY_PASSWORD
             # OIDC / SSO (#25) — non-secret routing from the ConfigMap; the client
             # secrets come from the Secret. A disabled provider needs no secret.
             - name: AUTH_MODE

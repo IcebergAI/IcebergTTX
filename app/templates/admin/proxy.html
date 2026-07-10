@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Outbound proxy — IcebergTTX{% endblock %}
+
+{% block content %}
+<div x-data="adminProxy()" class="workspace max-w-[1040px]">
+
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Outbound proxy</h1>
+      <p class="text-[13.5px] text-muted mt-1">
+        Route egress to the LLM API, the SIEM HTTP collector, and the SSO identity provider
+        through a corporate proxy.
+      </p>
+    </div>
+  </div>
+
+  <div class="space-y-5">
+
+    <!-- Routing config -->
+    <section class="surface p-5">
+      <div class="section-title mb-4">
+        <h2 class="smallcaps text-muted">Routing</h2>
+      </div>
+
+      <div class="grid gap-4" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+        <div>
+          <label class="block smallcaps text-muted mb-1">Mode</label>
+          <select x-model="cfg.mode"
+                  class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface">
+            <template x-for="m in allModes" :key="m">
+              <option :value="m" x-text="m"></option>
+            </template>
+          </select>
+          <p class="text-[11.5px] text-faint mt-1" x-text="modeHelp"></p>
+        </div>
+
+        <div>
+          <label class="block smallcaps text-muted mb-1">Proxy URL (explicit mode)</label>
+          <input type="text" x-model="cfg.proxy_url" placeholder="http://proxy.corp:3128"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+          <p class="text-[11.5px] text-faint mt-1">
+            Credentials are set out-of-band via the <span class="mono">PROXY_USERNAME</span> /
+            <span class="mono">PROXY_PASSWORD</span> secrets — never entered or shown here.
+          </p>
+        </div>
+
+        <div class="col-span-2">
+          <label class="block smallcaps text-muted mb-1">No-proxy list</label>
+          <textarea x-model="cfg.no_proxy" rows="2"
+                    placeholder="localhost,127.0.0.0/8,10.0.0.0/8,siem.internal"
+                    class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono"></textarea>
+          <p class="text-[11.5px] text-faint mt-1">
+            Comma-separated hosts, domains (matching subdomains), or CIDR ranges that bypass the
+            proxy. An internal SIEM collector belongs here. The raw-socket syslog sink is never
+            proxied.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 mt-5">
+        <button @click="save()" :disabled="saving"
+                class="btn btn-primary h-9 px-4 text-[13px] justify-center disabled:opacity-50">
+          <span x-text="saving ? 'Saving…' : 'Save routing'"></span>
+        </button>
+        <p class="text-[12.5px] text-muted" x-text="message"></p>
+      </div>
+    </section>
+
+    <!-- Connectivity test -->
+    <section class="surface p-5">
+      <div class="section-title mb-4">
+        <h2 class="smallcaps text-muted">Test connection</h2>
+      </div>
+      <p class="text-[12.5px] text-muted mb-3">
+        Dials one of the endpoints this app is configured to call, using the saved routing
+        above. Save first — the test reads the persisted configuration.
+      </p>
+      <template x-if="targets.length === 0">
+        <p class="text-[12.5px] text-faint">
+          No egress targets configured. Enable an LLM provider, the SIEM http sink, or an
+          OIDC provider to test connectivity.
+        </p>
+      </template>
+      <div class="flex items-center gap-2" x-show="targets.length > 0">
+        <select x-model="target"
+                class="flex-1 ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono">
+          <template x-for="t in targets" :key="t">
+            <option :value="t" x-text="t"></option>
+          </template>
+        </select>
+        <button @click="runTest()" :disabled="testing"
+                class="btn btn-ghost h-9 px-4 text-[13px] justify-center disabled:opacity-50">
+          <span x-text="testing ? 'Testing…' : 'Test'"></span>
+        </button>
+      </div>
+      <template x-if="testResult">
+        <p class="text-[12.5px] mt-3 mono" :class="testFailed ? 'text-red-600' : 'text-muted'"
+           x-text="testResult"></p>
+      </template>
+    </section>
+
+  </div>
+</div>
+{% endblock %}

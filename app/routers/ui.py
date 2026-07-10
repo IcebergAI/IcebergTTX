@@ -217,3 +217,8 @@ def settings_page(request: Request, user: LoggedInUser):
 @router.get("/admin/audit", response_class=HTMLResponse)
 def admin_audit_page(request: Request, user: AdminUser):
     return templates.TemplateResponse(request, "admin/audit.html", {"user": user})
+
+
+@router.get("/admin/proxy", response_class=HTMLResponse)
+def admin_proxy_page(request: Request, user: AdminUser):
+    return templates.TemplateResponse(request, "admin/proxy.html", {"user": user})

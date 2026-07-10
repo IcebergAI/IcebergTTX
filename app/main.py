@@ -23,6 +23,7 @@ from app.models import (  # noqa: F401
     exercise,
     inject,
     inject_comment,
+    proxy_settings,
     response,
     scenario,
     suggested_inject,
@@ -44,6 +45,7 @@ from app.routers import (
     users,
     ws,
 )
+from app.routers import proxy as proxy_router
 from app.routers import settings as settings_router
 from app.routers.ui import UIRedirect
 from app.services import audit_service
@@ -70,11 +72,34 @@ async def _load_siem_config() -> None:
         logger.exception("failed to load SIEM audit config; forwarding stays disabled")
 
 
+async def _load_proxy_config() -> None:
+    """Load the ProxySettings singleton into the outbound-proxy cache (#97).
+
+    Best-effort: a failure here must not block startup — the cache stays unloaded,
+    and every call site then passes no proxy kwargs, i.e. httpx's pre-feature
+    default (``trust_env=True``, honouring any ambient HTTPS_PROXY).
+    """
+    try:
+        from sqlmodel.ext.asyncio.session import AsyncSession
+
+        from app.database import engine
+        from app.services import proxy_settings_service
+
+        async with AsyncSession(engine) as session:
+            await proxy_settings_service.refresh_cache(session)
+    except Exception:
+        logger.exception("failed to load outbound proxy config; using httpx defaults")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
     validate_settings()
     await run_migrations()
+    # Must precede OIDC registration and any outbound call: the OIDC providers bake
+    # the resolved proxy into their Authlib client at registration time (#97). Move
+    # this below register_providers() and OIDC silently loses proxying.
+    await _load_proxy_config()
     await _load_siem_config()
     # Register enabled OIDC providers with Authlib (#25). Idempotent; the routes
     # also register lazily so this is a no-op fast path under the test transport.
@@ -139,6 +164,7 @@ app.include_router(ui.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(oidc.router, prefix="/api")
 app.include_router(audit_router.router, prefix="/api")
+app.include_router(proxy_router.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(scenarios.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")

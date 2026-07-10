@@ -45,6 +45,15 @@ data:
   SIEM_SYSLOG_PROTOCOL: "UDP"
   SIEM_HTTP_ENDPOINT: ""
   SIEM_HTTP_VERIFY_TLS: "true"
+  # Outbound proxy (#97) — non-secret routing; seeds the admin-editable /admin/proxy
+  # config. Credentials live in the Secret (PROXY_USERNAME/PROXY_PASSWORD), never here.
+  # system = honour HTTP(S)_PROXY/NO_PROXY env (default, and the pre-feature behaviour);
+  # none = always direct; explicit = via PROXY_URL except for PROXY_NO_PROXY hosts.
+  # Covers LLM, SIEM-http and OIDC egress. The raw-socket syslog sink is never proxied —
+  # keep an in-cluster collector in PROXY_NO_PROXY (the private ranges already are).
+  PROXY_MODE: "system"
+  PROXY_URL: ""
+  PROXY_NO_PROXY: "localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,::1"
   # OIDC / SSO (#25) — non-secret routing. Client secrets live in the Secret
   # (OIDC_*_CLIENT_SECRET), never here. AUTH_MODE=local|oidc|both. Enable a provider
   # and supply its client id / discovery inputs; set OIDC_REDIRECT_BASE_URL to the

@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 import httpx
 
 from app.config import settings
+from app.services import proxy
 
 logger = logging.getLogger("iceberg_ttx.siem")
 
@@ -120,6 +121,9 @@ async def _emit_file(event: dict, cfg: SiemConfig) -> None:
 
 
 async def _emit_syslog(event: dict, cfg: SiemConfig) -> None:
+    # NB: a raw UDP/TCP socket, so this sink is **not** routed through the outbound
+    # HTTP proxy (#97) — only the `http` sink can be. A syslog collector must be
+    # directly reachable from the app.
     # RFC 5424: <PRI>VERSION TIMESTAMP HOSTNAME APP-NAME PROCID MSGID STRUCTURED MSG
     # severity numeric per RFC 5424 (INFO=6, WARNING=4, CRITICAL=2) combined with
     # the configured facility into the PRI value.
@@ -150,6 +154,11 @@ async def _emit_http(event: dict, cfg: SiemConfig) -> None:
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, verify=cfg.http_verify_tls) as client:
+    # Route via the outbound proxy (#97). An internal collector is normally covered
+    # by the no-proxy list and resolves to a direct connection.
+    proxy_kwargs = proxy.resolve_kwargs(cfg.http_endpoint)
+    async with httpx.AsyncClient(
+        timeout=_HTTP_TIMEOUT, verify=cfg.http_verify_tls, **proxy_kwargs
+    ) as client:
         resp = await client.post(cfg.http_endpoint, content=_line(event), headers=headers)
         resp.raise_for_status()

@@ -15,7 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import OIDCProviderConfig, settings
 from app.models.user import LOCAL_AUTH_PROVIDER, User, UserRole
-from app.services import audit_service
+from app.services import audit_service, proxy
 from app.services.oidc import auth0 as _auth0  # noqa: F401 - registers adapter
 from app.services.oidc import authentik as _authentik  # noqa: F401 - registers adapter
 from app.services.oidc import entra as _entra  # noqa: F401 - registers adapter
@@ -47,19 +47,41 @@ def register_providers() -> list[OIDCProviderConfig]:
     for cfg in configs:
         if cfg.key in _registered:
             continue
+        # Authlib's AsyncOAuth2Client subclasses httpx.AsyncClient, so the resolved
+        # proxy kwargs reach httpx through client_kwargs (#97). The decision is baked
+        # in here, at registration, against the IdP's discovery host — which is why
+        # the proxy cache must be loaded before this runs, and why a proxy change
+        # calls reset_registration().
+        client_kwargs = {
+            "scope": cfg.scopes,
+            "code_challenge_method": "S256",
+        }
+        client_kwargs.update(proxy.resolve_kwargs(cfg.metadata_url))
         oauth.register(
             name=cfg.key,
             client_id=cfg.client_id,
             client_secret=cfg.client_secret,
             server_metadata_url=cfg.metadata_url,
-            client_kwargs={
-                "scope": cfg.scopes,
-                "code_challenge_method": "S256",
-            },
+            client_kwargs=client_kwargs,
         )
         _registered[cfg.key] = cfg
     _registration_done = True
     return configs
+
+
+def reset_registration() -> None:
+    """Force providers to re-register on next use (e.g. after a proxy change).
+
+    Authlib's ``register()`` overwrites its ``_registry`` entry but ``create_client()``
+    returns the **cached** ``_clients[name]``, so re-registering alone would silently
+    keep serving the old client — with the old proxy. Rebinding ``oauth`` to a fresh
+    registry sidesteps Authlib's internals entirely; the routers reach it as
+    ``oidc_service.oauth``, so they pick up the new object.
+    """
+    global oauth, _registration_done
+    oauth = OAuth()
+    _registered.clear()
+    _registration_done = False
 
 
 def ensure_registered() -> None:

@@ -71,6 +71,15 @@ services:
       SIEM_HTTP_ENDPOINT: ${SIEM_HTTP_ENDPOINT:-}
       SIEM_HTTP_VERIFY_TLS: ${SIEM_HTTP_VERIFY_TLS:-true}
       SIEM_HTTP_TOKEN: ${SIEM_HTTP_TOKEN:-}
+      # Outbound proxy (#97). Routes LLM, SIEM-http and OIDC egress through a
+      # corporate proxy; seeds the admin-editable /admin/proxy config. Default
+      # `system` honours HTTP(S)_PROXY/NO_PROXY, matching pre-feature behaviour.
+      # PROXY_USERNAME/PASSWORD are secrets — env-only, never persisted or logged.
+      PROXY_MODE: ${PROXY_MODE:-system}
+      PROXY_URL: ${PROXY_URL:-}
+      PROXY_NO_PROXY: ${PROXY_NO_PROXY:-localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,::1}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
       # OIDC / SSO (#25). AUTH_MODE=local|oidc|both. Client secrets are secrets —
       # passed through from the .env, never logged or persisted.
       AUTH_MODE: ${AUTH_MODE:-both}
