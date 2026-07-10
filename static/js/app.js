@@ -383,6 +383,7 @@ document.addEventListener('alpine:init', () => {
       if (p.startsWith('/scenarios')) return 'Scenarios';
       if (p.startsWith('/exercises')) return 'Exercises';
       if (p.startsWith('/admin/audit')) return 'Audit log';
+      if (p.startsWith('/admin/proxy')) return 'Outbound proxy';
       if (p.startsWith('/help')) return 'Help';
       if (p.startsWith('/settings')) return 'Settings';
       const seg = p.replace(/^\/+/, '').split('/')[0] || 'Home';

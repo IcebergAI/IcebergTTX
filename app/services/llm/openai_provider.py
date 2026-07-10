@@ -14,10 +14,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx
+
+from app.services import proxy
 from app.services.llm.base import register_adapter
 
 if TYPE_CHECKING:
     from app.config import LLMProviderConfig
+
+OPENAI_API_BASE = "https://api.openai.com"
 
 
 class OpenAICompatAdapter:
@@ -29,6 +34,17 @@ class OpenAICompatAdapter:
         self.model = cfg.model
         self.llm_model_label = f"{cfg.key}:{cfg.model}"
         self._client = None
+
+    def api_base(self) -> str:
+        """The URL the SDK actually dials — what the no-proxy list is matched against.
+        Ollama's local endpoint is covered by the default no-proxy list."""
+        return self.cfg.base_url or OPENAI_API_BASE
+
+    def _http_client(self) -> httpx.AsyncClient | None:
+        """A proxied httpx client, or None to let the SDK build its own default.
+        Resolved once, against the base URL — the SDK client is long-lived."""
+        proxy_kwargs = proxy.resolve_kwargs(self.api_base())
+        return httpx.AsyncClient(**proxy_kwargs) if proxy_kwargs else None
 
     def _get_client(self):
         if self._client is not None:
@@ -44,6 +60,7 @@ class OpenAICompatAdapter:
         self._client = AsyncOpenAI(
             api_key=self.cfg.api_key or "not-needed",
             base_url=self.cfg.base_url or None,
+            http_client=self._http_client(),
         )
         return self._client
 
