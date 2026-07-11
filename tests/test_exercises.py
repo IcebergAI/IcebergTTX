@@ -498,6 +498,19 @@ async def test_enrol_member_rejects_unknown_group(
     assert r.status_code == 422
 
 
+async def test_enrol_member_rejects_unknown_user(
+    client: AsyncClient, facilitator_token: str, draft_exercise
+):
+    r = await client.post(
+        f"/api/exercises/{draft_exercise.id}/members",
+        json={"user_id": 2_147_483_647},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+
+    assert r.status_code == 404
+    assert r.json() == {"detail": "User not found"}
+
+
 async def test_enrol_member_idempotent(
     client: AsyncClient, facilitator_token: str, draft_exercise, participant: User
 ):
