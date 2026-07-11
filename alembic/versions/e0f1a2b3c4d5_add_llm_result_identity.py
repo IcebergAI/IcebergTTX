@@ -16,11 +16,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.create_unique_constraint("uq_assessment_response", "responseassessment", ["response_id"])
-    op.create_unique_constraint(
-        "uq_suggested_inject_response", "suggestedinject", ["triggered_by_response_id"]
-    )
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_suggested_inject_response", "suggestedinject", type_="unique")
     op.drop_constraint("uq_assessment_response", "responseassessment", type_="unique")
