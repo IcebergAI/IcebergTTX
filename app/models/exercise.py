@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from app.models.communication import Communication
     from app.models.inject import Inject
     from app.models.inject_comment import InjectComment
+    from app.models.report_summary import ExecutiveSummary
     from app.models.response import Response
     from app.models.scenario import Scenario
     from app.models.suggested_inject import SuggestedInject
@@ -61,6 +62,11 @@ class Exercise(SQLModel, table=True):
     )
     suggested_injects: list["SuggestedInject"] = Relationship(
         back_populates="exercise", cascade_delete=True
+    )
+    executive_summary: Optional["ExecutiveSummary"] = Relationship(
+        back_populates="exercise",
+        cascade_delete=True,
+        sa_relationship_kwargs={"uselist": False},
     )
 
 

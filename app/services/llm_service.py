@@ -2,9 +2,11 @@ import json
 import logging
 from datetime import UTC, datetime
 
+from sqlmodel import select
+
 from app.config import settings
 from app.database import engine
-from app.schemas.api import AssessmentPublic, SuggestedInjectPublic
+from app.schemas.api import AssessmentPublic, ExecutiveSummaryPublic, SuggestedInjectPublic
 from app.services.llm.service import active_provider
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,13 @@ _SUGGESTION_SYSTEM = (
     "You are an expert tabletop exercise facilitator. "
     "Suggest realistic, challenging follow-up injects that build on participant decisions. "
     "Reply only with valid JSON."
+)
+
+_SUMMARY_SYSTEM = (
+    "You are an expert tabletop exercise facilitator writing the executive summary of an "
+    "after-action report for senior leadership. Be concise, factual, and constructive: "
+    "cover what happened, how key decisions were made, and the main strengths and areas "
+    "for improvement. Reply with plain prose (2-3 short paragraphs) — no JSON, no headings."
 )
 
 
@@ -204,6 +213,117 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
                     "payload": _suggested_payload(suggested),
                 },
             )
+
+
+def _build_summary_context(report: dict) -> tuple[str, str]:
+    """Cacheable scenario block + the per-run decision/comms/debrief prompt."""
+    sc = report["scenario"]
+    teams = ", ".join(t["label"] for t in report["teams"]) or "All participants"
+    cached = f"Scenario: {sc['title']}\n{sc['description'] or ''}\nParticipant teams: {teams}"
+
+    decisions: list[str] = []
+    for inj in report["injects"]:
+        decisions.append(f"Inject '{inj['title']}':")
+        for r in inj["responses"]:
+            q = f" [{r['decision_quality']}]" if r["decision_quality"] else ""
+            decisions.append(f"- {r['author']}{q}: {r['content']}")
+    comms = [f"- [{c['direction']}] {c['subject']}" for c in report["communications"]]
+    debrief = report["debrief"]["debrief_notes"] or "None"
+
+    user_prompt = (
+        "Write the executive summary for this exercise.\n\n"
+        "Decisions:\n" + ("\n".join(decisions) or "None recorded") + "\n\n"
+        "Communications:\n" + ("\n".join(comms) or "None") + "\n\n"
+        "Facilitator observations:\n" + debrief
+    )
+    return cached, user_prompt
+
+
+async def generate_executive_summary(session, exercise_id: int):
+    """Generate (or regenerate) the executive summary for one exercise. Upserts the
+    single ExecutiveSummary row and resets ``edited``. Returns None when disabled."""
+    from app.models.report_summary import ExecutiveSummary
+    from app.services.report_service import build_report
+
+    provider = active_provider()
+    if provider is None:
+        return None
+
+    report = await build_report(session, exercise_id)
+    if report is None:
+        return None
+
+    cached, user_prompt = _build_summary_context(report)
+    text = (await _call(provider, _SUMMARY_SYSTEM, cached, user_prompt)).strip()
+
+    existing = (
+        await session.exec(
+            select(ExecutiveSummary).where(ExecutiveSummary.exercise_id == exercise_id)
+        )
+    ).first()
+    if existing is not None:
+        existing.summary_text = text
+        existing.llm_model = provider.llm_model_label
+        existing.generated_at = datetime.now(UTC)
+        existing.edited = False
+        summary = existing
+    else:
+        summary = ExecutiveSummary(
+            exercise_id=exercise_id,
+            summary_text=text,
+            llm_model=provider.llm_model_label,
+        )
+    session.add(summary)
+    await session.commit()
+    await session.refresh(summary)
+    return summary
+
+
+async def run_summary_pipeline(exercise_id: int) -> None:
+    """Background task (#113): draft the after-action executive summary."""
+    try:
+        await _run_summary_pipeline(exercise_id)
+    except Exception:
+        logger.exception("Summary pipeline failed for exercise %d", exercise_id)
+
+
+async def _run_summary_pipeline(exercise_id: int) -> None:
+    if active_provider() is None:
+        logger.info("Summary pipeline skipped: no AI provider configured (LLM_PROVIDER)")
+        return
+
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.models.exercise import Exercise
+    from app.services.ws_manager import manager
+
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        exercise = await session.get(Exercise, exercise_id)
+        # Gate on the exercise's own AI opt-in too, matching the assessment path.
+        if not exercise or not exercise.llm_enabled:
+            return
+        summary = await generate_executive_summary(session, exercise_id)
+        if summary is None:
+            return
+        await manager.send_to_facilitators(
+            exercise_id,
+            {
+                "type": "summary_ready",
+                "exercise_id": exercise_id,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "payload": _summary_payload(summary),
+            },
+        )
+
+
+def _summary_payload(s) -> dict:
+    return ExecutiveSummaryPublic(
+        exercise_id=s.exercise_id,
+        summary_text=s.summary_text,
+        llm_model=s.llm_model,
+        edited=s.edited,
+        generated_at=s.generated_at.isoformat(),
+    ).model_dump(mode="json")
 
 
 def _assessment_payload(a) -> dict:

@@ -23,6 +23,7 @@ from app.models import (  # noqa: F401
     exercise,
     inject,
     inject_comment,
+    report_summary,
     response,
     scenario,
     suggested_inject,
