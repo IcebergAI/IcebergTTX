@@ -78,28 +78,32 @@ async def release_inject(
         update(Inject)
         .where(Inject.id == inject.id, Inject.state == InjectState.pending)
         .values(state=InjectState.released, released_at=now, released_by=released_by)
-        .returning(Inject)
+        .returning(Inject.id)
         .execution_options(synchronize_session=False)
     )
-    released = (await session.exec(statement)).scalar_one_or_none()
-    if released is None:
+    released_id = (await session.exec(statement)).scalar_one_or_none()
+    if released_id is None:
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Inject is no longer pending and cannot be released",
         )
     await session.commit()
+    # ``inject`` may already be in this session's identity map, so a returned ORM
+    # row would retain its old pending attributes with synchronize_session=False.
+    # Refresh the authoritative row after commit before constructing side effects.
+    await session.refresh(inject)
 
     # Releasing (manually or on schedule) settles any pending scheduled-release timer only
     # after the compare-and-swap has committed. The losing racer must not cancel the winner's
     # timer or emit any side effects.
     from app.services.schedule_service import cancel_inject_schedule
 
-    cancel_inject_schedule(released.exercise_id, released.id)
+    cancel_inject_schedule(inject.exercise_id, inject.id)
 
-    await _broadcast_inject_released(session, released)
-    await _trigger_communications(session, released)
-    return released
+    await _broadcast_inject_released(session, inject)
+    await _trigger_communications(session, inject)
+    return inject
 
 
 async def _trigger_communications(session: AsyncSession, inject: Inject) -> None:
