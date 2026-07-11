@@ -7,6 +7,7 @@ Create Date: 2026-07-12 01:55:00.000000
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -61,7 +62,13 @@ def upgrade() -> None:
         sa.Column("group_id", sa.String(), nullable=True),
         sa.Column(
             "state",
-            sa.Enum("pending", "released", "resolved", name="injectstate"),
+            postgresql.ENUM(
+                "pending",
+                "released",
+                "resolved",
+                name="injectstate",
+                create_type=False,
+            ),
             nullable=False,
         ),
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
