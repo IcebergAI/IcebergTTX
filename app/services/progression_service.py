@@ -99,4 +99,11 @@ async def release_is_allowed(session: AsyncSession, inject: Inject) -> bool:
             )
         )
     ).one_or_none()
-    return cursor is None or cursor.current_node_id == inject.scenario_node_id
+    # A scenario may deliberately have independent group-specific opening injects;
+    # before a group has advanced, the facilitator retains that manual choice.
+    # Once a response advances the cursor, only its selected successor may release.
+    return (
+        cursor is None
+        or cursor.current_inject_id is None
+        or cursor.current_node_id == inject.scenario_node_id
+    )
