@@ -390,6 +390,27 @@ def test_facilitator_console_mobile_panes_are_reachable_without_overflow(page: P
         assert console.evaluate("el => el.scrollWidth <= el.clientWidth")
 
 
+def test_mobile_shell_opens_navigation_and_reaches_settings(page: Page):
+    """Phone navigation keeps the route visible while preserving all destinations (#137)."""
+    page.set_viewport_size({"width": 390, "height": 844})
+    login_facilitator(page)
+
+    shell = page.get_by_test_id("mobile-shell")
+    expect(shell).to_be_visible()
+    menu = page.get_by_role("button", name="Open navigation")
+    menu.click()
+    nav = page.locator("#primary-navigation")
+    expect(nav).to_be_visible()
+    expect(page.get_by_role("button", name="Close navigation")).to_be_focused()
+
+    page.get_by_role("link", name="Settings").click()
+    page.wait_for_url(f"{BASE}/settings", timeout=8000)
+    expect(page.locator("h1")).to_contain_text("Settings")
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+    )
+
+
 def test_facilitator_console_desktop_preserves_split_panes(page: Page):
     page.set_viewport_size({"width": 1440, "height": 1000})
     login_facilitator(page)

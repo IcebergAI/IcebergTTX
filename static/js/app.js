@@ -329,6 +329,7 @@ document.addEventListener('alpine:init', () => {
     selectedId: null,
     scenarioCount: null,
     currentPath: window.location.pathname,
+    mobileNavOpen: false,
 
     async init() {
       document.addEventListener('dt:soft-navigated', (event) => {
@@ -469,6 +470,19 @@ document.addEventListener('alpine:init', () => {
 
     isActive(path) {
       return this.currentPath === path || this.currentPath.startsWith(path + '/');
+    },
+
+    toggleMobileNav() {
+      this.mobileNavOpen = !this.mobileNavOpen;
+      if (this.mobileNavOpen) {
+        this.$nextTick(() => this.$refs.mobileNavClose?.focus());
+      }
+    },
+
+    closeMobileNav() {
+      if (!this.mobileNavOpen) return;
+      this.mobileNavOpen = false;
+      this.$nextTick(() => this.$refs.mobileNavToggle?.focus());
     },
 
     async logout() {
