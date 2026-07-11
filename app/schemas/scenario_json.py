@@ -47,6 +47,17 @@ class InjectNode(BaseModel):
     free_text_response: bool = True
     triggers_communications: list[TriggerComm] = []
     expected_actions: list[str] = []
+    # Optional scheduled release (#116): minutes after exercise start at which this
+    # inject auto-releases. None = manual-only. Purely a timing hint — it adds no graph
+    # edge, so `_check_no_cycles` is unaffected.
+    release_at_minutes: int | None = None
+
+    @field_validator("release_at_minutes")
+    @classmethod
+    def validate_release_at_minutes(cls, v: int | None) -> int | None:
+        if v is not None and v < 0:
+            raise ValueError("release_at_minutes must be >= 0")
+        return v
 
 
 class ScenarioMetadata(BaseModel):
