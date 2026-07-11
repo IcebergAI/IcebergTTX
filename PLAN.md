@@ -552,6 +552,14 @@ before changing that subsystem. Keep them current as the code changes.
 
 **Group-scoped injects**: `Inject.group_id` and `ExerciseMember.group_id` allow injects to be targeted at specific exercise groups (teams). When `group_id` is `None` the inject is visible to all groups. The inject router resolves group membership via `exercise_group_for_user()` at query time.
 
+**Attendance role snapshots**: `ExerciseMember.role_at_enrolment` records the user's
+global role when they are enrolled. After-action reports count participants,
+facilitators, and observers from that immutable snapshot, so later account-role
+changes do not rewrite historical attendance. Removing and re-enrolling a member
+captures a new role snapshot. Participant team counts exclude facilitators and
+observers and include an explicit unassigned/legacy-team bucket so their breakdown
+always sums to the participant total.
+
 **File attachments on injects**: Injects support a single file attachment (`attachment_filename`, `attachment_path`, `attachment_content_type`, `attachment_size` on the `Inject` model). Files are stored under `uploads/inject_attachments/{exercise_id}/`. The inject router accepts `multipart/form-data`; `inject_attachment_payload()` builds the download URL returned in the inject payload. Uploads stream to disk in chunks and abort once `MAX_ATTACHMENT_BYTES` (25 MB) is exceeded, so an oversized upload is never fully buffered (#39). Content-type is confined to `ALLOWED_ATTACHMENT_TYPES` (`_normalize_content_type` — anything else, e.g. `text/html`/`image/svg+xml`, is stored and served as `application/octet-stream`), applied on both upload and download; downloads set `X-Content-Type-Options: nosniff` alongside the `Content-Disposition: attachment` implied by `filename` (#16).
 
 **Role preview**: Facilitators can view the app as a participant or observer via `dt_view_role` and `dt_view_team` cookies (set from `/settings`). `_optional_user()` in `ui.py` reads these cookies and overrides the Jinja2 template role/team — but only when the JWT already contains the `facilitator` role, so API calls are never downgraded.

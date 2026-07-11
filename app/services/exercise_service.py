@@ -240,6 +240,7 @@ async def enrol_member(
         exercise_id=exercise.id,
         user_id=user_id,
         group_id=resolved_group_id,
+        role_at_enrolment=user.role,
     )
     session.add(member)
     await session.commit()
