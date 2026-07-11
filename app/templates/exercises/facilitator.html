@@ -23,8 +23,9 @@
       <div class="w-px h-5 border-l rule-2 mx-1"></div>
       <button @click="showOpsPanel = !showOpsPanel"
               class="btn h-7 px-3 text-[12.5px]"
-              :class="showOpsPanel ? 'btn-primary' : 'btn-ghost'">
-        <span x-text="'Participants (' + members.length + ')'"></span>
+              :class="showOpsPanel ? 'btn-primary' : 'btn-ghost'"
+              :title="showOpsPanel ? 'Hide ops panel' : 'Show ops panel (review, participants, export)'">
+        <span>Ops panel</span>
       </button>
       <a :href="commsHref"
          class="btn btn-ghost h-7 px-3 text-[12.5px]">Communications</a>
