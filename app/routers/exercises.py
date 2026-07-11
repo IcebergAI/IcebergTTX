@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -107,7 +108,7 @@ async def _scenario_titles(session: AsyncSession, exercises: list[Exercise]) -> 
     rows = await session.exec(
         select(Scenario.id, Scenario.title).where(col(Scenario.id).in_(scenario_ids))
     )
-    return dict(rows.all())
+    return {scenario_id: title for scenario_id, title in rows.all() if scenario_id is not None}
 
 
 def _member_out(m: ExerciseMember) -> dict:
@@ -128,7 +129,7 @@ async def list_exercises(current_user: CurrentUserDep, session: SessionDep):
         member_ids = select(ExerciseMember.exercise_id).where(
             ExerciseMember.user_id == current_user.id
         )
-        q = q.where((Exercise.created_by == current_user.id) | col(Exercise.id).in_(member_ids))
+        q = q.where(or_(Exercise.created_by == current_user.id, col(Exercise.id).in_(member_ids)))
     else:
         q = q.join(ExerciseMember).where(ExerciseMember.user_id == current_user.id)
     # Deterministic order (#96). Without it Postgres returns heap order, which shifts

@@ -119,8 +119,10 @@ async def build_report(session: AsyncSession, exercise_id: int) -> dict | None:
 
     inject_rows = []
     for i in injects:
+        assert i.id is not None
         rows = []
         for r in sorted(responses_by_inject.get(i.id, []), key=lambda x: x.submitted_at):
+            assert r.id is not None
             a = quality.get(r.id)
             rows.append(
                 {
