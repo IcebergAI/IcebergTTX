@@ -241,6 +241,25 @@ async def test_returning_user_is_not_duplicated(session):
     assert count == 1
 
 
+async def test_returning_identity_loses_role_when_group_removed(session):
+    cfg = _cfg(role_map={"ttx-facilitators": "facilitator"})
+    user, _ = await oidc_service.provision_oidc_user(
+        session,
+        cfg=cfg,
+        identity=_identity(subject="reconcile-sub", groups=["ttx-facilitators"]),
+    )
+    assert user.role == UserRole.facilitator
+
+    returned, created = await oidc_service.provision_oidc_user(
+        session,
+        cfg=cfg,
+        identity=_identity(subject="reconcile-sub", groups=[]),
+    )
+    assert created is False
+    assert returned.id == user.id
+    assert returned.role == UserRole.participant
+
+
 # --------------------------------------------------------------------------- #
 # Adapters
 # --------------------------------------------------------------------------- #
