@@ -73,6 +73,14 @@ async def release_inject(
     inject: Inject,
     released_by: int | None,
 ) -> Inject:
+    from app.services.progression_service import release_is_allowed
+
+    if not await release_is_allowed(session, inject):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Inject is not the current branch for its group",
+        )
+
     now = datetime.now(UTC)
     statement = (
         update(Inject)

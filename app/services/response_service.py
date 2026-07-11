@@ -90,6 +90,22 @@ async def submit_response(
     )
     session.add(response)
     try:
+        await session.flush()
+
+        next_ids = await _compute_next_inject_ids(
+            session, exercise_id, inject_id, selected_option
+        )
+        inject = await session.get(Inject, inject_id)
+        assert inject is not None
+        from app.services.progression_service import resolve_response_progression
+
+        await resolve_response_progression(
+            session,
+            inject=inject,
+            group_id=group_id,
+            actor_id=user_id,
+            next_node_id=next_ids[0] if len(next_ids) == 1 else None,
+        )
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
@@ -99,7 +115,6 @@ async def submit_response(
         ) from exc
     await session.refresh(response)
 
-    next_ids = await _compute_next_inject_ids(session, exercise_id, inject_id, selected_option)
     return response, await _pending_next_injects(session, exercise_id, next_ids, group_id)
 
 
