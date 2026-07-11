@@ -11,7 +11,11 @@ from app.models.inject import Inject
 from app.models.suggested_inject import SuggestedInject, SuggestedInjectStatus
 from app.models.user import User, UserRole
 from app.schemas.api import SuggestedInjectPublic
-from app.services.access_control import require_exercise_owner, require_operational_mutability
+from app.services.access_control import (
+    require_exercise_access,
+    require_exercise_owner,
+    require_operational_mutability,
+)
 from app.services.inject_service import create_inject
 from app.services.llm_service import _suggested_payload
 
@@ -34,6 +38,7 @@ async def _get_or_404(
 
 @router.get("", response_model=list[SuggestedInjectPublic])
 async def list_suggested(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    await require_exercise_access(session, exercise_id, current_user)
     items = (
         await session.exec(
             select(SuggestedInject).where(SuggestedInject.exercise_id == exercise_id)
