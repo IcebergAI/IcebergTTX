@@ -354,8 +354,25 @@ async def test_list_suggested_injects(
 ):
     inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
     resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
+    from app.models.response import Response
+
+    second_response = Response(
+        inject_id=inject_id,
+        exercise_id=active_exercise.id,
+        user_id=active_exercise.created_by,
+        content="Facilitator replay fixture",
+    )
+    session.add(second_response)
+    await session.commit()
+    await session.refresh(second_response)
+    assert second_response.id is not None
     (await _make_suggested(session, active_exercise.id, resp["id"], "First suggestion"))
-    (await _make_suggested(session, active_exercise.id, resp["id"], "Second suggestion"))
+    (await _make_suggested(
+        session,
+        active_exercise.id,
+        second_response.id,
+        "Second suggestion",
+    ))
 
     r = await client.get(
         f"/api/exercises/{active_exercise.id}/suggested-injects",
