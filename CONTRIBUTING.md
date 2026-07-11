@@ -19,28 +19,29 @@ there.
 
 ## Development setup
 
-Full instructions are in the README's [Setup](README.md#setup) section. In short:
+Full instructions are in the README's [Setup](README.md#setup) section.
+Dependencies are managed with [uv](https://docs.astral.sh/uv/) against the
+committed `uv.lock`. In short:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env      # set SECRET_KEY (see the README)
-uvicorn app.main:app --reload
+uv sync --extra dev              # create .venv from the lockfile + dev tools
+cp .env.example .env             # set SECRET_KEY (see the README)
+uv run uvicorn app.main:app --reload
 ```
 
 The backend targets **Python 3.14+**, FastAPI (fully async), and PostgreSQL via
 `asyncpg`. **Docker is required to run the test suite** — the tests spin up a real
 PostgreSQL 17 instance with `testcontainers`, so the Docker daemon must be running.
+After changing dependencies in `pyproject.toml`, run `uv lock` and commit the
+updated `uv.lock` (CI runs `uv lock --check`).
 
 ## Before you open a pull request
 
 Run these locally and make sure they pass:
 
 ```bash
-ruff check .          # lint
-ruff format --check . # formatting
-pytest                # full test suite (needs Docker running)
+uv run ruff check app/ tests/   # lint
+uv run pytest                   # full test suite (needs Docker running)
 ```
 
 - **Add tests** for new behaviour or bug fixes — one test file per resource, async
