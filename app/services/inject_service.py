@@ -212,6 +212,7 @@ async def inject_payload(session: AsyncSession, inject: Inject) -> dict:
     Built via the ``InjectPublic`` schema so the HTTP and WebSocket payloads cannot
     drift (#21, #31).
     """
+    assert inject.id is not None
     node = await _inject_node(session, inject)
     return InjectPublic(
         id=inject.id,

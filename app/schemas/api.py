@@ -55,6 +55,7 @@ class ExercisePublic(BaseModel):
 
     @classmethod
     def from_model(cls, ex: Exercise, scenario_title: str | None = None) -> ExercisePublic:
+        assert ex.id is not None
         return cls(
             id=ex.id,
             scenario_id=ex.scenario_id,
@@ -150,6 +151,7 @@ class MemberPublic(BaseModel):
 
     @classmethod
     def from_model(cls, m: ExerciseMember) -> MemberPublic:
+        assert m.id is not None
         return cls(
             id=m.id,
             exercise_id=m.exercise_id,

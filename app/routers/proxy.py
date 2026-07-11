@@ -7,7 +7,7 @@ result string must never contain the resolved (credential-bearing) proxy URL.
 """
 
 import logging
-from typing import Annotated
+from typing import Annotated, cast
 from urllib.parse import quote
 
 import httpx
@@ -80,7 +80,9 @@ def egress_targets() -> dict[str, str]:
     provider = active_provider()
     api_base = getattr(provider, "api_base", None)
     if provider is not None and callable(api_base):
-        targets[f"LLM ({provider.key})"] = api_base()
+        url = api_base()
+        if isinstance(url, str):
+            targets[f"LLM ({provider.key})"] = url
 
     endpoint = siem_service.get_config().http_endpoint
     if endpoint:
@@ -162,7 +164,9 @@ async def test_proxy(
 
     try:
         async with httpx.AsyncClient(
-            timeout=_TEST_TIMEOUT, follow_redirects=True, **proxy.resolve(row, url)
+            timeout=_TEST_TIMEOUT,
+            follow_redirects=True,
+            **proxy.resolve(cast(proxy.ProxyConfig, row), url),
         ) as client:
             resp = await client.get(url)
         result = f"ok: HTTP {resp.status_code}"

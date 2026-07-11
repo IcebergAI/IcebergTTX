@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
@@ -78,7 +78,7 @@ async def list_inject_comments(
         await session.exec(
             select(InjectComment)
             .where(InjectComment.exercise_id == exercise_id)
-            .order_by(InjectComment.created_at)
+            .order_by(col(InjectComment.created_at))
         )
     ).all()
     return [
@@ -113,6 +113,7 @@ async def create_comment(
         raise HTTPException(status_code=422, detail="content is required")
 
     inject = await get_inject_or_404(session, exercise_id, body.inject_id)
+    assert inject.id is not None
     await require_inject_visible(session, inject, current_user)
     if inject.state not in (InjectState.released, InjectState.resolved):
         raise HTTPException(
