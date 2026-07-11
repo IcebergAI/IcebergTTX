@@ -14,6 +14,22 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.exercise import Exercise
 from app.models.user import User
 
+
+def test_provider_json_boundary_rejects_non_objects_and_invalid_fields():
+    from app.services.llm_service import AssessmentOutput, SuggestedInjectOutput, _parse_json
+
+    fallback = {"assessment_text": "fallback"}
+    assert _parse_json("[]", fallback) == fallback
+    assert _parse_json("null", fallback) == fallback
+    assert _parse_json("not json", fallback) == fallback
+    with pytest.raises(ValueError):
+        AssessmentOutput.model_validate({"assessment_text": "x", "decision_quality": "invalid"})
+    with pytest.raises(ValueError):
+        SuggestedInjectOutput.model_validate(
+            {"title": "x", "content": "y", "unexpected": "field"}
+        )
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _first_released_inject_id(client: AsyncClient, token: str, exercise_id: int) -> int:
