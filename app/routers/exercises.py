@@ -46,6 +46,10 @@ from app.services.llm.service import active_provider
 from app.services.llm_service import run_summary_pipeline
 from app.services.report_service import build_report, render_markdown
 from app.services.scenario_service import get_scenario_definition
+from app.services.schedule_service import (
+    cancel_exercise_schedules,
+    schedule_exercise_injects,
+)
 from app.services.timeline_service import build_timeline
 from app.services.ws_manager import manager
 
@@ -224,6 +228,8 @@ async def _transition(
         transitioned_at=transition.transitioned_at.isoformat(),
         started_at=(result.exercise.started_at.isoformat() if result.exercise.started_at else None),
         ended_at=result.exercise.ended_at.isoformat() if result.exercise.ended_at else None,
+        paused_at=(result.exercise.paused_at.isoformat() if result.exercise.paused_at else None),
+        accumulated_pause_seconds=result.exercise.accumulated_pause_seconds,
     ).model_dump(mode="json")
     try:
         await manager.broadcast_to_exercise(
@@ -240,6 +246,12 @@ async def _transition(
         # One dead socket is handled by ConnectionManager; this guard covers an
         # unexpected manager failure without misreporting the committed request.
         logger.exception("failed to broadcast exercise lifecycle transition %d", transition.id)
+    # Start/resume arm pending timers; pause/complete cancel them. This runs only
+    # after the atomic state/history transaction and canonical WS projection.
+    if target == ExerciseState.active:
+        await schedule_exercise_injects(session, result.exercise)
+    else:
+        cancel_exercise_schedules(exercise_id)
     return _exercise_out(result.exercise)
 
 

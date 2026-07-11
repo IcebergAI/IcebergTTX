@@ -56,6 +56,11 @@ class Exercise(SQLModel, table=True):
     debrief_notes: str | None = None
     started_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     ended_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    # Pause-aware clock (#116). `paused_at` is set while the exercise is paused (else
+    # None); `accumulated_pause_seconds` is the total of all completed pause spans.
+    # Effective elapsed = (now|paused_at|ended_at - started_at) - accumulated_pause_seconds.
+    paused_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    accumulated_pause_seconds: float = Field(default=0.0)
     created_by: int = Field(foreign_key="user.id")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)

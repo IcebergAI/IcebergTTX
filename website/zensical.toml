@@ -22,9 +22,12 @@ extra_css = [
 
 nav = [
   { "Home" = "index.md" },
+  { "Facilitator guide" = "facilitator-guide.md" },
   { "Deployment" = "deployment.md" },
   { "Scenario authoring" = "scenarios.md" },
+  { "Scenario cookbook" = "cookbook.md" },
   { "Security" = "security.md" },
+  { "Changelog" = "changelog.md" },
 ]
 
 # ----------------------------------------------------------------------------
@@ -103,6 +106,12 @@ pygments_lang_class = true
 [project.markdown_extensions.pymdownx.magiclink]
 [project.markdown_extensions.pymdownx.mark]
 [project.markdown_extensions.pymdownx.smartsymbols]
+# Pull the repo-root CHANGELOG.md into changelog.md via `--8<-- "CHANGELOG.md"`
+# (base_path reaches out of website/ to the repo root; check_paths fails the
+# build if the file moves rather than silently emitting an empty page).
+[project.markdown_extensions.pymdownx.snippets]
+base_path = [".."]
+check_paths = true
 [project.markdown_extensions.pymdownx.superfences]
 custom_fences = [
   { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" }

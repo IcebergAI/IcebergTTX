@@ -98,6 +98,15 @@ async def transition_state_with_history(
     values: dict = {"state": new_state}
     if new_state == ExerciseState.active and exercise.started_at is None:
         values["started_at"] = now
+    # Include pacing fields in the same compare-and-swap update as state so a
+    # stale lifecycle request cannot overwrite a completed pause calculation.
+    if new_state == ExerciseState.paused:
+        values["paused_at"] = now
+    if new_state == ExerciseState.active and exercise.paused_at is not None:
+        values["accumulated_pause_seconds"] = (
+            exercise.accumulated_pause_seconds + (now - exercise.paused_at).total_seconds()
+        )
+        values["paused_at"] = None
     if new_state == ExerciseState.completed:
         values["ended_at"] = now
 
@@ -144,6 +153,27 @@ async def transition_state_with_history(
     assert updated is not None
     action = transition_action(previous_state, new_state)
     return ExerciseTransitionResult(exercise=updated, transition=transition, action=action)
+
+
+async def broadcast_exercise_state(exercise: Exercise) -> None:
+    """Push a state/timing change to every connected client (#116).
+
+    Carries the full serialised exercise so each client's pause-aware clock stays
+    correct (pause/resume must freeze/continue on participant views too). Sent on every
+    lifecycle transition; there is no per-second traffic — the clock ticks client-side.
+    """
+    from app.schemas.api import ExercisePublic
+    from app.services.ws_manager import manager
+
+    await manager.broadcast_to_exercise(
+        exercise.id,
+        {
+            "type": "exercise_state_change",
+            "exercise_id": exercise.id,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "payload": ExercisePublic.from_model(exercise).model_dump(mode="json"),
+        },
+    )
 
 
 async def scenario_group_ids(session: AsyncSession, exercise: Exercise) -> set[str]:
