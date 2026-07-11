@@ -336,6 +336,91 @@ def test_facilitator_console_renders(page: Page):
     expect(page.locator("body")).to_contain_text("Injects")
 
 
+def test_facilitator_console_mobile_panes_are_reachable_without_overflow(page: Page):
+    """The phone layout exposes each console pane without a page-wide x-scroll (#135)."""
+    page.set_viewport_size({"width": 390, "height": 844})
+    login_facilitator(page)
+    scenario_id = _make_scenario(page)
+    exercise_id = _make_exercise(page, scenario_id, title="Mobile Console Exercise")
+    api_post(page, f"/exercises/{exercise_id}/start")
+
+    page.goto(f"{BASE}/exercises/{exercise_id}/facilitate")
+    expect(page.locator('[x-text="exTitle"]')).to_have_text("Mobile Console Exercise")
+
+    console = page.get_by_test_id("facilitator-console")
+    expect(console).to_be_visible()
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+    )
+    assert console.evaluate("el => el.scrollWidth <= el.clientWidth")
+
+    injects = page.get_by_test_id("facilitator-pane-injects")
+    responses = page.get_by_test_id("facilitator-pane-responses")
+    ops = page.get_by_test_id("facilitator-pane-ops")
+    expect(injects).to_be_visible()
+    expect(responses).to_be_hidden()
+    expect(ops).to_be_hidden()
+
+    page.get_by_test_id("facilitator-tab-responses").click()
+    expect(injects).to_be_hidden()
+    expect(responses).to_be_visible()
+    expect(responses.get_by_role("heading", name="Responses")).to_be_visible()
+
+    page.get_by_test_id("facilitator-tab-ops").click()
+    expect(responses).to_be_hidden()
+    expect(ops).to_be_visible()
+    expect(ops.get_by_text("Participants", exact=True)).to_be_visible()
+
+    # The new mobile command and tab controls must remain fully inside the viewport.
+    assert console.evaluate(
+        """el => [...el.querySelectorAll(
+          '.fac-console__ticker a, .fac-console__ticker button, .fac-console__mobile-nav button'
+        )].filter(node => node.getClientRects().length).every(node => {
+          const rect = node.getBoundingClientRect();
+          return rect.left >= 0 && rect.right <= document.documentElement.clientWidth;
+        })"""
+    )
+
+    for width in (320, 390, 768):
+        page.set_viewport_size({"width": width, "height": 844})
+        page.wait_for_timeout(50)
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+        assert console.evaluate("el => el.scrollWidth <= el.clientWidth")
+
+
+def test_facilitator_console_desktop_preserves_split_panes(page: Page):
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    login_facilitator(page)
+    scenario_id = _make_scenario(page)
+    exercise_id = _make_exercise(page, scenario_id, title="Desktop Console Exercise")
+    api_post(page, f"/exercises/{exercise_id}/start")
+
+    page.goto(f"{BASE}/exercises/{exercise_id}/facilitate")
+    expect(page.locator('[x-text="exTitle"]')).to_have_text("Desktop Console Exercise")
+    expect(page.locator(".fac-console__mobile-nav")).to_be_hidden()
+
+    injects = page.get_by_test_id("facilitator-pane-injects")
+    responses = page.get_by_test_id("facilitator-pane-responses")
+    ops = page.get_by_test_id("facilitator-pane-ops")
+    expect(injects).to_be_visible()
+    expect(responses).to_be_visible()
+    expect(ops).to_be_hidden()
+
+    page.get_by_role("button", name="Ops panel").click()
+    expect(ops).to_be_visible()
+    injects_rect = injects.bounding_box()
+    responses_rect = responses.bounding_box()
+    ops_rect = ops.bounding_box()
+    assert injects_rect is not None and responses_rect is not None and ops_rect is not None
+    assert injects_rect["x"] + injects_rect["width"] <= responses_rect["x"] + 1
+    assert responses_rect["x"] + responses_rect["width"] <= ops_rect["x"] + 1
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+    )
+
+
 def test_participant_view_renders(page: Page):
     login_facilitator(page)
     scenario_id = _make_scenario(page)

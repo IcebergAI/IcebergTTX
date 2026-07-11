@@ -350,6 +350,10 @@ document.addEventListener('alpine:init', () => {
     showAddMember: false,
     showExport: false,
     showOpsPanel: false,
+    mobilePane: 'injects',
+    isMobileConsole: false,
+    mobileMediaQuery: null,
+    mobileMediaListener: null,
     responseFilter: 'all',
     ws: null,
     wsConnected: false,
@@ -377,12 +381,19 @@ document.addEventListener('alpine:init', () => {
       const live = this.injects.filter(i => i.state !== 'pending').length;
       return live + '/' + this.injects.length + ' live';
     },
+    get mobileInjectCountLabel() {
+      const live = this.injects.filter(i => i.state !== 'pending').length;
+      return live + '/' + this.injects.length;
+    },
     get newAttachmentName() { return this.newAttachment ? this.newAttachment.name : ''; },
     get pendingSuggested() {
       return this.suggestedInjects.filter(s => s.status === 'pending_review');
     },
     get hasPendingSuggestions() { return this.pendingSuggested.length > 0; },
     get pendingSuggestedCount() { return this.pendingSuggested.length; },
+    get opsPanelVisible() {
+      return this.showOpsPanel || (this.isMobileConsole && this.mobilePane === 'ops');
+    },
 
     get filteredResponses() {
       if (this.responseFilter === 'node')
@@ -453,6 +464,10 @@ document.addEventListener('alpine:init', () => {
       return user.display_name.split(' ').map(x => x[0]).join('').slice(0, 2);
     },
 
+    memberGroupLabel(userId) {
+      return 'Team for ' + this.userDisplayName(userId);
+    },
+
     injectById(injectId) {
       return this.injects.find(i => i.id === injectId) || null;
     },
@@ -482,6 +497,43 @@ document.addEventListener('alpine:init', () => {
     // x-effect arrow, which the CSP build cannot parse).
     syncSelectValue(el, value) {
       this.$nextTick(() => { el.value = value || ''; });
+    },
+
+    setMobilePane(pane) {
+      if (!['injects', 'responses', 'ops'].includes(pane)) return;
+      this.mobilePane = pane;
+    },
+
+    focusMobilePane(pane) {
+      this.setMobilePane(pane);
+      const refs = {
+        injects: 'mobileInjectsTab',
+        responses: 'mobileResponsesTab',
+        ops: 'mobileOpsTab',
+      };
+      this.$nextTick(() => {
+        const tab = this.$refs[refs[pane]];
+        if (tab) tab.focus();
+      });
+    },
+
+    cycleMobilePane(direction) {
+      const panes = ['injects', 'responses', 'ops'];
+      const current = panes.indexOf(this.mobilePane);
+      const next = (current + direction + panes.length) % panes.length;
+      this.focusMobilePane(panes[next]);
+    },
+
+    initResponsiveConsole() {
+      // The desktop rail consumes 240px, so compact the console before its
+      // three-pane minimum width would overflow the remaining workspace.
+      const query = window.matchMedia('(max-width: 1120px)');
+      this.mobileMediaQuery = query;
+      this.isMobileConsole = query.matches;
+      this.mobileMediaListener = (event) => {
+        this.isMobileConsole = event.matches;
+      };
+      query.addEventListener('change', this.mobileMediaListener);
     },
 
     // Pause-aware effective elapsed seconds (#116): wall time since start minus all
@@ -543,6 +595,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     async init() {
+      this.initResponsiveConsole();
       await this.load();
       this.connectWs();
     },
@@ -638,6 +691,11 @@ document.addEventListener('alpine:init', () => {
 
     destroy() {
       this.destroyed = true;
+      if (this.mobileMediaQuery && this.mobileMediaListener) {
+        this.mobileMediaQuery.removeEventListener('change', this.mobileMediaListener);
+      }
+      this.mobileMediaQuery = null;
+      this.mobileMediaListener = null;
       if (this.clockInterval) clearInterval(this.clockInterval);
       if (this.pingInterval) clearInterval(this.pingInterval);
       if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
