@@ -56,6 +56,16 @@
   --shadow-lift: 0 6px 20px -8px oklch(0.4 0.04 256 / 0.18), 0 2px 6px -2px oklch(0.4 0.04 256 / 0.08);
   --ring: 0 0 0 3px var(--accent-glow);
 
+  /* Legacy template aliases. Keep these centralized so older server-rendered
+     views inherit the active light/dark palette instead of dropping a whole
+     declaration when a custom property is undefined. */
+  --bg:           var(--paper);
+  --paper-soft:   var(--surface-2);
+  --rule:         var(--line);
+  --rule-2:       var(--line-strong);
+  --accent-d:     var(--accent-deep);
+  --node-current: var(--accent-soft);
+
   --fs-sans: 'Archivo', ui-sans-serif, system-ui, sans-serif;
   --fs-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   --fs-serif: 'Spectral', Georgia, 'Times New Roman', serif;
