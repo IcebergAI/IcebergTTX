@@ -1,9 +1,9 @@
 """Merged, chronological event feed for one exercise — the AAR foundation (#111).
 
-Assembles a single time-ordered timeline from the tables that already record what
-happened during an exercise (injects released, responses, communications, inject
-comments, state transitions), so the facilitator can replay a run and the after-action
-report (#113) can render from one source. Read-only; no schema of its own.
+Assembles a single time-ordered timeline from the tables that record what happened
+during an exercise (injects released, responses, communications, inject comments,
+and durable state transitions), so the facilitator can replay a run and the
+after-action report (#113) can render from one source. Read-only; no schema of its own.
 
 Ownership scoping is enforced by the caller (``require_exercise_owner``) — this service
 only reads by ``exercise_id``.
@@ -15,16 +15,11 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.assessment import ResponseAssessment
-from app.models.audit import AuditEvent
 from app.models.communication import Communication
-from app.models.exercise import Exercise
+from app.models.exercise import Exercise, ExerciseStateTransition, transition_action
 from app.models.inject import Inject
 from app.models.inject_comment import InjectComment
 from app.models.response import Response
-
-# Exercise-lifecycle audit actions, in transition order (used for the derived-vs-audit
-# de-dup below). Present as AuditEvent rows only when ``settings.audit_persist`` is on.
-_STATE_ACTIONS = ("exercise.start", "exercise.pause", "exercise.resume", "exercise.complete")
 
 # Stable secondary sort so events sharing a timestamp never swap between calls.
 _KIND_ORDER = {
@@ -147,42 +142,26 @@ async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
         )
 
     # ── State transitions ─────────────────────────────────────────────────────
-    # Audit rows carry the acting facilitator + exact action, but exist only when
-    # audit persistence is on. Exercise.started_at/ended_at are always present, so
-    # derive start/complete from them and only fall back for a kind the audit trail
-    # already covers (avoids double-counting when both sources agree).
-    audit_rows = (
+    # Lifecycle history is an authoritative domain record committed in the same
+    # transaction as Exercise.state (#129), not an optional audit-log projection.
+    transitions = (
         await session.exec(
-            select(AuditEvent).where(
-                AuditEvent.target_type == "exercise",
-                AuditEvent.target_id == str(exercise_id),
-                col(AuditEvent.action).in_(_STATE_ACTIONS),
+            select(ExerciseStateTransition).where(
+                ExerciseStateTransition.exercise_id == exercise_id
             )
         )
     ).all()
-    audit_actions = {a.action for a in audit_rows}
-    for a in audit_rows:
-        events.append(
-            _event(a.created_at, "state_change", a.id or 0, action=a.action, actor_id=a.actor_id)
-        )
-    if exercise.started_at and "exercise.start" not in audit_actions:
+    for transition in transitions:
         events.append(
             _event(
-                exercise.started_at,
+                transition.transitioned_at,
                 "state_change",
-                0,
-                action="exercise.start",
-                actor_id=exercise.created_by,
-            )
-        )
-    if exercise.ended_at and "exercise.complete" not in audit_actions:
-        events.append(
-            _event(
-                exercise.ended_at,
-                "state_change",
-                0,
-                action="exercise.complete",
-                actor_id=exercise.created_by,
+                transition.id or 0,
+                transition_id=transition.id,
+                action=transition_action(transition.from_state, transition.to_state),
+                actor_id=transition.actor_id,
+                previous_state=transition.from_state,
+                new_state=transition.to_state,
             )
         )
 

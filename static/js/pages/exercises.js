@@ -193,7 +193,13 @@ document.addEventListener('alpine:init', () => {
             await this._enrichAndAdd(msg.payload);
           }
           if (msg.type === 'exercise_state_change') {
-            this.exercise = { ...this.exercise, state: msg.payload.state };
+            this.exercise = {
+              ...this.exercise,
+              state: msg.payload.new_state || msg.payload.state,
+              started_at: msg.payload.started_at || this.exercise.started_at,
+              ended_at: msg.payload.ended_at || this.exercise.ended_at,
+            };
+            document.dispatchEvent(new CustomEvent('dt:exercises-changed'));
           }
           if (msg.type === 'inject_comment_created') {
             this.upsertComment(msg.payload);
@@ -500,7 +506,14 @@ document.addEventListener('alpine:init', () => {
             this.upsertComment(msg.payload);
           }
           if (msg.type === 'exercise_state_change') {
-            this.exercise = { ...this.exercise, state: msg.payload.state };
+            this.exercise = {
+              ...this.exercise,
+              state: msg.payload.new_state || msg.payload.state,
+              started_at: msg.payload.started_at || this.exercise.started_at,
+              ended_at: msg.payload.ended_at || this.exercise.ended_at,
+            };
+            this._startElapsed();
+            document.dispatchEvent(new CustomEvent('dt:exercises-changed'));
           }
           if (msg.type === 'assessment_ready') {
             this.assessments[msg.payload.response_id] = msg.payload.assessment;

@@ -1,5 +1,6 @@
 import csv
 import io
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,6 +22,7 @@ from app.schemas.api import (
     DebriefNotes,
     ExecutiveSummaryPublic,
     ExercisePublic,
+    ExerciseStateChange,
     MemberPublic,
     ReportSummaryState,
     TimelineEvent,
@@ -37,7 +39,7 @@ from app.services.exercise_service import (
     create_exercise,
     enrol_member,
     remove_member,
-    transition_state,
+    transition_state_with_history,
     update_member_group,
 )
 from app.services.llm.service import active_provider
@@ -45,8 +47,10 @@ from app.services.llm_service import run_summary_pipeline
 from app.services.report_service import build_report, render_markdown
 from app.services.scenario_service import get_scenario_definition
 from app.services.timeline_service import build_timeline
+from app.services.ws_manager import manager
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
+logger = logging.getLogger(__name__)
 
 FacilitatorDep = Annotated[User, Depends(require_role(UserRole.facilitator))]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
@@ -196,40 +200,67 @@ async def delete_exercise(exercise_id: int, current_user: FacilitatorDep, sessio
 
 
 async def _transition(
-    exercise_id: int, current_user: User, session: AsyncSession, target: ExerciseState, action: str
+    exercise_id: int, current_user: User, session: AsyncSession, target: ExerciseState
 ) -> dict:
+    assert current_user.id is not None
     ex = await require_exercise_owner(session, exercise_id, current_user)
-    result = await transition_state(session, ex, target)
-    audit_service.emit(action, actor=current_user, target_type="exercise", target_id=exercise_id)
-    return _exercise_out(result)
+    result = await transition_state_with_history(session, ex, target, actor_id=current_user.id)
+    audit_service.emit(
+        result.action,
+        actor=current_user,
+        target_type="exercise",
+        target_id=exercise_id,
+    )
+
+    transition = result.transition
+    assert transition.id is not None
+    payload = ExerciseStateChange(
+        transition_id=transition.id,
+        exercise_id=exercise_id,
+        previous_state=transition.from_state,
+        new_state=transition.to_state,
+        state=transition.to_state,
+        actor_id=transition.actor_id,
+        transitioned_at=transition.transitioned_at.isoformat(),
+        started_at=(result.exercise.started_at.isoformat() if result.exercise.started_at else None),
+        ended_at=result.exercise.ended_at.isoformat() if result.exercise.ended_at else None,
+    ).model_dump(mode="json")
+    try:
+        await manager.broadcast_to_exercise(
+            exercise_id,
+            {
+                "type": "exercise_state_change",
+                "exercise_id": exercise_id,
+                "timestamp": transition.transitioned_at.isoformat(),
+                "payload": payload,
+            },
+        )
+    except Exception:
+        # The database transition is already committed and remains authoritative.
+        # One dead socket is handled by ConnectionManager; this guard covers an
+        # unexpected manager failure without misreporting the committed request.
+        logger.exception("failed to broadcast exercise lifecycle transition %d", transition.id)
+    return _exercise_out(result.exercise)
 
 
 @router.post("/{exercise_id}/start", response_model=ExercisePublic)
 async def start(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
-    return await _transition(
-        exercise_id, current_user, session, ExerciseState.active, "exercise.start"
-    )
+    return await _transition(exercise_id, current_user, session, ExerciseState.active)
 
 
 @router.post("/{exercise_id}/pause", response_model=ExercisePublic)
 async def pause(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
-    return await _transition(
-        exercise_id, current_user, session, ExerciseState.paused, "exercise.pause"
-    )
+    return await _transition(exercise_id, current_user, session, ExerciseState.paused)
 
 
 @router.post("/{exercise_id}/resume", response_model=ExercisePublic)
 async def resume(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
-    return await _transition(
-        exercise_id, current_user, session, ExerciseState.active, "exercise.resume"
-    )
+    return await _transition(exercise_id, current_user, session, ExerciseState.active)
 
 
 @router.post("/{exercise_id}/complete", response_model=ExercisePublic)
 async def complete(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
-    return await _transition(
-        exercise_id, current_user, session, ExerciseState.completed, "exercise.complete"
-    )
+    return await _transition(exercise_id, current_user, session, ExerciseState.completed)
 
 
 # ── Members ───────────────────────────────────────────────────────────────────

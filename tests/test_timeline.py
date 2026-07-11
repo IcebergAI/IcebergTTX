@@ -131,6 +131,35 @@ async def test_timeline_response_carries_decision_quality(
     assert resp["selected_option"] == "opt_a"
 
 
+async def test_timeline_uses_durable_lifecycle_history_when_audit_persistence_is_off(
+    client: AsyncClient,
+    facilitator_token: str,
+    facilitator,
+    active_exercise,
+):
+    headers = _bearer(facilitator_token)
+    pause = await client.post(f"/api/exercises/{active_exercise.id}/pause", headers=headers)
+    assert pause.status_code == 200
+    resume = await client.post(f"/api/exercises/{active_exercise.id}/resume", headers=headers)
+    assert resume.status_code == 200
+
+    r = await client.get(f"/api/exercises/{active_exercise.id}/timeline", headers=headers)
+    assert r.status_code == 200
+    lifecycle = [event for event in r.json() if event["kind"] == "state_change"]
+    assert [event["action"] for event in lifecycle] == [
+        "exercise.start",
+        "exercise.pause",
+        "exercise.resume",
+    ]
+    assert [(event["previous_state"], event["new_state"]) for event in lifecycle] == [
+        ("draft", "active"),
+        ("active", "paused"),
+        ("paused", "active"),
+    ]
+    assert all(event["transition_id"] for event in lifecycle)
+    assert all(event["actor_id"] == facilitator.id for event in lifecycle)
+
+
 async def test_timeline_owner_scoping(
     client: AsyncClient,
     facilitator_token: str,
