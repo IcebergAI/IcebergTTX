@@ -3,6 +3,26 @@ from httpx import AsyncClient
 from app.models.exercise import Exercise
 
 
+async def test_facilitator_console_exposes_responsive_pane_contract(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
+):
+    """The server-rendered console keeps the mobile tab/panel wiring in CI (#135)."""
+    client.cookies.set("access_token", facilitator_token)
+    r = await client.get(f"/exercises/{active_exercise.id}/facilitate")
+
+    assert r.status_code == 200
+    assert 'data-testid="facilitator-console"' in r.text
+    assert 'role="tablist"' in r.text
+    assert 'data-testid="facilitator-tab-injects"' in r.text
+    assert 'data-testid="facilitator-tab-responses"' in r.text
+    assert 'data-testid="facilitator-tab-ops"' in r.text
+    assert 'data-testid="facilitator-pane-injects"' in r.text
+    assert 'data-testid="facilitator-pane-responses"' in r.text
+    assert 'data-testid="facilitator-pane-ops"' in r.text
+    assert 'x-show="opsPanelVisible"' in r.text
+    assert 'cycleMobilePane(1)' in r.text
+
+
 async def test_participant_cannot_load_facilitator_console(
     client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):

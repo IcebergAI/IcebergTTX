@@ -3,13 +3,14 @@
 
 {% block content %}
 <div x-data="facilitatorConsole({{ exercise_id }})"
-     class="flex flex-col" style="height: 100vh;">
+     class="fac-console flex flex-col"
+     data-testid="facilitator-console">
 
   <!-- Ticker bar -->
-  <div class="h-12 flex items-center gap-4 border-b px-5 shrink-0 rule"
+  <div class="fac-console__ticker h-12 flex items-center gap-4 border-b px-5 shrink-0 rule"
        style="background: var(--paper);">
 
-    <div class="flex items-center gap-2 min-w-0">
+    <div class="fac-console__identity flex items-center gap-2 min-w-0">
       <span class="text-[13.5px] font-medium truncate" x-text="exTitle"></span>
       <span class="mono text-[11.5px] text-faint" x-text="exId"></span>
     </div>
@@ -17,18 +18,19 @@
     <span class="pill mono" x-text="exState || 'loading'"></span>
     <span x-show="exState === 'active'" class="mono text-[12px] text-muted" x-text="elapsedStr"></span>
 
-    <div class="ml-auto flex items-center gap-2">
-      <span class="smallcaps" :class="wsConnected ? 'text-faint' : 'text-red-400'"
+    <div class="fac-console__actions ml-auto flex items-center gap-2">
+      <span class="fac-console__connection smallcaps" :class="wsConnected ? 'text-faint' : 'text-red-400'"
             x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
-      <div class="w-px h-5 border-l rule-2 mx-1"></div>
+      <div class="fac-console__action-divider w-px h-5 border-l rule-2 mx-1"></div>
       <button @click="showOpsPanel = !showOpsPanel"
-              class="btn h-7 px-3 text-[12.5px]"
+              class="fac-console__ops-toggle btn h-7 px-3 text-[12.5px]"
               :class="showOpsPanel ? 'btn-primary' : 'btn-ghost'"
+              :aria-pressed="showOpsPanel"
               :title="showOpsPanel ? 'Hide ops panel' : 'Show ops panel (review, participants, export)'">
         <span>Ops panel</span>
       </button>
       <a :href="commsHref"
-         class="btn btn-ghost h-7 px-3 text-[12.5px]">Communications</a>
+         class="fac-console__comms btn btn-ghost h-7 px-3 text-[12.5px]">Communications</a>
       <button x-show="exState === 'draft'" @click="transition('start')"
               class="btn btn-accent h-7 px-3 text-[12.5px]">Start</button>
       <button x-show="exState === 'active'" @click="transition('pause')"
@@ -41,12 +43,68 @@
     </div>
   </div>
 
+  <!-- Mobile console navigation. Desktop keeps the full split-pane workspace. -->
+  <div class="fac-console__mobile-nav"
+       role="tablist"
+       aria-label="Facilitator workspace"
+       @keydown.right.prevent="cycleMobilePane(1)"
+       @keydown.left.prevent="cycleMobilePane(-1)"
+       @keydown.home.prevent="focusMobilePane('injects')"
+       @keydown.end.prevent="focusMobilePane('ops')">
+    <button id="fac-tab-injects"
+            x-ref="mobileInjectsTab"
+            type="button"
+            role="tab"
+            aria-controls="fac-pane-injects"
+            :aria-selected="mobilePane === 'injects'"
+            :tabindex="mobilePane === 'injects' ? '0' : '-1'"
+            :class="mobilePane === 'injects' ? 'is-active' : ''"
+            @click="setMobilePane('injects')"
+            data-testid="facilitator-tab-injects">
+      <span>Injects</span>
+      <span class="fac-console__tab-meta" x-text="mobileInjectCountLabel"></span>
+    </button>
+    <button id="fac-tab-responses"
+            x-ref="mobileResponsesTab"
+            type="button"
+            role="tab"
+            aria-controls="fac-pane-responses"
+            :aria-selected="mobilePane === 'responses'"
+            :tabindex="mobilePane === 'responses' ? '0' : '-1'"
+            :class="mobilePane === 'responses' ? 'is-active' : ''"
+            @click="setMobilePane('responses')"
+            data-testid="facilitator-tab-responses">
+      <span>Responses</span>
+      <span class="fac-console__tab-meta" x-text="responses.length"></span>
+    </button>
+    <button id="fac-tab-ops"
+            x-ref="mobileOpsTab"
+            type="button"
+            role="tab"
+            aria-controls="fac-pane-ops"
+            :aria-selected="mobilePane === 'ops'"
+            :tabindex="mobilePane === 'ops' ? '0' : '-1'"
+            :class="mobilePane === 'ops' ? 'is-active' : ''"
+            @click="setMobilePane('ops')"
+            data-testid="facilitator-tab-ops">
+      <span>Ops</span>
+      <span class="fac-console__tab-meta" x-text="members.length"></span>
+    </button>
+  </div>
+
   <!-- Console body -->
-  <div class="grid flex-1 min-h-0"
+  <div class="fac-console__body grid flex-1 min-h-0"
+       data-testid="facilitator-console-body"
        :style="showOpsPanel ? 'grid-template-columns: minmax(300px, 320px) minmax(340px, 1fr) minmax(240px, 260px);' : 'grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);'">
 
     <!-- LEFT: inject tree + ad-hoc form -->
-    <div class="border-r rule overflow-y-auto" style="background: var(--paper);">
+    <div id="fac-pane-injects"
+         role="tabpanel"
+         aria-labelledby="fac-tab-injects"
+         class="fac-console__pane fac-console__pane--injects border-r rule overflow-y-auto"
+         :class="mobilePane === 'injects' ? 'is-mobile-active' : ''"
+         data-testid="facilitator-pane-injects"
+         style="background: var(--paper);">
       <div class="px-4 pt-4 pb-2 flex items-center justify-between">
         <div>
           <div class="smallcaps text-muted">Injects</div>
@@ -169,14 +227,19 @@
     </div>
 
     <!-- MIDDLE: response feed -->
-    <div class="overflow-y-auto">
-      <div class="px-6 pt-5 pb-3 flex items-baseline gap-3">
+    <div id="fac-pane-responses"
+         role="tabpanel"
+         aria-labelledby="fac-tab-responses"
+         class="fac-console__pane fac-console__pane--responses overflow-y-auto"
+         :class="mobilePane === 'responses' ? 'is-mobile-active' : ''"
+         data-testid="facilitator-pane-responses">
+      <div class="fac-console__response-header px-6 pt-5 pb-3 flex items-baseline gap-3">
         <h2 class="text-[18px] font-semibold tracking-tight">Responses</h2>
         <span class="mono text-[12px] text-muted"
               x-text="responses.length + ' total'"></span>
         <span class="mono text-[12px] text-faint"
               x-text="comments.length + ' comments'"></span>
-        <div class="ml-auto flex items-center gap-2">
+        <div class="fac-console__response-filters ml-auto flex items-center gap-2">
           <button class="smallcaps hover:text-ink"
                   :class="responseFilter === 'all' ? 'text-ink' : 'text-faint'"
                   @click="responseFilter = 'all'">All</button>
@@ -222,7 +285,7 @@
 
         <template x-for="resp in filteredResponses" :key="resp.id">
           <div class="surface overflow-hidden">
-            <div class="px-4 py-3 flex items-center gap-3 border-b rule">
+            <div class="fac-console__response-card-head px-4 py-3 flex items-center gap-3 border-b rule">
               <div class="avatar-chip h-7 w-7 rounded-full grid place-items-center text-[11px] font-semibold shrink-0"
                    x-text="userInitials(resp.user_id)">U</div>
               <div class="min-w-0">
@@ -238,10 +301,10 @@
                     :class="resp.group_id ? teamColor(resp.group_id) : 'bg-surface-2 text-ink-soft ring-line'"
                     x-text="groupLabel(resp.group_id)"></span>
             </div>
-            <div class="grid" :style="assessments[resp.id] ? 'grid-template-columns: 1fr 240px' : 'grid-template-columns: 1fr'">
+            <div class="fac-console__response-content grid" :style="assessments[resp.id] ? 'grid-template-columns: 1fr 240px' : 'grid-template-columns: 1fr'">
               <div class="px-4 py-3 text-[13.5px] text-ink" x-text="resp.content"></div>
               <template x-if="assessments[resp.id]">
-                <div class="px-4 py-3 border-l rule paper-soft">
+                <div class="fac-console__assessment px-4 py-3 border-l rule paper-soft">
                   <div class="flex items-center gap-2 mb-1.5">
                     <span class="smallcaps text-muted">AI assessment</span>
                     <span x-show="assessments[resp.id].decision_quality"
@@ -271,7 +334,14 @@
     </div>
 
     <!-- RIGHT: AI suggestions + participants + export -->
-    <div x-show="showOpsPanel" class="border-l rule overflow-y-auto" style="background: var(--paper);">
+    <div id="fac-pane-ops"
+         x-show="opsPanelVisible"
+         role="tabpanel"
+         aria-labelledby="fac-tab-ops"
+         class="fac-console__pane fac-console__pane--ops border-l rule overflow-y-auto"
+         :class="mobilePane === 'ops' ? 'is-mobile-active' : ''"
+         data-testid="facilitator-pane-ops"
+         style="background: var(--paper);">
 
       <!-- AI suggestion card -->
       <template x-if="hasPendingSuggestions">
@@ -336,6 +406,7 @@
                       </template>
                     </div>
                     <select :value="m.group_id || ''"
+                            :aria-label="memberGroupLabel(m.user_id)"
                             x-effect="syncSelectValue($el, m.group_id)"
                             @change="changeMemberGroup(m, $event.target.value)"
                             class="w-24 rounded-md ring-rule px-1.5 py-1 text-[11px] bg-surface shrink-0">
