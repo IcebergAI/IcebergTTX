@@ -124,6 +124,14 @@
       </div>
       <p class="text-[12.5px] text-muted mt-3" x-text="sampleMessage"></p>
     </section>
+
+    <!-- Version + beta feedback (issue #118). Version is a server-rendered
+         Jinja global; the link opens the GitHub bug form with it prefilled. -->
+    <footer class="mt-8 pt-4 border-t rule flex items-center justify-between gap-4">
+      <span class="mono text-[12px] text-faint">IcebergTTX v{{ app_version }}</span>
+      <a href="https://github.com/IcebergAI/IcebergTTX/issues/new?template=bug_report.yml&amp;version={{ app_version | urlencode }}"
+         class="text-[12.5px] text-muted hover:text-ink" target="_blank" rel="noopener noreferrer">Report an issue &rarr;</a>
+    </footer>
   </div>
 
 </div>

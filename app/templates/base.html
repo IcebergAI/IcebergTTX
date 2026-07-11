@@ -104,6 +104,13 @@
           <a href="/settings" class="rail-link" :class="isActive('/settings') && 'is-active'">
             <span class="rail-dot"></span><span class="rail-link-label">Settings</span>
           </a>
+          <!-- Beta feedback: opens the GitHub bug-report form with the running
+               version prefilled (issue #118). Plain external anchor — CSP-safe,
+               no inline JS. The version is a server-rendered Jinja global. -->
+          <a href="https://github.com/IcebergAI/IcebergTTX/issues/new?template=bug_report.yml&amp;version={{ app_version | urlencode }}"
+             class="rail-link" target="_blank" rel="noopener noreferrer">
+            <span class="rail-dot"></span><span class="rail-link-label">Beta feedback</span>
+          </a>
         </div>
 
         <!-- Live-now widget. More than one exercise can be active (#96): the switcher
