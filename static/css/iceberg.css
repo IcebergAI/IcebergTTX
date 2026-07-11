@@ -359,6 +359,7 @@ code, .code { font-family: var(--fs-mono); font-size: 0.86em; background: var(--
  * ------------------------------------------------------------------------ */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-width: 40px; min-height: 40px;
   font-family: var(--fs-sans); font-weight: 600; letter-spacing: -0.005em;
   border-radius: var(--radius-sm); border: 1px solid transparent; cursor: pointer;
   transition: background .13s, border-color .13s, color .13s, box-shadow .13s, transform .05s;
@@ -375,6 +376,15 @@ code, .code { font-family: var(--fs-mono); font-size: 0.86em; background: var(--
 .btn--ink { background: var(--ink); color: var(--paper); }
 .btn--ink:hover { filter: brightness(1.15); }
 .btn--sm { font-size: 12.5px; padding: 6px 11px; }
+
+/* Interaction geometry: command controls are used during a live exercise, often
+   on a tablet.  Keep every shared control at the desktop 40px baseline even
+   when a legacy utility class asks for a denser visual height. */
+button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
+.rail-link, .rail-live-main, .rail-live-opt, .rail-logout, summary {
+  min-height: 40px;
+}
+.rail-live-opt { min-width: 40px; }
 
 /* --------------------------------------------------------------------------
  *  Scenario inject tree node
@@ -506,11 +516,24 @@ code, .code { font-family: var(--fs-mono); font-size: 0.86em; background: var(--
  * ------------------------------------------------------------------------ */
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 select, textarea {
+  min-height: 40px;
   font-family: var(--fs-sans); color: var(--ink);
   background: var(--surface); border-color: var(--line-strong);
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
 ::placeholder { color: var(--faint); }
+
+/* Phone layouts use a 44px hit area.  The visual treatment remains compact,
+   but the tappable box and keyboard focus ring have enough room to breathe. */
+@media (max-width: 760px) {
+  .btn, button, [role="button"], [role="tab"],
+  .rail-link, .rail-live-main, .rail-live-opt, .rail-logout, summary,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select, textarea {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
 
 /* --------------------------------------------------------------------------
  *  Scrollbars

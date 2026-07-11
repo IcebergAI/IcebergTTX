@@ -419,6 +419,61 @@ def test_mobile_shell_opens_navigation_and_reaches_settings(page: Page):
     page.get_by_role("link", name="Settings").click()
     page.wait_for_url(f"{BASE}/settings", timeout=8000)
     expect(page.locator("h1")).to_contain_text("Settings")
+
+
+def _assert_visible_control_geometry(page: Page, minimum: int) -> None:
+    """Verify the visible shared controls meet the touch-target baseline."""
+    undersized = page.evaluate(
+        """minimum => [...document.querySelectorAll(
+          'button, a.btn, .rail-link, .rail-live-main, .rail-live-opt, .rail-logout, '
+          + 'input:not([type=checkbox]):not([type=radio]):not([type=range]), '
+          + 'select, textarea, summary, '
+          + '[role=button], [role=tab]'
+        )].filter(node => {
+          const style = getComputedStyle(node);
+          const rect = node.getBoundingClientRect();
+          return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0
+            && rect.height > 0 && (rect.width < minimum || rect.height < minimum);
+        }).map(node => ({
+          tag: node.tagName, text: node.textContent.trim().slice(0, 48),
+          width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height,
+        }))""",
+        minimum,
+    )
+    assert not undersized, undersized
+
+
+def test_touch_target_geometry_across_core_routes(page: Page):
+    """Shared controls remain at least 40px desktop / 44px on a phone (#151)."""
+    login_facilitator(page)
+    scenario_id = _make_scenario(page)
+    exercise_id = _make_exercise(page, scenario_id, title="Touch target exercise")
+    _enrol_participant(page, exercise_id)
+    api_post(page, f"/exercises/{exercise_id}/start")
+
+    desktop_routes = [
+        "/dashboard",
+        f"/exercises/{exercise_id}/facilitate",
+        f"/scenarios/{scenario_id}/edit",
+        "/settings",
+        "/admin/users",
+    ]
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    for route in desktop_routes:
+        page.goto(f"{BASE}{route}")
+        expect(page.locator("body")).not_to_contain_text("Internal Server Error")
+        _assert_visible_control_geometry(page, 40)
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+
+    # A real phone interaction: changing facilitator panes is the primary live
+    # exercise navigation at 390px, then all visible targets remain 44px.
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(f"{BASE}/exercises/{exercise_id}/facilitate")
+    page.get_by_test_id("facilitator-tab-responses").click()
+    expect(page.get_by_test_id("facilitator-pane-responses")).to_be_visible()
+    _assert_visible_control_geometry(page, 44)
     assert page.evaluate(
         "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
     )
