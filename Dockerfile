@@ -18,31 +18,47 @@ RUN tailwindcss -i static/css/input.css -o static/css/output.css --minify
 FROM python:3.14-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    # uv: use the image's interpreter (never download one), copy instead of
+    # hardlink (works across build layers), compile bytecode for faster cold
+    # starts, and put the project venv first on PATH so `uvicorn` resolves to it.
+    UV_PYTHON_DOWNLOADS=0 \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
+
+# Pinned uv binary — reproducible resolver/installer. Dependabot's docker updater
+# keeps this tag fresh.
+COPY --from=ghcr.io/astral-sh/uv:0.11.23 /uv /uvx /bin/
 
 RUN addgroup --system --gid 1000 appgroup && \
     adduser --system --uid 1000 --gid 1000 --no-create-home appuser
 
-# Install Python dependencies (asyncpg is a core dependency). No LLM SDK is a core
-# dependency; the `llm-all` extra bundles every provider SDK so any LLM_PROVIDER
-# (anthropic/bedrock/openai/ollama/gemini) works in the image. Narrow this to a
-# single extra (e.g. `.[llm-anthropic]`) to slim the image, or drop it for none.
-COPY pyproject.toml .
-COPY app/__init__.py app/__init__.py
-RUN pip install --no-cache-dir -e ".[llm-all]"
+# 1) Dependency layer — cached until pyproject.toml / uv.lock change. Installs the
+# exact, hashed dependency set from the lockfile (reproducible builds). asyncpg is
+# core; no LLM SDK is, so the `llm-all` extra bundles every provider SDK so any
+# LLM_PROVIDER (anthropic/bedrock/openai/ollama/gemini) works in the image (narrow
+# to e.g. `--extra llm-anthropic` to slim it). `--frozen` fails if the lock is
+# stale; `--no-install-project` installs only deps so this layer ignores source.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --extra llm-all --no-install-project
 
-# Copy application source
+# Application source. README.md + LICENSE are referenced by pyproject metadata and
+# must be present for the project install below. Alembic config/versions are needed
+# because migrations run at startup (app.database.run_migrations).
 COPY app/ app/
-
-# Alembic migrations are applied at startup (app.database.run_migrations); the
-# config and versions must be present in the image.
 COPY alembic.ini alembic.ini
 COPY alembic/ alembic/
-
-# Copy compiled static assets from builder stage
+COPY README.md LICENSE ./
 COPY --from=tailwind-builder /app/static/ static/
+
+# 2) Install the project itself (editable) into the venv, so importlib.metadata
+# resolves its version at runtime (audit events, #73) and Jinja templates/static
+# resolve from the source tree. Fast — only builds the project's own metadata.
+RUN uv sync --frozen --no-dev --extra llm-all
 
 # static_src/ is never overridden by a volume mount — used by the entrypoint
 # (and k8s init containers) to populate shared static volumes at startup so
