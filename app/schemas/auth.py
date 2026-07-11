@@ -9,10 +9,14 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # Password policy (#13): length-only, NIST-aligned — reject blank/whitespace-only
 # and anything outside the min/max length. No character-class complexity
-# requirement. The upper bound caps request size on the unauthenticated register
-# endpoint (bcrypt truncates at 72 bytes anyway).
+# requirement. The upper bound is measured in UTF-8 *bytes* and set to bcrypt's
+# 72-byte input limit: bcrypt silently truncates anything past 72 bytes, so a
+# longer password's tail would not affect the stored hash (a mistyped tail on a
+# long passphrase would still authenticate). Capping here keeps the whole
+# password significant and also bounds request size on the unauthenticated
+# register endpoint.
 MIN_PASSWORD_LENGTH = 12
-MAX_PASSWORD_LENGTH = 128
+MAX_PASSWORD_BYTES = 72
 
 
 def validate_password_strength(v: str) -> str:
@@ -21,8 +25,8 @@ def validate_password_strength(v: str) -> str:
         raise ValueError("Password must not be blank.")
     if len(v) < MIN_PASSWORD_LENGTH:
         raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
-    if len(v) > MAX_PASSWORD_LENGTH:
-        raise ValueError(f"Password must be at most {MAX_PASSWORD_LENGTH} characters.")
+    if len(v.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        raise ValueError(f"Password must be at most {MAX_PASSWORD_BYTES} bytes.")
     return v
 
 

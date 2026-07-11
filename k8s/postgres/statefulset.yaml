@@ -33,6 +33,10 @@ spec:
           image: postgres:17
           securityContext:
             allowPrivilegeEscalation: false
+            # Read-only rootfs (parity with the app/caddy/backup containers). The
+            # data dir is the PVC below; Postgres also needs a writable socket dir
+            # (/var/run/postgresql) and /tmp, provided as emptyDir mounts.
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           ports:
@@ -51,6 +55,12 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+            # Writable paths for a read-only rootfs: the postgres unix socket dir
+            # and scratch. emptyDir so nothing persists outside the data PVC.
+            - name: postgres-run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             exec:
               command: [pg_isready, -U, iceberg_ttx, -d, iceberg_ttx]
@@ -76,3 +86,7 @@ spec:
         - name: postgres-data
           persistentVolumeClaim:
             claimName: postgres-data
+        - name: postgres-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

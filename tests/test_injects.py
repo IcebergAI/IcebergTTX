@@ -1,8 +1,10 @@
+import pytest
 from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
 from app.models.user import User
+from app.routers.injects import _safe_filename
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -414,3 +416,30 @@ async def test_release_broadcast_team_targeted(
     )
     assert r.status_code == 200
     assert r.json()["target_teams"] == ["it_ops"]
+
+
+# ── #16/#39: attachment filename sanitization (path-traversal defence) ─────────
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("../../etc/passwd", "passwd"),
+        ("/etc/passwd", "passwd"),
+        ("a/b/c.txt", "c.txt"),
+        ("..", "attachment"),
+        ("...", "attachment"),
+        ("", "attachment"),
+        (None, "attachment"),
+        ("réport final.pdf", "r_port_final.pdf"),
+        ("normal-file_1.csv", "normal-file_1.csv"),
+    ],
+)
+def test_safe_filename_strips_traversal(raw, expected):
+    """_safe_filename must never yield a path separator or a leading-dot name, so
+    a malicious upload filename cannot escape the attachment storage dir."""
+    result = _safe_filename(raw)
+    assert result == expected
+    assert "/" not in result
+    assert not result.startswith(".")
+    assert result  # never empty

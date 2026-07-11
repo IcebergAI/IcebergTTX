@@ -47,6 +47,25 @@ async def _call(provider, system: str, cached_context: str, user_prompt: str) ->
     )
 
 
+def _build_context(inject, definition, response) -> tuple[str, str]:
+    """Shared LLM prompt context for assess/suggest: the cached scenario+inject
+    summary (the prefix-cacheable block) and the optional selected-option line."""
+    node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
+    cached = _scenario_summary(definition) + "\n\n" + _inject_summary(inject, node)
+    selected_line = (
+        f"\nSelected option: {response.selected_option}" if response.selected_option else ""
+    )
+    return cached, selected_line
+
+
+def _parse_json(text: str, fallback: dict) -> dict:
+    """Parse an LLM JSON reply; return ``fallback`` on invalid JSON."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return fallback
+
+
 async def assess_response(session, response, inject, definition):
     from app.models.assessment import ResponseAssessment
 
@@ -54,12 +73,7 @@ async def assess_response(session, response, inject, definition):
     if provider is None:
         return None
 
-    node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
-    cached = _scenario_summary(definition) + "\n\n" + _inject_summary(inject, node)
-
-    selected_line = (
-        f"\nSelected option: {response.selected_option}" if response.selected_option else ""
-    )
+    cached, selected_line = _build_context(inject, definition, response)
     user_prompt = (
         f"Participant response:\n{response.content}{selected_line}\n\n"
         "Assess this response. Reply as JSON with keys: "
@@ -69,14 +83,11 @@ async def assess_response(session, response, inject, definition):
     )
 
     text = await _call(provider, _ASSESSMENT_SYSTEM, cached, user_prompt)
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        data = {
-            "assessment_text": text,
-            "decision_quality": None,
-            "recommended_branch_option_id": None,
-        }
+    data = _parse_json(text, {
+        "assessment_text": text,
+        "decision_quality": None,
+        "recommended_branch_option_id": None,
+    })
 
     assessment = ResponseAssessment(
         response_id=response.id,
@@ -103,12 +114,7 @@ async def suggest_inject(session, response, inject, exercise, definition):
     if provider is None:
         return None
 
-    node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
-    cached = _scenario_summary(definition) + "\n\n" + _inject_summary(inject, node)
-
-    selected_line = (
-        f"\nSelected option: {response.selected_option}" if response.selected_option else ""
-    )
+    cached, selected_line = _build_context(inject, definition, response)
     user_prompt = (
         f"Participant response:\n{response.content}{selected_line}\n\n"
         "Suggest a follow-up inject. Reply as JSON with keys: "
@@ -118,10 +124,7 @@ async def suggest_inject(session, response, inject, exercise, definition):
     )
 
     text = await _call(provider, _SUGGESTION_SYSTEM, cached, user_prompt)
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        data = {"title": "Follow-up inject", "content": text, "target_teams": None}
+    data = _parse_json(text, {"title": "Follow-up inject", "content": text, "target_teams": None})
 
     target_teams = data.get("target_teams")
     suggested = SuggestedInject(
