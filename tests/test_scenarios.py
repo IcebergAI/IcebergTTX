@@ -10,32 +10,108 @@ def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_definition_rejects_duplicate_teams_options_and_unknown_audiences():
+def _minimal_definition(**overrides):
+    definition = {
+        "title": "Validation test",
+        "participant_teams": [{"id": "ops", "label": "Ops"}],
+        "injects": [{"id": "start", "title": "Start", "content": "x"}],
+        "start_inject_id": "start",
+    }
+    definition.update(overrides)
+    return definition
+
+
+def test_definition_rejects_duplicate_teams_and_unknown_audiences():
     with pytest.raises(ValidationError):
         ScenarioDefinition.model_validate(
-            {
-                "title": "Invalid",
-                "participant_teams": [{"id": "ops", "label": "Ops"}, {"id": "ops", "label": "Dup"}],
-                "injects": [{"id": "start", "title": "Start", "content": "x"}],
-                "start_inject_id": "start",
-            }
+            _minimal_definition(
+                participant_teams=[
+                    {"id": "ops", "label": "Ops"},
+                    {"id": "ops", "label": "Duplicate"},
+                ]
+            )
         )
     with pytest.raises(ValidationError):
         ScenarioDefinition.model_validate(
-            {
-                "title": "Invalid",
-                "participant_teams": [{"id": "ops", "label": "Ops"}],
-                "injects": [
+            _minimal_definition(
+                injects=[
                     {
                         "id": "start",
                         "title": "Start",
                         "content": "x",
                         "target_teams": ["other"],
                     }
-                ],
-                "start_inject_id": "start",
-            }
+                ]
+            )
         )
+
+
+@pytest.mark.parametrize("delay", [-1, 86_401])
+def test_definition_rejects_invalid_trigger_delay(delay: int):
+    with pytest.raises(ValidationError, match="delay_after_release_seconds"):
+        ScenarioDefinition.model_validate(
+            _minimal_definition(
+                injects=[
+                    {
+                        "id": "start",
+                        "title": "Start",
+                        "content": "x",
+                        "triggers_communications": [
+                            {
+                                "external_entity": "Regulator",
+                                "direction": "outbound",
+                                "subject": "Notice",
+                                "body": "Details",
+                                "delay_after_release_seconds": delay,
+                            }
+                        ],
+                    }
+                ]
+            )
+        )
+
+
+def test_definition_rejects_duplicate_options():
+    with pytest.raises(ValidationError, match="option ids must be unique"):
+        ScenarioDefinition.model_validate(
+            _minimal_definition(
+                injects=[
+                    {
+                        "id": "start",
+                        "title": "Start",
+                        "content": "x",
+                        "options": [
+                            {"id": "decide", "label": "First"},
+                            {"id": " decide ", "label": "Duplicate after normalization"},
+                        ],
+                    }
+                ]
+            )
+        )
+
+
+def test_definition_normalizes_graph_reference_ids():
+    definition = ScenarioDefinition.model_validate(
+        _minimal_definition(
+            start_inject_id=" start ",
+            injects=[
+                {
+                    "id": " start ",
+                    "title": "Start",
+                    "content": "x",
+                    "next_inject_id": " next ",
+                    "options": [
+                        {"id": "branch", "label": "Branch", "next_inject_id": " next "}
+                    ],
+                },
+                {"id": " next ", "title": "Next", "content": "y"},
+            ],
+        )
+    )
+
+    assert definition.start_inject_id == "start"
+    assert definition.injects[0].next_inject_id == "next"
+    assert definition.injects[0].options[0].next_inject_id == "next"
 
 
 # ── List ──────────────────────────────────────────────────────────────────────

@@ -62,6 +62,11 @@ class InjectOption(BaseModel):
     def normalize_id(cls, value: str) -> str:
         return _normalized_id(value, "option id")
 
+    @field_validator("next_inject_id")
+    @classmethod
+    def normalize_next_inject_id(cls, value: str | None) -> str | None:
+        return _normalized_id(value, "option next_inject_id") if value is not None else None
+
 
 class InjectNode(BaseModel):
     id: str
@@ -83,6 +88,11 @@ class InjectNode(BaseModel):
     @classmethod
     def normalize_id(cls, value: str) -> str:
         return _normalized_id(value, "inject id")
+
+    @field_validator("next_inject_id")
+    @classmethod
+    def normalize_next_inject_id(cls, value: str | None) -> str | None:
+        return _normalized_id(value, "inject next_inject_id") if value is not None else None
 
     @field_validator("target_teams")
     @classmethod
@@ -115,6 +125,11 @@ class ScenarioDefinition(BaseModel):
     injects: list[InjectNode]
     start_inject_id: str
     debrief_notes: str | None = None
+
+    @field_validator("start_inject_id")
+    @classmethod
+    def normalize_start_inject_id(cls, value: str) -> str:
+        return _normalized_id(value, "start_inject_id")
 
     @model_validator(mode="after")
     def validate_structure(self) -> ScenarioDefinition:
