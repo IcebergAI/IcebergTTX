@@ -14,7 +14,7 @@ from starlette.datastructures import UploadFile
 from app.database import get_session
 from app.dependencies import get_current_user, require_role
 from app.models.exercise import ExerciseState
-from app.models.inject import Inject
+from app.models.inject import Inject, InjectState
 from app.models.user import User, UserRole
 from app.schemas.api import InjectPublic
 from app.services import audit_service
@@ -25,11 +25,13 @@ from app.services.access_control import (
 from app.services.exercise_service import validate_group_id
 from app.services.inject_service import (
     AttachmentMeta,
+    broadcast_inject_updated,
     create_inject,
     get_inject_or_404,
     inject_payload,
     release_inject,
 )
+from app.services.schedule_service import arm_inject_schedule, cancel_inject_schedule
 
 router = APIRouter(prefix="/exercises/{exercise_id}/injects", tags=["injects"])
 
@@ -302,6 +304,61 @@ async def release(
         reason=f"exercise={exercise_id}",
     )
     return await inject_payload(session, released)
+
+
+class UpdateScheduleRequest(BaseModel):
+    # Minutes after exercise start; null clears the schedule (back to manual-only).
+    release_offset_minutes: int | None = None
+
+
+@router.patch("/{inject_id}/schedule", response_model=InjectPublic)
+async def update_schedule(
+    exercise_id: int,
+    inject_id: int,
+    body: UpdateScheduleRequest,
+    current_user: FacilitatorDep,
+    session: SessionDep,
+):
+    """Set, change, or clear a pending inject's scheduled-release offset (#116).
+
+    Same authz as manual release. Only pending injects can be (re)scheduled; a running
+    exercise re-arms the timer immediately, a paused/draft one just persists (start or
+    resume will arm it). "Pull not push" is preserved — the facilitator can still release
+    early or clear the schedule at any time.
+    """
+    if body.release_offset_minutes is not None and body.release_offset_minutes < 0:
+        raise HTTPException(status_code=422, detail="release_offset_minutes must be >= 0")
+    exercise = await require_exercise_access(session, exercise_id, current_user)
+    if exercise.state == ExerciseState.completed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot schedule injects on a completed exercise",
+        )
+    inject = await get_inject_or_404(session, exercise_id, inject_id)
+    if inject.state != InjectState.pending:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Inject is '{inject.state}', cannot schedule",
+        )
+    inject.release_offset_minutes = body.release_offset_minutes
+    session.add(inject)
+    await session.commit()
+    await session.refresh(inject)
+
+    # Re-arm the in-memory timer to match the new value (only affects a running exercise;
+    # start/resume arm the rest). Cancel first so a cleared/edited offset can't double-fire.
+    cancel_inject_schedule(exercise_id, inject_id)
+    arm_inject_schedule(exercise, inject)
+
+    audit_service.emit(
+        "inject.schedule",
+        actor=current_user,
+        target_type="inject",
+        target_id=inject_id,
+        reason=f"exercise={exercise_id} offset={body.release_offset_minutes}",
+    )
+    await broadcast_inject_updated(session, inject)
+    return await inject_payload(session, inject)
 
 
 async def require_visible_bool(session: AsyncSession, inject: Inject, user: User) -> bool:
