@@ -353,6 +353,7 @@ async def patch_member(
     session: SessionDep,
 ):
     ex = await require_exercise_owner(session, exercise_id, current_user)
+    require_operational_mutability(ex)
     member = await update_member_group(
         session, exercise=ex, user_id=user_id, group_id=body.group_id
     )
@@ -371,6 +372,7 @@ async def delete_member(
     exercise_id: int, user_id: int, current_user: FacilitatorDep, session: SessionDep
 ):
     ex = await require_exercise_owner(session, exercise_id, current_user)
+    require_operational_mutability(ex)
     await remove_member(session, exercise=ex, user_id=user_id)
     audit_service.emit(
         "member.remove",

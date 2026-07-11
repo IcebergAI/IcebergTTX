@@ -296,6 +296,7 @@ async def release(
 ):
     assert current_user.id is not None
     exercise = await require_exercise_access(session, exercise_id, current_user)
+    require_operational_mutability(exercise)
     if exercise.state != ExerciseState.active:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -336,11 +337,7 @@ async def update_schedule(
     if body.release_offset_minutes is not None and body.release_offset_minutes < 0:
         raise HTTPException(status_code=422, detail="release_offset_minutes must be >= 0")
     exercise = await require_exercise_access(session, exercise_id, current_user)
-    if exercise.state == ExerciseState.completed:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot schedule injects on a completed exercise",
-        )
+    require_operational_mutability(exercise)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
     if inject.state != InjectState.pending:
         raise HTTPException(
