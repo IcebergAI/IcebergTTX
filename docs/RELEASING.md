@@ -27,7 +27,8 @@ cosign (keyless) signature.
    the project version in `uv.lock`.
 2. **Update `CHANGELOG.md`**: move items from `[Unreleased]` into a new
    `[X.Y.Z(-beta.N)]` section; refresh the compare/link footnotes.
-3. **Open a PR**, let CI pass (`uv lock --check`, tests, zizmor/actionlint, CodeQL), merge.
+3. **Open a PR**, let CI pass (`uv lock --check`, tests, zizmor/actionlint, CodeQL),
+   resolve every conversation, and obtain an independent approval before merge.
 4. **Tag and push** the merge commit on `main`:
    ```
    git checkout main && git pull
@@ -40,6 +41,13 @@ cosign (keyless) signature.
 Before the very first real tag, validate the pipeline with a throwaway pre-release tag
 (e.g. `v0.0.0-test`) or a `workflow_dispatch` run with **dry_run** unchecked, then delete
 the test tag, its Release, and the GHCR version.
+
+## Emergency releases
+
+The protected-main rules apply to administrators. Do not bypass them for ordinary
+release work. If an urgent production remediation requires an emergency bypass,
+record the reason, commit, approving maintainer, and follow-up review in the
+release record; then reconcile the change through a normal reviewed pull request.
 
 ## Verifying a released image
 
