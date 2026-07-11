@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime
+from sqlalchemy import CheckConstraint, Column, DateTime, Index
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -29,6 +29,19 @@ VALID_TRANSITIONS: dict[ExerciseState, set[ExerciseState]] = {
     ExerciseState.paused: {ExerciseState.active, ExerciseState.completed},
     ExerciseState.completed: set(),
 }
+
+TRANSITION_ACTIONS: dict[tuple[ExerciseState, ExerciseState], str] = {
+    (ExerciseState.draft, ExerciseState.active): "exercise.start",
+    (ExerciseState.active, ExerciseState.paused): "exercise.pause",
+    (ExerciseState.paused, ExerciseState.active): "exercise.resume",
+    (ExerciseState.active, ExerciseState.completed): "exercise.complete",
+    (ExerciseState.paused, ExerciseState.completed): "exercise.complete",
+}
+
+
+def transition_action(from_state: ExerciseState, to_state: ExerciseState) -> str:
+    """Return the canonical audit/timeline action for a valid transition."""
+    return TRANSITION_ACTIONS[(from_state, to_state)]
 
 
 class Exercise(SQLModel, table=True):
@@ -73,6 +86,9 @@ class Exercise(SQLModel, table=True):
         cascade_delete=True,
         sa_relationship_kwargs={"uselist": False},
     )
+    state_transitions: list["ExerciseStateTransition"] = Relationship(
+        back_populates="exercise", cascade_delete=True
+    )
 
 
 class ExerciseMember(SQLModel, table=True):
@@ -85,3 +101,29 @@ class ExerciseMember(SQLModel, table=True):
     )
 
     exercise: Optional["Exercise"] = Relationship(back_populates="members")
+
+
+class ExerciseStateTransition(SQLModel, table=True):
+    """Append-only lifecycle history committed atomically with the Exercise row."""
+
+    __table_args__ = (
+        CheckConstraint("from_state <> to_state", name="ck_exercise_transition_changes_state"),
+        Index(
+            "ix_exercisestatetransition_exercise_time",
+            "exercise_id",
+            "transitioned_at",
+            "id",
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
+    from_state: ExerciseState
+    to_state: ExerciseState
+    actor_id: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    transitioned_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+    exercise: Optional["Exercise"] = Relationship(back_populates="state_transitions")

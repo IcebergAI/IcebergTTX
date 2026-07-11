@@ -72,6 +72,23 @@ class ExercisePublic(BaseModel):
         )
 
 
+class ExerciseStateChange(BaseModel):
+    """Canonical post-commit WebSocket payload for a lifecycle transition (#129)."""
+
+    transition_id: int
+    exercise_id: int
+    previous_state: ExerciseState
+    new_state: ExerciseState
+    # Compatibility alias for clients written against the original envelope.
+    state: ExerciseState
+    actor_id: int | None = None
+    transitioned_at: str
+    started_at: str | None = None
+    ended_at: str | None = None
+    paused_at: str | None = None
+    accumulated_pause_seconds: float = 0.0
+
+
 class ExecutiveSummaryPublic(BaseModel):
     """LLM-drafted (and facilitator-editable) executive summary for the report (#113)."""
 
@@ -243,8 +260,11 @@ class TimelineEvent(BaseModel):
     group_id: str | None = None
     content: str | None = None
     # state_change
+    transition_id: int | None = None
     action: str | None = None
     actor_id: int | None = None
+    previous_state: ExerciseState | None = None
+    new_state: ExerciseState | None = None
 
 
 class SuggestedInjectPublic(BaseModel):

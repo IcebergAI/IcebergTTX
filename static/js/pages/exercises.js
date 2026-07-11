@@ -233,9 +233,12 @@ document.addEventListener('alpine:init', () => {
             await this._enrichAndAdd(msg.payload);
           }
           if (msg.type === 'exercise_state_change') {
-            // Merge the full payload so the clock pauses/resumes in step with the
-            // facilitator (needs paused_at/accumulated_pause_seconds, not just state).
-            this.exercise = { ...this.exercise, ...msg.payload };
+            this.exercise = {
+              ...this.exercise,
+              ...msg.payload,
+              state: msg.payload.new_state || msg.payload.state,
+            };
+            document.dispatchEvent(new CustomEvent('dt:exercises-changed'));
           }
           if (msg.type === 'inject_comment_created') {
             this.upsertComment(msg.payload);
@@ -614,9 +617,13 @@ document.addEventListener('alpine:init', () => {
             this.upsertComment(msg.payload);
           }
           if (msg.type === 'exercise_state_change') {
-            // Merge the full payload so pause_at/accumulated_pause_seconds keep the clock
-            // correct on other clients, not just `state` (#116).
-            this.exercise = { ...this.exercise, ...msg.payload };
+            this.exercise = {
+              ...this.exercise,
+              ...msg.payload,
+              state: msg.payload.new_state || msg.payload.state,
+            };
+            this._startElapsed();
+            document.dispatchEvent(new CustomEvent('dt:exercises-changed'));
           }
           if (msg.type === 'assessment_ready') {
             this.assessments[msg.payload.response_id] = msg.payload.assessment;
