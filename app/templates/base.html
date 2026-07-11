@@ -64,13 +64,19 @@
       </button>
     </header>
 
+    <div class="mobile-nav-backdrop" x-show="mobileNavOpen" x-cloak
+         @click="closeMobileNav()" aria-hidden="true"></div>
+
     <!-- Command-center rail — hidden on auth pages (user is null) -->
     <aside id="primary-navigation" class="rail" x-show="!!user" x-cloak
            :class="{ 'is-mobile-open': mobileNavOpen }"
+           :role="mobileNavOpen && 'dialog'" :aria-modal="mobileNavOpen"
+           aria-labelledby="mobile-navigation-title"
+           @keydown.tab="trapMobileNav($event)"
            @keydown.escape.window="closeMobileNav()">
 
       <div class="mobile-nav-head">
-        <span class="smallcaps">Navigation</span>
+        <span id="mobile-navigation-title" class="smallcaps">Navigation</span>
         <button type="button" class="mobile-nav-close" x-ref="mobileNavClose"
                 @click="closeMobileNav()" aria-label="Close navigation">Close</button>
       </div>
@@ -176,7 +182,7 @@
     </aside>
 
     <!-- Workspace column -->
-    <div class="flex-1 min-w-0 flex flex-col">
+    <div class="flex-1 min-w-0 flex flex-col" data-app-content>
       <header class="topbar" x-show="!!user" x-cloak>
         <div class="topbar-crumb">
           <span class="crumb-root">IcebergTTX</span>

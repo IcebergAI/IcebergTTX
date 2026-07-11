@@ -123,6 +123,7 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+html.dialog-open { overflow: hidden; }
 a { color: var(--accent-ink); text-decoration: none; }
 a:hover { color: var(--accent-deep); }
 ::selection { background: var(--accent-glow); }
@@ -224,7 +225,7 @@ a:hover { color: var(--accent-deep); }
  *  Shell: rail | (topbar / canvas)
  * ------------------------------------------------------------------------ */
 .app { display: flex; min-height: 100vh; width: 100%; }
-.mobile-shell, .mobile-nav-head { display: none; }
+.mobile-shell, .mobile-nav-head, .mobile-nav-backdrop { display: none; }
 .topbar {
   flex: none; height: 52px; display: flex; align-items: center; gap: 16px; padding: 0 24px;
   background: var(--surface); border-bottom: 1px solid var(--line);
@@ -250,6 +251,7 @@ a:hover { color: var(--accent-deep); }
   .mobile-shell__route { min-width: 0; color: var(--muted); font-size: 12.5px; font-weight: 700; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-shell__menu { min-width: 44px; min-height: 44px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; font-weight: 700; }
   .mobile-shell__menu:focus-visible, .mobile-nav-close:focus-visible { outline: none; box-shadow: var(--ring); }
+  .mobile-nav-backdrop { display: block; position: fixed; inset: 0; z-index: 35; background: rgb(2 8 23 / 48%); }
   .rail { display: none; width: min(320px, calc(100vw - 36px)); height: 100dvh; position: fixed; inset: 0 auto 0 0; z-index: 40; box-shadow: var(--shadow-lift); overflow-y: auto; }
   .rail.is-mobile-open { display: flex !important; }
   .mobile-nav-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 4px; }
