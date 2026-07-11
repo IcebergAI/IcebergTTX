@@ -79,6 +79,9 @@ dev = [
 # Out-of-band operator bootstrap (#65): create/promote an admin or facilitator.
 # Also runnable without install as `python -m app.bootstrap_admin`.
 iceberg-ttx-admin = "app.bootstrap_admin:main"
+# Local source-development entrypoint: performs an initial Tailwind build, then
+# supervises Tailwind watch mode and Uvicorn reload mode in one terminal.
+iceberg-ttx-dev = "app.dev:main"
 
 [project.urls]
 Homepage = "https://github.com/IcebergAI/IcebergTTX"
