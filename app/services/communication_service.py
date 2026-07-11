@@ -4,10 +4,11 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import desc
-from sqlmodel import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.communication import CommDirection, Communication
+from app.models.communication import CommDirection, Communication, CommunicationRead
 from app.models.exercise import ExerciseMember
 from app.models.inject import Inject
 from app.models.user import User
@@ -48,15 +49,53 @@ async def create_communication(
     return comm
 
 
-async def mark_read(session: AsyncSession, comm: Communication, user_id: int) -> Communication:
-    readers: list[int] = list(comm.read_by) if comm.read_by else []
-    if user_id not in readers:
-        readers.append(user_id)
-        comm.read_by = readers
-        session.add(comm)
-        await session.commit()
-        await session.refresh(comm)
-    return comm
+async def mark_read(
+    session: AsyncSession, communication_id: int, user_id: int
+) -> CommunicationRead:
+    """Record the user's first read atomically and idempotently.
+
+    ``ON CONFLICT DO NOTHING`` prevents both duplicate retries and concurrent
+    inserts from changing the original ``read_at`` timestamp.
+    """
+    statement = (
+        pg_insert(CommunicationRead)
+        .values(
+            communication_id=communication_id,
+            user_id=user_id,
+            read_at=datetime.now(UTC),
+        )
+        .on_conflict_do_nothing(index_elements=["communication_id", "user_id"])
+    )
+    await session.exec(statement)
+    await session.commit()
+    receipt = await session.get(CommunicationRead, (communication_id, user_id))
+    if receipt is None:  # defensive: both referenced rows were already validated
+        raise RuntimeError("Communication read receipt was not persisted")
+    return receipt
+
+
+async def communication_read_at(
+    session: AsyncSession, communication_id: int, user_id: int
+) -> datetime | None:
+    receipt = await session.get(CommunicationRead, (communication_id, user_id))
+    return receipt.read_at if receipt else None
+
+
+async def communication_read_times(
+    session: AsyncSession, communication_ids: list[int], user_id: int
+) -> dict[int, datetime]:
+    """Batch the inbox's viewer-specific read state into one targeted query."""
+    if not communication_ids:
+        return {}
+    receipts = (
+        await session.exec(
+            select(CommunicationRead).where(
+                CommunicationRead.user_id == user_id,
+                col(CommunicationRead.communication_id).in_(communication_ids),
+            )
+        )
+    ).all()
+    return {receipt.communication_id: receipt.read_at for receipt in receipts}
 
 
 async def list_communications(
@@ -130,7 +169,13 @@ async def visible_to_teams_for_payload(
     return None
 
 
-async def comm_payload(c: Communication, session: AsyncSession | None = None) -> dict:
+async def comm_payload(
+    c: Communication,
+    session: AsyncSession | None = None,
+    *,
+    read_at: datetime | None = None,
+) -> dict:
+    assert c.id is not None
     return CommunicationPublic(
         id=c.id,
         exercise_id=c.exercise_id,
@@ -143,7 +188,8 @@ async def comm_payload(c: Communication, session: AsyncSession | None = None) ->
         triggered_by_inject_id=c.triggered_by_inject_id,
         visible_to_teams=await visible_to_teams_for_payload(c, session),
         sent_at=c.sent_at.isoformat(),
-        read_by=c.read_by or [],
+        is_read=read_at is not None,
+        read_at=read_at.isoformat() if read_at else None,
     ).model_dump(mode="json")
 
 
