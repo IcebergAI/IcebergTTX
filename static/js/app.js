@@ -305,13 +305,33 @@ function connectExerciseWs(exerciseId, component, { viewParams = false, onMessag
 
 const dialogHelpers = {
   dialogTrigger: null,
+  dialogBackground: [],
   focusDialog(ref) {
     this.dialogTrigger = document.activeElement;
     document.documentElement.classList.add('dialog-open');
-    this.$nextTick(() => this.$refs[ref]?.focus());
+    this.$nextTick(() => {
+      const target = this.$refs[ref];
+      const dialog = target?.closest('[role="dialog"]');
+      const overlay = dialog?.parentElement;
+      this.dialogBackground = [];
+      let branch = overlay;
+      while (branch?.parentElement && branch.parentElement !== document.body) {
+        for (const sibling of branch.parentElement.children) {
+          if (sibling === branch || sibling.contains(branch) || sibling.hasAttribute('inert')) {
+            continue;
+          }
+          sibling.setAttribute('inert', '');
+          this.dialogBackground.push(sibling);
+        }
+        branch = branch.parentElement;
+      }
+      target?.focus();
+    });
   },
   restoreDialogFocus() {
     document.documentElement.classList.remove('dialog-open');
+    for (const node of this.dialogBackground) node.removeAttribute('inert');
+    this.dialogBackground = [];
     this.$nextTick(() => this.dialogTrigger?.focus?.());
   },
   trapDialog(event, ref) {
