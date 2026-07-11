@@ -3,6 +3,7 @@
 
 document.addEventListener('alpine:init', () => {
   Alpine.data('adminUsers', () => ({
+    ...DT.dialogHelpers,
     users: [],
     loading: true,
     loadError: '',
@@ -31,14 +32,19 @@ document.addEventListener('alpine:init', () => {
     },
 
     openReset(user) {
+      this.dialogTrigger = document.activeElement;
+      document.documentElement.classList.add('dialog-open');
       this.resetTarget = user;
       this.resetPassword = '';
       this.resetMustChange = true;
       this.resetError = '';
+      this.$nextTick(() => this.$refs.resetPassword?.focus());
     },
 
     closeReset() {
       this.resetTarget = null;
+      document.documentElement.classList.remove('dialog-open');
+      this.restoreDialogFocus();
     },
 
     get resetTargetLabel() {

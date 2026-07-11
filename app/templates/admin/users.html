@@ -69,8 +69,10 @@
   <div x-show="resetTarget" x-cloak
        class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
        @keydown.escape.window="closeReset()">
-    <div class="paper ring-rule rounded-xl w-full max-w-md p-6 shadow-xl" @click.stop>
-      <h2 class="text-[18px] font-semibold mb-1">Reset password</h2>
+    <div x-ref="resetDialog" role="dialog" aria-modal="true" aria-labelledby="reset-password-title"
+         tabindex="-1" @keydown.tab="trapDialog($event, 'resetDialog')"
+         class="paper ring-rule rounded-xl w-full max-w-md p-6 shadow-xl" @click.stop>
+      <h2 id="reset-password-title" class="text-[18px] font-semibold mb-1">Reset password</h2>
       <p class="text-[13px] text-muted mb-4" x-text="resetTargetLabel"></p>
 
       <div x-show="resetError" x-cloak
@@ -80,8 +82,8 @@
 
       <div class="space-y-3">
         <div>
-          <label class="block smallcaps text-muted mb-1">Temporary password</label>
-          <input type="text" x-model="resetPassword" autocomplete="off"
+          <label for="reset-password-input" class="block smallcaps text-muted mb-1">Temporary password</label>
+          <input id="reset-password-input" x-ref="resetPassword" type="text" x-model="resetPassword" autocomplete="off"
                  class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
                  placeholder="Min 12 characters" />
         </div>

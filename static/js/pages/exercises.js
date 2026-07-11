@@ -3,6 +3,7 @@
 document.addEventListener('alpine:init', () => {
   Alpine.data('exerciseList', (showCreate = false) => ({
     ...DT.uiHelpers,
+    ...DT.dialogHelpers,
     loading: true,
     exercises: [],
     scenarios: [],
@@ -28,11 +29,22 @@ document.addEventListener('alpine:init', () => {
       if (er && er.ok) this.exercises = await readJson(er, []);
       if (sr && sr.ok) this.scenarios = await readJson(sr, []);
       this.loading = false;
+      if (this.showCreate) this.focusDialog('createTitle');
     },
 
     async load() {
       const r = await apiFetch('/exercises');
       if (r && r.ok) this.exercises = await readJson(r, []);
+    },
+
+    openCreate() {
+      this.showCreate = true;
+      this.focusDialog('createTitle');
+    },
+
+    closeCreate() {
+      this.showCreate = false;
+      this.restoreDialogFocus();
     },
 
     async createExercise() {
@@ -51,7 +63,7 @@ document.addEventListener('alpine:init', () => {
       });
       this.creating = false;
       if (r && r.ok) {
-        this.showCreate = false;
+        this.closeCreate();
         this.newTitle = ''; this.newScenarioId = ''; this.newLlmEnabled = false;
         await this.load();
       } else if (r) {

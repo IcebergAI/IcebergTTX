@@ -3,6 +3,7 @@
 document.addEventListener('alpine:init', () => {
   Alpine.data('commsInbox', (exerciseId) => ({
     ...DT.uiHelpers,
+    ...DT.dialogHelpers,
     comms: [],
     commSearch: '',
     directionFilter: 'all',
@@ -95,6 +96,7 @@ document.addEventListener('alpine:init', () => {
       this.send.subject = this.replySubject(comm.subject);
       this.send.body = '';
       this.showSend = true;
+      this.focusDialog('sendRecipient');
     },
 
     openInjectInbound(comm = null) {
@@ -102,6 +104,7 @@ document.addEventListener('alpine:init', () => {
       if (!source) {
         this.compose = { external_entity: '', subject: '', body: '', visible_to_teams: [] };
         this.showCompose = true;
+        this.focusDialog('composeFrom');
         return;
       }
       this.compose.external_entity = source.external_entity || '';
@@ -109,6 +112,7 @@ document.addEventListener('alpine:init', () => {
       this.compose.body = '';
       this.compose.visible_to_teams = this.replyTargetTeams(source);
       this.showCompose = true;
+      this.focusDialog('composeFrom');
     },
 
     replySubject(subject) {
@@ -139,6 +143,7 @@ document.addEventListener('alpine:init', () => {
         const created = await r.json();
         this.upsertComm(created);
         this.showSend = false;
+        this.restoreDialogFocus();
         this.send = {
           recipient_type: 'external',
           recipient_team: '',
@@ -164,6 +169,7 @@ document.addEventListener('alpine:init', () => {
         const created = await r.json();
         this.upsertComm(created);
         this.showCompose = false;
+        this.restoreDialogFocus();
         this.compose = { external_entity: '', subject: '', body: '', visible_to_teams: [] };
       }
     },
