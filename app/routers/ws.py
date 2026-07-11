@@ -4,10 +4,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.database import get_session
+from app.database import engine, get_session
 from app.dependencies import resolve_user_from_token
 from app.middleware import origin_allowed
-from app.models.user import UserRole
+from app.models.user import User, UserRole
 from app.services.access_control import (
     exercise_member_for_user,
     is_actual_facilitator,
@@ -81,6 +81,32 @@ async def exercise_ws(
         while True:
             data = await ws.receive_json()
             if data.get("type") == "ping":
+                # Revalidate against a short-lived DB session. A socket can remain
+                # connected for hours, while membership, role, or token validity can
+                # change at any time.
+                async with AsyncSession(engine) as heartbeat_session:
+                    current = await heartbeat_session.get(User, user_id)
+                    if current is None or not current.is_active:
+                        await ws.close(code=4003)
+                        break
+                    try:
+                        await require_exercise_access(heartbeat_session, exercise_id, current)
+                    except Exception:
+                        await ws.close(code=4003)
+                        break
+                    current_member = await exercise_member_for_user(
+                        heartbeat_session, exercise_id, user_id
+                    )
+                    current_group = current_member.group_id if current_member else None
+                    if current.role == UserRole.participant and current_member is None:
+                        await ws.close(code=4003)
+                        break
+                    manager.refresh_authorization(
+                        ws,
+                        exercise_id,
+                        role=current.role.value,
+                        group_id=current_group,
+                    )
                 manager.ping(ws, exercise_id)
                 await ws.send_json(
                     {
