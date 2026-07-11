@@ -182,6 +182,35 @@ async def test_failed_inject_persistence_compensates_attachment(
     assert after == before
 
 
+async def test_draft_exercise_deletion_removes_attachment_files_after_commit(
+    client: AsyncClient,
+    facilitator_token: str,
+    draft_exercise: Exercise,
+    tmp_path,
+    monkeypatch,
+):
+    """Exercise cascades clean storage only after the row deletion succeeds (#139)."""
+    from app.routers import injects as injects_router
+
+    monkeypatch.setattr(injects_router, "ATTACHMENT_ROOT", tmp_path)
+    headers = {"Authorization": f"Bearer {facilitator_token}"}
+    created = await client.post(
+        f"/api/exercises/{draft_exercise.id}/injects",
+        data={"title": "Attachment", "content": "Delete with exercise"},
+        files={"attachment": ("brief.txt", b"brief", "text/plain")},
+        headers=headers,
+    )
+    assert created.status_code == 201
+    stored_files = list(tmp_path.rglob("*"))
+    assert any(path.is_file() for path in stored_files)
+
+    deleted = await client.delete(
+        f"/api/exercises/{draft_exercise.id}", headers=headers
+    )
+    assert deleted.status_code == 204
+    assert not any(path.is_file() for path in tmp_path.rglob("*"))
+
+
 async def test_create_inject_participant_forbidden(
     client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
