@@ -37,6 +37,25 @@ async def _comment(
     )
 
 
+async def _advance_to_legal(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    exercise_id: int,
+) -> None:
+    inject = await _release_node(client, facilitator_token, exercise_id, "inject_01")
+    response = await client.post(
+        f"/api/exercises/{exercise_id}/responses",
+        json={
+            "inject_id": inject["id"],
+            "content": "Escalate to legal.",
+            "selected_option": "opt_a",
+        },
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert response.status_code == 201
+
+
 async def _participant(
     session: AsyncSession,
     *,
@@ -134,6 +153,16 @@ async def test_team_comments_are_scoped_to_the_commenters_team(
     legal_token = _token(legal)
 
     it_inject = (await _release_node(client, facilitator_token, active_exercise.id, "inject_01"))
+    response = await client.post(
+        f"/api/exercises/{active_exercise.id}/responses",
+        json={
+            "inject_id": it_inject["id"],
+            "content": "Escalate to legal.",
+            "selected_option": "opt_a",
+        },
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert response.status_code == 201
     legal_inject = (await _release_node(client, facilitator_token, active_exercise.id, "inject_02"))
 
     assert (await _comment(
@@ -178,6 +207,9 @@ async def test_comment_on_wrong_team_inject_is_forbidden(
     participant_token: str,
     active_exercise: Exercise,
 ):
+    await _advance_to_legal(
+        client, facilitator_token, participant_token, active_exercise.id
+    )
     legal_inject = (await _release_node(client, facilitator_token, active_exercise.id, "inject_02"))
 
     response = (await _comment(

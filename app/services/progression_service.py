@@ -108,11 +108,12 @@ async def release_is_allowed(session: AsyncSession, inject: Inject) -> bool:
         return True
 
     query = select(ExerciseProgress).where(ExerciseProgress.exercise_id == inject.exercise_id)
-    if inject.group_id is not None:
-        query = query.where(ExerciseProgress.group_id == inject.group_id)
     cursors = (await session.exec(query)).all()
     if not cursors:
         return True
+    # A branch may intentionally hand off from one team to another. In that case
+    # the originating team's cursor authorizes release of the target team's
+    # physical inject; visibility remains constrained by the inject group.
     if any(cursor.current_node_id == inject.scenario_node_id for cursor in cursors):
         return True
     if any(cursor.current_inject_id is not None for cursor in cursors):

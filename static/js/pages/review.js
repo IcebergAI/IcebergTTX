@@ -101,7 +101,7 @@ document.addEventListener('alpine:init', () => {
     kindDotStyle(ev) {
       const map = {
         inject_released: 'var(--accent)',
-        inject_resolved: 'var(--c-success)',
+        inject_resolved: 'var(--c-success, #2f7d54)',
         response: 'var(--ink-soft)',
         communication: 'var(--c-warn)',
         comment: 'var(--ink-soft)',
