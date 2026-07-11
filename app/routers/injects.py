@@ -21,6 +21,7 @@ from app.services import audit_service
 from app.services.access_control import (
     require_exercise_access,
     require_inject_visible,
+    require_operational_mutability,
 )
 from app.services.exercise_service import validate_group_id, validate_team_ids
 from app.services.inject_service import (
@@ -209,6 +210,7 @@ async def create(
             detail=str(exc),
         ) from exc
     exercise = await require_exercise_access(session, exercise_id, current_user)
+    require_operational_mutability(exercise)
     target_teams = await validate_team_ids(
         session, exercise, body.target_teams, field="target_teams"
     )
@@ -244,6 +246,8 @@ async def get_inject(
 async def delete_inject(
     exercise_id: int, inject_id: int, current_user: FacilitatorDep, session: SessionDep
 ):
+    exercise = await require_exercise_access(session, exercise_id, current_user)
+    require_operational_mutability(exercise)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
     _delete_attachment_file(inject)
     await session.delete(inject)

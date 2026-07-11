@@ -3,7 +3,7 @@ from fastapi import HTTPException, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.exercise import Exercise, ExerciseMember
+from app.models.exercise import Exercise, ExerciseMember, ExerciseState
 from app.models.inject import Inject, InjectState
 from app.models.user import User, UserRole
 from app.services import audit_service
@@ -98,6 +98,15 @@ async def require_exercise_owner(session: AsyncSession, exercise_id: int, user: 
         severity="warning",
     )
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Exercise access denied")
+
+
+def require_operational_mutability(exercise: Exercise) -> None:
+    """Preserve completed exercises as after-action evidence (#127)."""
+    if exercise.state == ExerciseState.completed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Completed exercises are immutable; use debrief, summary, or export workflows",
+        )
 
 
 def inject_target_teams(inject: Inject) -> list[str] | None:
