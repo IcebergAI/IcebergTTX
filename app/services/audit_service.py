@@ -20,7 +20,7 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from app.config import settings
-from app.services.background import spawn
+from app.services.background import spawn_limited
 
 audit_logger = logging.getLogger("iceberg_ttx.audit")
 
@@ -39,6 +39,7 @@ _request_ctx: ContextVar[dict[str, Any]] = ContextVar("audit_request_ctx", defau
 
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _MAX_FIELD_LEN = 512
+_MAX_PENDING_AUDIT_DELIVERIES = 128
 
 
 def set_request_context(**fields: Any):
@@ -144,7 +145,11 @@ def _ship(event: dict[str, Any]) -> None:
     except Exception:  # nosec B110 # pragma: no cover - forwarding is best-effort
         return
 
-    spawn(siem_service.emit(event, cfg))
+    spawn_limited(
+        siem_service.emit(event, cfg),
+        bucket="audit_siem",
+        limit=_MAX_PENDING_AUDIT_DELIVERIES,
+    )
 
 
 def _persist(event: dict[str, Any]) -> None:
@@ -180,7 +185,11 @@ def _persist(event: dict[str, Any]) -> None:
     except Exception:  # nosec B110 # pragma: no cover - persistence is best-effort
         return
 
-    spawn(_persist_async(row))
+    spawn_limited(
+        _persist_async(row),
+        bucket="audit_persist",
+        limit=_MAX_PENDING_AUDIT_DELIVERIES,
+    )
 
 
 async def _persist_async(row: Any) -> None:

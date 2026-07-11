@@ -15,9 +15,11 @@ from app.services.siem_service import SiemConfig
 def _reset_siem():
     """Isolate the module-global OUTBOX + config cache between tests."""
     siem_service.OUTBOX.clear()
+    background._limited_tasks.clear()
     prev = siem_service.get_config()
     yield
     siem_service.OUTBOX.clear()
+    background._limited_tasks.clear()
     siem_service.set_config(prev)
 
 
@@ -48,6 +50,23 @@ async def _get_status(client: AsyncClient, path: str, token: str) -> int:
 async def test_disabled_is_noop():
     await siem_service.emit(_event(), SiemConfig(enabled=False, methods=frozenset({"stdout"})))
     assert siem_service.OUTBOX == []
+
+
+async def test_limited_background_bucket_drops_excess_work():
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _blocked():
+        started.set()
+        await release.wait()
+
+    first = background.spawn_limited(_blocked(), bucket="test", limit=1)
+    assert first is not None
+    await started.wait()
+    assert background.spawn_limited(_blocked(), bucket="test", limit=1) is None
+    assert len(background._limited_tasks["test"]) == 1
+    release.set()
+    await first
 
 
 async def test_min_severity_gate():

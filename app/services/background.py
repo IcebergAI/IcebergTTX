@@ -16,6 +16,7 @@ from collections.abc import Coroutine
 from typing import Any
 
 _tasks: set[asyncio.Task] = set()
+_limited_tasks: dict[str, set[asyncio.Task]] = {}
 
 
 def spawn(coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
@@ -23,4 +24,18 @@ def spawn(coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
     task = asyncio.ensure_future(coro)
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
+    return task
+
+
+def spawn_limited(
+    coro: Coroutine[Any, Any, Any], *, bucket: str, limit: int
+) -> asyncio.Task | None:
+    """Schedule work only while its named best-effort bucket has capacity."""
+    tasks = _limited_tasks.setdefault(bucket, set())
+    if len(tasks) >= limit:
+        coro.close()
+        return None
+    task = asyncio.ensure_future(coro)
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
     return task
