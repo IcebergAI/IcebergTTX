@@ -38,9 +38,15 @@
             <dd class="mono" x-text="fmtTime(report.exercise.ended_at)"></dd></div>
           <div class="flex gap-2"><dt class="smallcaps text-muted w-28 shrink-0">Duration</dt>
             <dd class="mono" x-text="report.exercise.duration || '—'"></dd></div>
-          <div class="flex gap-2"><dt class="smallcaps text-muted w-28 shrink-0">Teams</dt>
+          <div class="flex gap-2"><dt class="smallcaps text-muted w-28 shrink-0">Participant teams</dt>
             <dd x-text="teamsLabel"></dd></div>
           <div class="flex gap-2"><dt class="smallcaps text-muted w-28 shrink-0">Participants</dt>
+            <dd class="mono" x-text="report.participant_count"></dd></div>
+          <div class="flex gap-2"><dt class="smallcaps text-muted w-28 shrink-0">Facilitators</dt>
+            <dd class="mono" x-text="report.facilitator_count"></dd></div>
+          <div class="flex gap-2"><dt class="smallcaps text-muted w-28 shrink-0">Observers</dt>
+            <dd class="mono" x-text="report.observer_count"></dd></div>
+          <div class="flex gap-2"><dt class="smallcaps text-muted w-28 shrink-0">Total enrolled</dt>
             <dd class="mono" x-text="report.member_count"></dd></div>
         </dl>
         <p x-show="report.scenario.description" class="lede mt-3" x-text="report.scenario.description"></p>

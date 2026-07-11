@@ -115,6 +115,7 @@ class MemberPublic(BaseModel):
     exercise_id: int
     user_id: int
     group_id: str | None = None
+    role_at_enrolment: UserRole
     joined_at: str
 
     @classmethod
@@ -124,6 +125,7 @@ class MemberPublic(BaseModel):
             exercise_id=m.exercise_id,
             user_id=m.user_id,
             group_id=m.group_id,
+            role_at_enrolment=m.role_at_enrolment,
             joined_at=m.joined_at.isoformat(),
         )
 

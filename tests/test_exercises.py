@@ -650,6 +650,7 @@ async def test_enrol_member(
     assert r.status_code == 201
     assert r.json()["user_id"] == participant.id
     assert r.json()["group_id"] == "it_ops"
+    assert r.json()["role_at_enrolment"] == "participant"
 
 
 async def test_enrol_member_with_group_id(

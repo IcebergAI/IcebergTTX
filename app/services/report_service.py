@@ -21,7 +21,7 @@ from app.models.inject import Inject
 from app.models.report_summary import ExecutiveSummary
 from app.models.response import Response
 from app.models.scenario import Scenario
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.services.scenario_service import export_definition
 
 
@@ -64,6 +64,25 @@ async def build_report(session: AsyncSession, exercise_id: int) -> dict | None:
     members = (
         await session.exec(select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id))
     ).all()
+
+    role_counts = {role: 0 for role in UserRole}
+    for member in members:
+        role_counts[member.role_at_enrolment] += 1
+
+    participant_team_counts = {
+        team.id: 0 for team in (definition.participant_teams if definition else [])
+    }
+    unassigned_participant_count = 0
+    for member in members:
+        if member.role_at_enrolment != UserRole.participant:
+            continue
+        if member.group_id in participant_team_counts:
+            participant_team_counts[member.group_id] += 1
+        else:
+            # Includes explicitly unassigned participants and legacy/removed team IDs.
+            # Keeping this bucket explicit guarantees that the breakdown always sums
+            # to participant_count.
+            unassigned_participant_count += 1
 
     # Released injects, ordered as released, each with its responses + decision quality.
     injects = (
@@ -169,10 +188,18 @@ async def build_report(session: AsyncSession, exercise_id: int) -> dict | None:
             "description": definition.description if definition else None,
         },
         "teams": [
-            {"id": t.id, "label": t.label}
+            {
+                "id": t.id,
+                "label": t.label,
+                "participant_count": participant_team_counts[t.id],
+            }
             for t in (definition.participant_teams if definition else [])
         ],
         "member_count": len(members),
+        "participant_count": role_counts[UserRole.participant],
+        "facilitator_count": role_counts[UserRole.facilitator],
+        "observer_count": role_counts[UserRole.observer],
+        "unassigned_participant_count": unassigned_participant_count,
         "injects": inject_rows,
         "communications": comm_rows,
         "debrief": {
@@ -207,9 +234,24 @@ def render_markdown(report: dict) -> str:
     lines.append(f"- **Ended:** {ex['ended_at'] or '—'}")
     if ex.get("duration"):
         lines.append(f"- **Duration:** {ex['duration']}")
-    teams = ", ".join(t["label"] for t in report["teams"]) or "—"
+    teams = ", ".join(
+        f"{t['label']} ({t['participant_count']})" for t in report["teams"]
+    )
+    if report["unassigned_participant_count"]:
+        teams = ", ".join(
+            part
+            for part in (
+                teams,
+                f"Unassigned / other ({report['unassigned_participant_count']})",
+            )
+            if part
+        )
+    teams = teams or "—"
     lines.append(f"- **Teams:** {teams}")
-    lines.append(f"- **Participants:** {report['member_count']}")
+    lines.append(f"- **Participants:** {report['participant_count']}")
+    lines.append(f"- **Facilitators:** {report['facilitator_count']}")
+    lines.append(f"- **Observers:** {report['observer_count']}")
+    lines.append(f"- **Total enrolled:** {report['member_count']}")
     lines.append("")
 
     # Executive summary

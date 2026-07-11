@@ -171,10 +171,9 @@ async def validate_group_id(
 
 
 async def default_group_for_user(
-    session: AsyncSession, exercise: Exercise, user_id: int
+    session: AsyncSession, exercise: Exercise, user: User
 ) -> str | None:
-    user = await session.get(User, user_id)
-    if not user or not user.team:
+    if not user.team:
         return None
     return user.team if user.team in await scenario_group_ids(session, exercise) else None
 
@@ -187,6 +186,10 @@ async def enrol_member(
     group_id: str | None = None,
 ) -> ExerciseMember:
     assert exercise.id is not None
+    user = await session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
     normalized_group_id = await validate_group_id(session, exercise, group_id)
     existing = (
         await session.exec(
@@ -201,12 +204,13 @@ async def enrol_member(
     resolved_group_id = (
         normalized_group_id
         if normalized_group_id is not None
-        else await default_group_for_user(session, exercise, user_id)
+        else await default_group_for_user(session, exercise, user)
     )
     member = ExerciseMember(
         exercise_id=exercise.id,
         user_id=user_id,
         group_id=resolved_group_id,
+        role_at_enrolment=user.role,
     )
     session.add(member)
     await session.commit()

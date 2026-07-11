@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Optional
 from sqlalchemy import CheckConstraint, Column, DateTime, Index
 from sqlmodel import Field, Relationship, SQLModel
 
+from app.models.user import UserRole
+
 if TYPE_CHECKING:
     from app.models.communication import Communication
     from app.models.inject import Inject
@@ -91,6 +93,10 @@ class ExerciseMember(SQLModel, table=True):
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
     user_id: int = Field(foreign_key="user.id")
     group_id: str | None = None
+    # Immutable attendance metadata: reporting must not be rewritten when an
+    # administrator later changes the user's global role. Removing and re-enrolling
+    # a user intentionally captures a new snapshot.
+    role_at_enrolment: UserRole
     joined_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )
