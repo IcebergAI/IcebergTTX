@@ -52,7 +52,6 @@
 
   .comm-list-row-selected .comm-row-subject {
     color: var(--ink) !important;
-    font-weight: 600;
   }
 
   .comm-list-row-selected .comm-row-preview {
@@ -138,8 +137,8 @@
                   x-text="fmtAgo(c.sent_at)"></span>
           </div>
           <div class="comm-row-subject text-[13.5px] truncate"
-               :class="c.read_by && c.read_by.length ? 'font-normal' : 'font-medium'"
-               :style="c.read_by && c.read_by.length ? 'color: var(--ink-soft)' : 'color: var(--ink)'"
+               :class="c.is_read ? 'font-normal' : 'font-medium'"
+               :style="c.is_read ? 'color: var(--ink-soft)' : 'color: var(--ink)'"
                x-text="c.subject"></div>
           <div class="comm-row-preview text-[12px] truncate mt-0.5"
                style="color: var(--muted);"

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column, DateTime, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -34,9 +34,37 @@ class Communication(SQLModel, table=True):
     sent_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )
-    read_by: list[int] | None = Field(  # user ids that have read this comm
-        default=None, sa_column=Column(JSONB)
-    )
-
     exercise: Optional["Exercise"] = Relationship(back_populates="communications")
     triggered_by_inject: Optional["Inject"] = Relationship(back_populates="communications")
+    reads: list["CommunicationRead"] = Relationship(
+        back_populates="communication", cascade_delete=True
+    )
+
+
+class CommunicationRead(SQLModel, table=True):
+    """One immutable first-read receipt per communication and user."""
+
+    __table_args__ = (
+        Index(
+            "ix_communicationread_user_communication",
+            "user_id",
+            "communication_id",
+        ),
+    )
+
+    communication_id: int = Field(
+        foreign_key="communication.id",
+        ondelete="CASCADE",
+        primary_key=True,
+    )
+    user_id: int = Field(
+        foreign_key="user.id",
+        ondelete="CASCADE",
+        primary_key=True,
+    )
+    read_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+    communication: Optional["Communication"] = Relationship(back_populates="reads")

@@ -550,6 +550,15 @@ before changing that subsystem. Keep them current as the code changes.
 
 **Communications state guards**: participant outbound `send_comm` requires the exercise to be `active` (409 otherwise), consistent with response `submit` and inject-comment `create_comment` (#40). Facilitator `inject_comm` (simulated inbound) is **intentionally** unrestricted so facilitators can seed comms during `draft`/`paused` setup.
 
+**Communication read receipts**: reading a communication is an explicit, idempotent
+`PUT /api/exercises/{exercise_id}/communications/{communication_id}/read` operation.
+`GET` is side-effect free. `CommunicationRead` stores one immutable first-read
+timestamp per `(communication_id, user_id)`; concurrent readers cannot overwrite
+one another, retries retain the first timestamp, communication deletion cascades
+its receipts, and user deletion removes that user's receipts. Inbox payloads expose
+only the current viewer's `is_read` / `read_at` state rather than other users' IDs.
+The list route loads viewer read state in one batch query.
+
 **Group-scoped injects**: `Inject.group_id` and `ExerciseMember.group_id` allow injects to be targeted at specific exercise groups (teams). When `group_id` is `None` the inject is visible to all groups. The inject router resolves group membership via `exercise_group_for_user()` at query time.
 
 **Attendance role snapshots**: `ExerciseMember.role_at_enrolment` records the user's

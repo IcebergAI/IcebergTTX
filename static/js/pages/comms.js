@@ -65,7 +65,14 @@ document.addEventListener('alpine:init', () => {
     async open(c) {
       const r = await apiFetch(`/exercises/${exerciseId}/communications/${c.id}`);
       if (r && r.ok) {
-        const updated = await r.json();
+        let updated = await r.json();
+        if (!updated.is_read) {
+          const marked = await apiFetch(
+            `/exercises/${exerciseId}/communications/${c.id}/read`,
+            { method: 'PUT' },
+          );
+          if (marked && marked.ok) updated = await marked.json();
+        }
         this.upsertComm(updated, { preserveOrder: true });
         this.selected = updated;
       }

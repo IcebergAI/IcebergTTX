@@ -1,10 +1,19 @@
+import asyncio
+from uuid import uuid4
+
 from httpx import AsyncClient
 from httpx_ws import aconnect_ws
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.database import engine
+from app.models.communication import CommDirection, Communication, CommunicationRead
 from app.models.exercise import Exercise
+from app.models.scenario import Scenario
 from app.models.user import User, UserRole
+from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.auth_service import create_access_token, hash_password
+from app.services.communication_service import mark_read
 from app.services.exercise_service import enrol_member
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -61,6 +70,9 @@ async def test_send_outbound(
     assert data["direction"] == "outbound"
     assert data["subject"] == "Test"
     assert data["sender_team"] == "it_ops"
+    assert data["is_read"] is False
+    assert data["read_at"] is None
+    assert "read_by" not in data
 
 
 async def test_participant_send_blocked_when_not_active(
@@ -291,9 +303,12 @@ async def test_facilitator_sees_all_regardless_of_visibility(
 
 # ── Mark read ─────────────────────────────────────────────────────────────────
 
-async def test_get_comm_marks_read(
-    client: AsyncClient, participant_token: str, facilitator_token: str,
-    active_exercise: Exercise, participant: User
+async def test_get_comm_is_side_effect_free(
+    client: AsyncClient,
+    participant_token: str,
+    session: AsyncSession,
+    active_exercise: Exercise,
+    participant: User,
 ):
     comm = (await _send(client, participant_token, active_exercise.id)).json()
 
@@ -303,7 +318,244 @@ async def test_get_comm_marks_read(
     )
     assert r.status_code == 200
     data = r.json()
-    assert participant.id in data["read_by"]
+    assert data["is_read"] is False
+    assert data["read_at"] is None
+    assert await session.get(CommunicationRead, (comm["id"], participant.id)) is None
+
+
+async def test_put_comm_read_is_idempotent_and_preserves_first_timestamp(
+    client: AsyncClient,
+    participant_token: str,
+    session: AsyncSession,
+    active_exercise: Exercise,
+    participant: User,
+):
+    comm = (await _send(client, participant_token, active_exercise.id)).json()
+    url = f"/api/exercises/{active_exercise.id}/communications/{comm['id']}/read"
+    headers = {"Authorization": f"Bearer {participant_token}"}
+
+    first = await client.put(url, headers=headers)
+    second = await client.put(url, headers=headers)
+
+    assert first.status_code == second.status_code == 200
+    assert first.json()["is_read"] is True
+    assert first.json()["read_at"] is not None
+    assert second.json()["read_at"] == first.json()["read_at"]
+    receipts = (
+        await session.exec(
+            select(CommunicationRead).where(
+                CommunicationRead.communication_id == comm["id"],
+                CommunicationRead.user_id == participant.id,
+            )
+        )
+    ).all()
+    assert len(receipts) == 1
+
+    listed = await client.get(
+        f"/api/exercises/{active_exercise.id}/communications",
+        headers=headers,
+    )
+    listed_comm = next(item for item in listed.json() if item["id"] == comm["id"])
+    assert listed_comm["is_read"] is True
+    assert listed_comm["read_at"] == first.json()["read_at"]
+
+
+async def test_read_state_is_private_to_the_current_viewer(
+    client: AsyncClient,
+    participant_token: str,
+    facilitator_token: str,
+    active_exercise: Exercise,
+):
+    comm = (await _send(client, participant_token, active_exercise.id)).json()
+    url = f"/api/exercises/{active_exercise.id}/communications/{comm['id']}/read"
+    facilitator_headers = {"Authorization": f"Bearer {facilitator_token}"}
+    participant_headers = {"Authorization": f"Bearer {participant_token}"}
+
+    assert (await client.put(url, headers=facilitator_headers)).status_code == 200
+    facilitator_list = (
+        await client.get(
+            f"/api/exercises/{active_exercise.id}/communications",
+            headers=facilitator_headers,
+        )
+    ).json()
+    participant_list = (
+        await client.get(
+            f"/api/exercises/{active_exercise.id}/communications",
+            headers=participant_headers,
+        )
+    ).json()
+
+    assert next(item for item in facilitator_list if item["id"] == comm["id"])[
+        "is_read"
+    ] is True
+    participant_comm = next(item for item in participant_list if item["id"] == comm["id"])
+    assert participant_comm["is_read"] is False
+    assert participant_comm["read_at"] is None
+
+
+async def test_mark_hidden_comm_read_returns_not_found_without_receipt(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    session: AsyncSession,
+    active_exercise: Exercise,
+    participant: User,
+):
+    comm = (
+        await _inject_comm(
+            client,
+            facilitator_token,
+            active_exercise.id,
+            subject="Legal receipt",
+            visible_to_teams=["legal"],
+        )
+    ).json()
+    response = await client.put(
+        f"/api/exercises/{active_exercise.id}/communications/{comm['id']}/read",
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+
+    assert response.status_code == 404
+    assert await session.get(CommunicationRead, (comm["id"], participant.id)) is None
+
+
+async def test_concurrent_read_receipts_are_lossless_and_cascade():
+    """Separate sessions reproduce the old JSON lost-update race against PostgreSQL."""
+    suffix = uuid4().hex
+    owner_id = reader_a_id = reader_b_id = scenario_id = exercise_id = comm_id = None
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as seed:
+            owner = User(
+                email=f"receipt-owner-{suffix}@example.test",
+                display_name="Receipt Owner",
+                hashed_password="unused",
+                role=UserRole.facilitator,
+            )
+            reader_a = User(
+                email=f"receipt-a-{suffix}@example.test",
+                display_name="Reader A",
+                hashed_password="unused",
+            )
+            reader_b = User(
+                email=f"receipt-b-{suffix}@example.test",
+                display_name="Reader B",
+                hashed_password="unused",
+            )
+            seed.add_all([owner, reader_a, reader_b])
+            await seed.commit()
+            for user in (owner, reader_a, reader_b):
+                await seed.refresh(user)
+            owner_id, reader_a_id, reader_b_id = owner.id, reader_a.id, reader_b.id
+            assert owner_id is not None and reader_a_id is not None and reader_b_id is not None
+
+            definition = ScenarioDefinition(
+                title="Receipt concurrency",
+                start_inject_id="opening",
+                injects=[
+                    InjectNode(id="opening", title="Opening", content="Opening")
+                ],
+            )
+            scenario = Scenario(
+                title=definition.title,
+                definition=definition.model_dump_json(),
+                created_by=owner_id,
+            )
+            seed.add(scenario)
+            await seed.commit()
+            await seed.refresh(scenario)
+            scenario_id = scenario.id
+            assert scenario_id is not None
+
+            exercise = Exercise(
+                scenario_id=scenario_id,
+                title="Receipt concurrency",
+                created_by=owner_id,
+            )
+            seed.add(exercise)
+            await seed.commit()
+            await seed.refresh(exercise)
+            exercise_id = exercise.id
+            assert exercise_id is not None
+
+            communication = Communication(
+                exercise_id=exercise_id,
+                direction=CommDirection.inbound,
+                external_entity="NCSC",
+                subject="Concurrent receipt",
+                body="Read concurrently",
+            )
+            seed.add(communication)
+            await seed.commit()
+            await seed.refresh(communication)
+            comm_id = communication.id
+            assert comm_id is not None
+
+        async def record(user_id: int):
+            async with AsyncSession(engine, expire_on_commit=False) as concurrent_session:
+                return await mark_read(concurrent_session, comm_id, user_id)
+
+        receipt_a, receipt_b, duplicate_a = await asyncio.gather(
+            record(reader_a_id),
+            record(reader_b_id),
+            record(reader_a_id),
+        )
+        assert receipt_a.read_at == duplicate_a.read_at
+        assert receipt_b.user_id == reader_b_id
+
+        async with AsyncSession(engine, expire_on_commit=False) as verify:
+            receipts = (
+                await verify.exec(
+                    select(CommunicationRead).where(
+                        CommunicationRead.communication_id == comm_id
+                    )
+                )
+            ).all()
+            assert {receipt.user_id for receipt in receipts} == {reader_a_id, reader_b_id}
+
+            reader_a = await verify.get(User, reader_a_id)
+            assert reader_a is not None
+            await verify.delete(reader_a)
+            await verify.commit()
+            remaining = (
+                await verify.exec(
+                    select(CommunicationRead).where(
+                        CommunicationRead.communication_id == comm_id
+                    )
+                )
+            ).all()
+            assert [receipt.user_id for receipt in remaining] == [reader_b_id]
+
+            exercise = await verify.get(Exercise, exercise_id)
+            assert exercise is not None
+            await verify.delete(exercise)
+            await verify.commit()
+            assert (
+                await verify.exec(
+                    select(CommunicationRead).where(
+                        CommunicationRead.communication_id == comm_id
+                    )
+                )
+            ).all() == []
+            exercise_id = None
+    finally:
+        async with AsyncSession(engine, expire_on_commit=False) as cleanup:
+            if exercise_id is not None:
+                exercise = await cleanup.get(Exercise, exercise_id)
+                if exercise is not None:
+                    await cleanup.delete(exercise)
+                    await cleanup.commit()
+            if scenario_id is not None:
+                scenario = await cleanup.get(Scenario, scenario_id)
+                if scenario is not None:
+                    await cleanup.delete(scenario)
+                    await cleanup.commit()
+            for user_id in (reader_a_id, reader_b_id, owner_id):
+                if user_id is None:
+                    continue
+                user = await cleanup.get(User, user_id)
+                if user is not None:
+                    await cleanup.delete(user)
+                    await cleanup.commit()
 
 
 async def test_get_comm_not_found(
