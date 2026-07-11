@@ -61,19 +61,17 @@ The UI ships with a light/dark theme toggle (system-aware):
 _*Note that this is deprecated and would require a local instance of Postgres, use Docker*_
 
 ```bash
-# Create and activate a virtual environment
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-
-# Install dependencies. The dev extra bundles every AI-provider SDK, so all
+# Install dependencies with uv (https://docs.astral.sh/uv/) from the committed
+# uv.lock into a local .venv. The dev extra bundles every AI-provider SDK, so all
 # LLM_PROVIDER options work locally out of the box.
-pip install -e ".[dev]"
-# For a production install (`pip install -e .`, no dev), no LLM SDK is included by
-# default — add the extra matching your LLM_PROVIDER (all providers are equal here):
-#   pip install -e ".[llm-anthropic]"   # anthropic (direct)
-#   pip install -e ".[llm-bedrock]"     # bedrock (pulls boto3)
-#   pip install -e ".[llm-openai]"      # openai | ollama | gemini
-#   pip install -e ".[llm-all]"         # every provider SDK
+uv sync --extra dev
+# For a lean run without dev tools, pick the extra matching your LLM_PROVIDER
+# (all providers are equal here), e.g.:
+#   uv sync --extra llm-anthropic   # anthropic (direct)
+#   uv sync --extra llm-bedrock     # bedrock (pulls boto3)
+#   uv sync --extra llm-openai      # openai | ollama | gemini
+#   uv sync --extra llm-all         # every provider SDK
+# (prefix app commands with `uv run`, or activate the venv: `source .venv/bin/activate`)
 
 # Configure environment
 cp .env.example .env
@@ -86,7 +84,7 @@ cp .env.example .env
 # LLM_PROVIDER is missing its credentials (set LLM_PROVIDER=none to run without the LLM).
 
 # Run the development server
-uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload
 ```
 
 Open [http://localhost:8000](http://localhost:8000). Self-registration always creates a **participant**; privileged roles are assigned out-of-band. Create your first admin/facilitator with the bootstrap command:
@@ -140,13 +138,12 @@ Manifests are in `k8s/`. Apply in order:
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/secrets.yaml -f k8s/configmap.yaml
 
-# Before applying, replace placeholder values in k8s/secrets.yaml,
-# replace 'your-registry/iceberg-ttx:latest' in:
-#   k8s/app/deployment.yaml
-#   k8s/caddy/deployment.yaml   (the copy-static initContainer uses the app image)
-# (pin by digest — image@sha256:… — in production for reproducible rollouts;
-#  Dependabot's docker updater keeps the base-image digests current), and set
-# the hostname/issuer/ingressClassName placeholders in k8s/caddy/ingress.yaml.
+# Before applying, replace placeholder values in k8s/secrets.yaml. The manifests
+# reference the published image ghcr.io/icebergai/iceberg-ttx:<version> in
+# k8s/app/deployment.yaml and k8s/caddy/deployment.yaml (the copy-static
+# initContainer reuses the app image) — set the tag you want, and pin by digest
+# (image@sha256:…) in production for reproducible rollouts. Then set the
+# hostname/issuer/ingressClassName placeholders in k8s/caddy/ingress.yaml.
 
 kubectl apply -f k8s/postgres/
 kubectl rollout status statefulset/postgres -n iceberg-ttx
@@ -421,8 +418,8 @@ slash) so the callback URL matches what you register with the IdP.
 ## Running Tests
 
 ```bash
-pytest
-pytest tests/ --ignore=tests/test_ui.py   # skip live Playwright tests
+uv run pytest
+uv run pytest tests/ --ignore=tests/test_ui.py   # skip live Playwright tests
 ```
 
 ## Rebuilding CSS
@@ -480,6 +477,25 @@ k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, 
 6. **Complete and export** — Complete button, then export transcript/responses from the right pane
 
 See [/help](/help) for full documentation including the scenario JSON schema.
+
+## Versioning & Releases
+
+IcebergTTX follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+The current release line is **`0.x` (pre-stable / beta)** — interfaces may change
+before `1.0.0`. Pre-releases carry a suffix (`vX.Y.Z-beta.N`); the first public
+release is **`v0.1.0-beta.1`**.
+
+Container images are published to **GitHub Container Registry**:
+
+```bash
+docker pull ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.1
+```
+
+Each release image ships an SBOM, a signed **SLSA build-provenance** attestation, and a
+**cosign** signature (keyless). The `latest` tag tracks the newest **stable** release only
+(never a beta). See the [CHANGELOG](CHANGELOG.md) for what's in each release and
+[docs/RELEASING.md](docs/RELEASING.md) for the release process and image-verification
+commands.
 
 ## Contributing
 

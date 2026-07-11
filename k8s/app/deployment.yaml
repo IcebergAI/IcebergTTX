@@ -40,7 +40,7 @@ spec:
         # Populate the shared emptyDir with compiled static assets from the
         # image so Caddy (which has its own copy) can serve them directly.
         - name: copy-static
-          image: your-registry/iceberg-ttx:latest  # REPLACE with actual image
+          image: ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.1  # pin by digest (…@sha256:) in prod
           command: ["/bin/sh", "-c", "cp -a /app/static_src/. /app/static/"]
           securityContext:
             allowPrivilegeEscalation: false
@@ -52,7 +52,7 @@ spec:
               mountPath: /app/static
       containers:
         - name: app
-          image: your-registry/iceberg-ttx:latest  # REPLACE with actual image
+          image: ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.1  # pin by digest (…@sha256:) in prod
           imagePullPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false

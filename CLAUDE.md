@@ -47,7 +47,7 @@ API-first architecture.
 - *Security & auth*: startup secret validation (#9), self-registration (#8), password policy (#13), token revocation (#14), admin password reset (#66), registration controls (#67), cookie security & CSRF (#10), security headers (#77), login brute-force (#11), trusted-proxy client IP (#36), WebSocket auth (#68), facilitator ownership scoping (#12).
 - *Observability & egress*: audit logging (#23), SIEM forwarding (#24), outbound proxy (#97), OIDC/SSO (#25), LLM providers (#26).
 - *Features*: inject comment threads, group-scoped injects, file attachments (#39, #16), communications state guards (#40), role preview, dark mode, sample scenarios (#15).
-- *Deployment*: containerized deployment (Docker/Caddy/k8s, hardened non-root).
+- *Deployment*: containerized deployment (Docker/Caddy/k8s, hardened non-root); release engineering (#73) — reproducible builds via `uv.lock`, GHCR image publish + SBOM/SLSA-provenance/cosign on tag push (`.github/workflows/release.yml`), SemVer (see [docs/RELEASING.md](docs/RELEASING.md)). Version single source: `pyproject.toml` → `audit_service.APP_VERSION` via `importlib.metadata`.
 
 **Tailwind**: CLI-compiled `static/css/output.css`. `static/css/input.css` is `@import "tailwindcss"` + `@import "./iceberg.css"` + `@source` lines for the component JS + an `@theme inline` block mapping Tailwind colour/font utilities (`bg-surface`, `text-ink`, `border-line`, `font-mono`, …) onto the shared token CSS variables. Rebuild after template/CSS/JS changes: `tailwindcss -i static/css/input.css -o static/css/output.css`. Tailwind v4 auto-scans `app/templates/**/*.html`; the explicit `@source "../js/app.js"` + `@source "../js/pages"` cover utility classes now emitted from the Alpine component JS (e.g. `teamColor()`'s `bg-sky-100/70 …` strings, #77) — no config file needed. The Dockerfile's tailwind stage copies the whole `static/` tree (so the `iceberg.css` import resolves and the fonts propagate to the runtime image).
 
@@ -118,15 +118,17 @@ Current test count: **401 passing** (1 skipped).
 
 ## Development Setup
 
+Dependencies are managed with **uv** against the committed **`uv.lock`** (#73) — the
+reproducible-build source of truth (the Dockerfile and CI use it too; `uv lock --check`
+gates CI). After changing deps in `pyproject.toml`, run `uv lock` and commit the result.
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env   # set SECRET_KEY
-uvicorn app.main:app --reload   # applies Alembic migrations to head on startup
+uv sync --extra dev             # creates .venv from uv.lock (+ dev tools)
+cp .env.example .env            # set SECRET_KEY
+uv run uvicorn app.main:app --reload   # applies Alembic migrations to head on startup
 ```
 
-Run tests: `pytest`
+Run tests: `uv run pytest` (or activate `.venv` and run `pytest`).
 
 Schema changes: edit the models, then `alembic revision --autogenerate -m "describe change"` (against a running Postgres) and review the generated migration under `alembic/versions/`. Migrations are applied automatically on app startup; run `alembic upgrade head` manually to apply without starting the app.
 

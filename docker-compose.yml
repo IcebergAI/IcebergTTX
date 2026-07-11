@@ -21,6 +21,9 @@ services:
       retries: 5
 
   app:
+    # Builds the image locally from source. To deploy the published release image
+    # instead, comment out `build:` and uncomment `image:` (pin by digest in prod):
+    #   image: ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.1
     build:
       context: .
       dockerfile: Dockerfile
