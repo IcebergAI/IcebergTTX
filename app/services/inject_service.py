@@ -30,6 +30,7 @@ async def create_inject(
     target_teams: list[str] | None = None,
     group_id: str | None = None,
     sequence_order: int = 0,
+    release_offset_minutes: int | None = None,
     attachment: AttachmentMeta | None = None,
 ) -> Inject:
     normalized_group_id = group_id.strip() if group_id and group_id.strip() else None
@@ -44,6 +45,7 @@ async def create_inject(
         target_teams=normalized_targets or None,
         group_id=normalized_group_id,
         sequence_order=sequence_order,
+        release_offset_minutes=release_offset_minutes,
         attachment_filename=attachment.filename if attachment else None,
         attachment_content_type=attachment.content_type if attachment else None,
         attachment_path=attachment.path if attachment else None,
@@ -65,13 +67,19 @@ async def get_inject_or_404(session: AsyncSession, exercise_id: int, inject_id: 
 async def release_inject(
     session: AsyncSession,
     inject: Inject,
-    released_by: int,
+    released_by: int | None,
 ) -> Inject:
     if inject.state != InjectState.pending:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Inject is already '{inject.state}', cannot release",
         )
+
+    # Releasing (manually or on schedule) settles any pending scheduled-release timer for
+    # this inject so it can't double-fire (#116). `released_by` is None for auto-release.
+    from app.services.schedule_service import cancel_inject_schedule
+
+    cancel_inject_schedule(inject.exercise_id, inject.id)
 
     inject.state = InjectState.released
     inject.released_at = datetime.now(UTC)
@@ -118,6 +126,25 @@ async def _broadcast_inject_released(session: AsyncSession, inject: Inject) -> N
         await manager.broadcast_to_groups(inject.exercise_id, target_groups, message)
     else:
         await manager.broadcast_to_exercise(inject.exercise_id, message)
+
+
+async def broadcast_inject_updated(session: AsyncSession, inject: Inject) -> None:
+    """Push a metadata change (e.g. edited/cancelled schedule, #116) to facilitators.
+
+    Facilitator-only: participants only ever see *released* injects, so a pending
+    inject's schedule edit is irrelevant to them and stays off their socket.
+    """
+    from app.services.ws_manager import manager
+
+    await manager.send_to_facilitators(
+        inject.exercise_id,
+        {
+            "type": "inject_updated",
+            "exercise_id": inject.exercise_id,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "payload": await inject_payload(session, inject),
+        },
+    )
 
 
 def _inject_target_groups(inject: Inject) -> list[str] | None:
@@ -177,6 +204,7 @@ async def inject_payload(session: AsyncSession, inject: Inject) -> dict:
         state=inject.state,
         released_at=inject.released_at.isoformat() if inject.released_at else None,
         released_by=inject.released_by,
+        release_offset_minutes=inject.release_offset_minutes,
         options=await _inject_options(session, inject),
         next_inject_id=node.next_inject_id if node else None,
         free_text_response=node.free_text_response if node else True,
@@ -202,6 +230,7 @@ async def seed_injects_from_scenario(
                     target_teams=[group_id],
                     group_id=group_id,
                     sequence_order=sequence_order,
+                    release_offset_minutes=node.release_at_minutes,
                 )
         else:
             await create_inject(
@@ -213,4 +242,5 @@ async def seed_injects_from_scenario(
                 target_teams=None,
                 group_id=None,
                 sequence_order=sequence_order,
+                release_offset_minutes=node.release_at_minutes,
             )

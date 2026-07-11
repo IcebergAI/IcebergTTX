@@ -47,6 +47,9 @@ class ExercisePublic(BaseModel):
     llm_enabled: bool
     started_at: str | None = None
     ended_at: str | None = None
+    # Pause-aware clock (#116) — the client ticks HH:MM:SS from these without per-second WS.
+    paused_at: str | None = None
+    accumulated_pause_seconds: float = 0.0
     created_by: int
     created_at: str
 
@@ -62,6 +65,8 @@ class ExercisePublic(BaseModel):
             llm_enabled=ex.llm_enabled,
             started_at=ex.started_at.isoformat() if ex.started_at else None,
             ended_at=ex.ended_at.isoformat() if ex.ended_at else None,
+            paused_at=ex.paused_at.isoformat() if ex.paused_at else None,
+            accumulated_pause_seconds=ex.accumulated_pause_seconds,
             created_by=ex.created_by,
             created_at=ex.created_at.isoformat(),
         )
@@ -142,6 +147,8 @@ class InjectPublic(BaseModel):
     state: InjectState
     released_at: str | None = None
     released_by: int | None = None
+    # Scheduled release offset in minutes from exercise start (#116); None = manual-only.
+    release_offset_minutes: int | None = None
     attachment: dict[str, Any] | None = None
     # Present only when the scenario node is resolved (a session was available).
     options: list[dict[str, Any]] | None = None

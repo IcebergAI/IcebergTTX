@@ -157,6 +157,7 @@
   "target_teams": ["it_ops"],
   "free_text_response": true,
   "sequence_order": 1,
+  "release_at_minutes": 15,
   "next_inject_id": null,
   "options": [
     { "id": "opt_isolate", "label": "Isolate affected systems immediately", "next_inject_id": "inject_02a" },
@@ -187,6 +188,10 @@
       <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
         <div class="smallcaps text-muted pt-0.5">next_inject_id</div>
         <div class="text-ink-soft">Linear continuation for injects without branch choices. Participants submit a free-text response, then facilitators can release the next inject.</div>
+      </div>
+      <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
+        <div class="smallcaps text-muted pt-0.5">release_at_minutes</div>
+        <div class="text-ink-soft">Optional. Auto-releases this inject that many minutes after the exercise starts (pause-aware). The facilitator still sees a countdown and can release it early or cancel the schedule. Omit for manual release only.</div>
       </div>
       <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
         <div class="smallcaps text-muted pt-0.5">triggers_communications</div>
