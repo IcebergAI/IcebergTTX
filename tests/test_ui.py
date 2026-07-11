@@ -469,3 +469,46 @@ def test_communications_inbox_renders(page: Page):
 
     page.goto(f"{BASE}/exercises/{exercise_id}/communications")
     expect(page.locator("body")).not_to_contain_text("Internal Server Error")
+
+
+def test_reset_password_dialog_traps_and_restores_focus(page: Page):
+    login_facilitator(page)
+    page.goto(f"{BASE}/admin/users")
+    trigger = page.get_by_role("button", name="Reset password").first
+    expect(trigger).to_be_visible()
+    trigger.click()
+
+    dialog = page.get_by_role("dialog", name="Reset password")
+    expect(dialog).to_be_visible()
+    password = page.locator("#reset-password-input")
+    expect(password).to_be_focused()
+    expect(page.locator("section").first).to_have_attribute("inert", "")
+    page.keyboard.press("Shift+Tab")
+    expect(dialog.get_by_role("button", name="Cancel")).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(password).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(dialog).to_be_hidden()
+    expect(trigger).to_be_focused()
+
+
+def test_communication_dialog_traps_and_restores_focus(page: Page):
+    login_facilitator(page)
+    scenario_id = _make_scenario(page)
+    exercise_id = _make_exercise(page, scenario_id)
+    api_post(page, f"/exercises/{exercise_id}/start")
+    page.goto(f"{BASE}/exercises/{exercise_id}/communications")
+
+    trigger = page.get_by_role("button", name="Inject inbound").first
+    trigger.click()
+    dialog = page.get_by_role("dialog", name="Inject inbound message")
+    expect(dialog).to_be_visible()
+    first_input = page.locator("#compose-from")
+    expect(first_input).to_be_focused()
+    page.keyboard.press("Shift+Tab")
+    expect(dialog.get_by_role("button", name="Cancel")).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(first_input).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(dialog).to_be_hidden()
+    expect(trigger).to_be_focused()

@@ -89,7 +89,7 @@
         <span x-text="wsConnected ? 'Live' : 'Disconnected'"></span>
       </span>
       <template x-if="!isF">
-        <button @click="showSend = true"
+        <button @click="openSend()"
                 class="btn btn-ghost h-8 px-3 text-[13px]">+ Send message</button>
       </template>
       <template x-if="isF">

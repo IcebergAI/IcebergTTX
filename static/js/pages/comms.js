@@ -99,6 +99,11 @@ document.addEventListener('alpine:init', () => {
       this.focusDialog('sendRecipient');
     },
 
+    openSend() {
+      this.showSend = true;
+      this.focusDialog('sendRecipient');
+    },
+
     openInjectInbound(comm = null) {
       const source = comm || null;
       if (!source) {
