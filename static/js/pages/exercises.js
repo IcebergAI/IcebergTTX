@@ -313,6 +313,7 @@ document.addEventListener('alpine:init', () => {
     get exTitle() { return (this.exercise && this.exercise.title) || '…'; },
     get exId() { return this.exercise ? 'EX-' + this.padId(this.exercise.id, 3) : ''; },
     get commsHref() { return this.exercise ? '/exercises/' + this.exercise.id + '/communications' : '#'; },
+    get reviewHref() { return '/exercises/' + (this.exercise ? this.exercise.id : 0) + '/review'; },
     get exportHref() { return '/api/exercises/' + (this.exercise ? this.exercise.id : 0) + '/export'; },
     get exportCsvHref() { return '/api/exercises/' + (this.exercise ? this.exercise.id : 0) + '/export.csv'; },
     get liveCountLabel() {

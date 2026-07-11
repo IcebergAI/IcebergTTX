@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Review — IcebergTTX{% endblock %}
+
+{% block content %}
+<div x-data="afterActionReview({{ exercise_id }})" class="workspace">
+
+  <div class="page-head">
+    <div>
+      <div class="eyebrow eyebrow-accent" x-text="exId"></div>
+      <h1 class="page-title" x-text="exTitle"></h1>
+      <p class="lede mt-1">After-action review — a chronological replay of everything that
+        happened in this exercise.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="pill" :class="stateBadgeClass(exState)" x-text="exState"></span>
+      <a :href="facilitateHref" class="btn h-8 px-3 text-[13px]">← Console</a>
+    </div>
+  </div>
+
+  <div x-show="loading" class="text-muted text-[13.5px] mt-6">Loading timeline…</div>
+  <div x-show="error" x-cloak class="mt-6 rounded-md px-3 py-2.5 text-[13px]"
+       style="background:#fee2e2; color:#b91c1c;" x-text="error"></div>
+
+  <template x-if="isEmpty">
+    <div class="surface rounded-lg p-6 mt-6 text-center text-muted text-[13.5px]">
+      Nothing has happened in this exercise yet. Release an inject or start the exercise to
+      populate the timeline.
+    </div>
+  </template>
+
+  <!-- Timeline -->
+  <div x-show="!loading && events.length" class="mt-6">
+    <div class="section-title mb-4">Timeline</div>
+    <ol class="relative border-l ml-2" style="border-color: var(--line);">
+      <template x-for="(ev, idx) in events" :key="idx">
+        <li class="mb-4 ml-5">
+          <span class="dot absolute -left-1 mt-1.5" :style="kindDotStyle(ev)"></span>
+          <div class="node">
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="pill mono" x-text="kindLabel(ev)"></span>
+                <span class="text-[13.5px] font-medium truncate" x-text="eventTitle(ev)"></span>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <template x-if="hasQuality(ev)">
+                  <span :class="qualityClass(ev.decision_quality)" x-text="ev.decision_quality"></span>
+                </template>
+                <span class="mono text-[11px] text-muted" x-text="fmtTime(ev.at)"></span>
+              </div>
+            </div>
+            <div class="text-[12px] text-muted mt-1" x-show="eventMeta(ev)" x-text="eventMeta(ev)"></div>
+            <div class="text-[13px] mt-1.5 whitespace-pre-wrap" x-show="hasBody(ev)" x-text="eventBody(ev)"></div>
+          </div>
+        </li>
+      </template>
+    </ol>
+  </div>
+
+</div>
+{% endblock %}
