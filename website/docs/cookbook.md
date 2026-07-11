@@ -249,9 +249,10 @@ offered. The two are independent, so an inject can have either, both, or neither
 }
 ```
 
-**What the facilitator sees** — these notes surface on the exercise **Review** page as
-author guidance, next to a separate editable box for the facilitator's own observations
-captured during the exercise.
+**What the facilitator sees** — these notes surface on the exercise
+[Review page](facilitator-guide.md#review-and-replay) as author guidance, next to a
+separate editable box for the facilitator's own observations captured during the
+exercise.
 
 !!! note "No per-inject debrief field"
     `debrief_notes` lives only at the top level of the scenario. There is no per-inject
@@ -260,4 +261,5 @@ captured during the exercise.
 
 ---
 
-Next: the [Scenario authoring](scenarios.md) reference for the full schema.
+Next: the [Scenario authoring](scenarios.md) reference for the full schema, or the
+[Facilitator guide](facilitator-guide.md) to run one of these scenarios end-to-end.
