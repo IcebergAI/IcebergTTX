@@ -32,7 +32,7 @@ async def _first_released_inject_id(client: AsyncClient, token: str, exercise_id
 async def _submit(client, token, exercise_id, inject_id, content="We isolated the systems."):
     return await client.post(
         f"/api/exercises/{exercise_id}/responses",
-        json={"inject_id": inject_id, "content": content},
+        json={"inject_id": inject_id, "content": content, "selected_option": "opt_a"},
         headers={"Authorization": f"Bearer {token}"},
     )
 

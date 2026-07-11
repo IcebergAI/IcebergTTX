@@ -28,7 +28,7 @@ async def _submit(
     exercise_id: int,
     inject_id: int,
     content: str = "We isolated the systems.",
-    selected_option: str | None = None,
+    selected_option: str | None = "opt_a",
 ):
     body = {"inject_id": inject_id, "content": content}
     if selected_option:
@@ -51,7 +51,7 @@ async def test_submit_response(
     data = r.json()
     assert data["inject_id"] == inject_id
     assert data["content"] == "We isolated the systems."
-    assert data["selected_option"] is None
+    assert data["selected_option"] == "opt_a"
     assert data["submitted_at"] is not None
 
 
@@ -126,7 +126,14 @@ async def test_submit_response_duplicate_rejected(
     assert (
         await _submit(client, participant_token, active_exercise.id, inject_id)
     ).status_code == 201
-    r = (await _submit(client, participant_token, active_exercise.id, inject_id, "Second response"))
+    r = (await _submit(
+        client,
+        participant_token,
+        active_exercise.id,
+        inject_id,
+        "Second response",
+        selected_option=None,
+    ))
     assert r.status_code == 409
 
 
@@ -406,7 +413,12 @@ async def test_free_text_linear_response_suggests_next_inject(
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     r = await _submit(
-        client, participant_token, exercise.id, first["id"], content="We will proceed."
+        client,
+        participant_token,
+        exercise.id,
+        first["id"],
+        content="We will proceed.",
+        selected_option=None,
     )
     assert r.status_code == 201
 

@@ -37,6 +37,8 @@ API-first architecture.
 
 **Scenario branching**: "Pull not push" — when a participant responds, the service resolves which inject IDs are valid next steps, but the facilitator manually reviews and releases the chosen branch. This keeps human control in the loop.
 
+**Response requirements (#130)**: An inject with options always requires a valid `selected_option` from that exact scenario node; it additionally requires non-blank `content` when `free_text_response` is true. Injects without options always require non-blank content. Option-only responses store an empty content string, and missing selections never expand to every possible branch.
+
 **Linear inject flows**: In addition to per-option `next_inject_id` branching, an `InjectNode` may set a node-level `next_inject_id` (in `scenario_json.py`) to chain to the next inject without requiring a participant decision — i.e. a straight-line sequence. The `ScenarioDefinition` validator checks the referenced ID exists, and `_check_no_cycles()` includes node-level `next_inject_id` edges in its adjacency graph so linear chains can't form a cycle.
 
 **JWT auth**: Stored in both an `httpOnly` cookie (for page navigation/Jinja2 routes) and `localStorage` (for Alpine/fetch calls). The `get_current_user` FastAPI dependency checks both; the `Authorization` header takes precedence.
@@ -112,7 +114,7 @@ forwarding (#24) → strict CSP (#77) → OIDC/SSO (#25) → Caddy reverse proxy
 cookie auth (#68) → pluggable AI providers (#26) → outbound proxy (#97). Per-phase
 detail lives in git history / merged PRs.
 
-Current test count: **401 passing** (1 skipped).
+Current test count: **445 passing** (1 skipped).
 
 ---
 

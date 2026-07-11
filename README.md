@@ -24,7 +24,7 @@ ships with Docker Compose and Kubernetes deployment manifests.
 
 - **Scenario library** — build branching inject trees (or linear chained flows) in the visual scenario builder, or import/export them as JSON
 - **Live exercises** — facilitator releases injects in real time via WebSocket push
-- **Participant responses** — free-text and multiple-choice, driving scenario branches
+- **Participant responses** — branch decisions require an explicit choice; injects can require that choice alone or choice plus free-text reasoning
 - **Team comment threads** — participants discuss released injects in group-scoped comment threads
 - **Simulated communications** — two-pane inbox/outbox for regulatory, press, and executive comms
 - **LLM assessment** — Claude evaluates participant decisions and suggests follow-up injects
