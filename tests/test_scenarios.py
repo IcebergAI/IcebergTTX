@@ -2,6 +2,7 @@ import pytest
 from httpx import AsyncClient
 from pydantic import ValidationError
 
+from app.models.exercise import Exercise
 from app.models.scenario import Scenario
 from app.schemas.scenario_json import ScenarioDefinition
 
@@ -208,6 +209,28 @@ async def test_update_scenario(
     )
     assert resp.status_code == 200
     assert resp.json()["title"] == "Updated Title"
+
+
+async def test_update_in_use_scenario_creates_revision(
+    client: AsyncClient,
+    facilitator_token: str,
+    sample_scenario: Scenario,
+    sample_definition: ScenarioDefinition,
+    draft_exercise: Exercise,
+):
+    updated = sample_definition.model_copy(update={"title": "Revision"})
+    resp = await client.put(
+        f"/api/scenarios/{sample_scenario.id}",
+        json=updated.model_dump(),
+        headers=_headers(facilitator_token),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["id"] != sample_scenario.id
+
+    original = await client.get(
+        f"/api/scenarios/{sample_scenario.id}", headers=_headers(facilitator_token)
+    )
+    assert original.json()["title"] == sample_definition.title
 
 
 # ── Delete ────────────────────────────────────────────────────────────────────

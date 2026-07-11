@@ -103,9 +103,14 @@ async def get_scenario(scenario_id: int, _: FacilitatorDep, session: SessionDep)
 
 @router.put("/{scenario_id}", response_model=ScenarioDetail)
 async def update(
-    scenario_id: int, body: ScenarioDefinition, _: FacilitatorDep, session: SessionDep
+    scenario_id: int, body: ScenarioDefinition, current_user: FacilitatorDep, session: SessionDep
 ):
     scenario = await _get_or_404(session, scenario_id)
+    if scenario.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Scenario owner access required",
+        )
     scenario = await update_scenario(session, scenario, definition=body)
     return _scenario_detail(scenario)
 

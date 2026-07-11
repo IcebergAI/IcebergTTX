@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
@@ -38,6 +39,13 @@ async def update_scenario(
     *,
     definition: ScenarioDefinition,
 ) -> Scenario:
+    # Exercises capture a scenario at creation time semantically, so never rewrite
+    # an in-use definition. Return a new owner-owned revision for future exercises.
+    in_use = (
+        await session.exec(select(Exercise.id).where(Exercise.scenario_id == scenario.id))
+    ).first()
+    if in_use is not None:
+        return await create_scenario(session, definition=definition, created_by=scenario.created_by)
     scenario.title = definition.title
     scenario.description = definition.description
     scenario.tags = definition.tags or None
