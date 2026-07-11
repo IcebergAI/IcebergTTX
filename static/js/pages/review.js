@@ -24,6 +24,10 @@ document.addEventListener('alpine:init', () => {
     exercise: null,
     events: [],
     userMap: {},
+    scenarioDebrief: '',
+    debriefNotes: '',
+    debriefSaving: false,
+    debriefSaved: false,
 
     async init() {
       await this.load();
@@ -31,11 +35,11 @@ document.addEventListener('alpine:init', () => {
 
     async load() {
       this.loading = true;
-      const [er, mr, ur, tr] = await Promise.all([
+      const [er, ur, tr, dr] = await Promise.all([
         apiFetch(`/exercises/${exerciseId}`),
-        apiFetch(`/exercises/${exerciseId}/members`),
         apiFetch('/users'),
         apiFetch(`/exercises/${exerciseId}/timeline`),
+        apiFetch(`/exercises/${exerciseId}/debrief`),
       ]);
       if (er && er.ok) this.exercise = await er.json();
       // /users is facilitator-visible; build id → display name for attribution.
@@ -43,10 +47,32 @@ document.addEventListener('alpine:init', () => {
         const users = await ur.json();
         this.userMap = Object.fromEntries(users.map(u => [u.id, u.display_name || u.email]));
       }
-      if (mr && mr.ok) { /* members loaded for parity; names come from userMap */ }
       if (tr && tr.ok) this.events = await tr.json();
       else this.error = 'Could not load the timeline.';
+      if (dr && dr.ok) {
+        const d = await dr.json();
+        this.scenarioDebrief = d.scenario_debrief_notes || '';
+        this.debriefNotes = d.debrief_notes || '';
+      }
       this.loading = false;
+    },
+
+    get hasScenarioDebrief() { return !!this.scenarioDebrief; },
+
+    async saveDebrief() {
+      this.debriefSaving = true;
+      this.debriefSaved = false;
+      const r = await apiFetch(`/exercises/${exerciseId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ debrief_notes: this.debriefNotes }),
+      });
+      this.debriefSaving = false;
+      if (r && r.ok) {
+        this.debriefSaved = true;
+        setTimeout(() => { this.debriefSaved = false; }, 2500);
+      } else {
+        this.error = 'Could not save debrief notes.';
+      }
     },
 
     // Shell getters (CSP: no `?.` in directives).

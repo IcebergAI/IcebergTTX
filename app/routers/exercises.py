@@ -16,7 +16,7 @@ from app.models.inject_comment import InjectComment
 from app.models.response import Response
 from app.models.scenario import Scenario
 from app.models.user import User, UserRole
-from app.schemas.api import ExercisePublic, MemberPublic, TimelineEvent
+from app.schemas.api import DebriefNotes, ExercisePublic, MemberPublic, TimelineEvent
 from app.services import audit_service
 from app.services.access_control import (
     is_actual_facilitator,
@@ -53,6 +53,7 @@ class CreateExerciseRequest(BaseModel):
 class UpdateExerciseRequest(BaseModel):
     title: str | None = None
     llm_enabled: bool | None = None
+    debrief_notes: str | None = None  # #112 — owner-only, editable in any live state
 
 
 class EnrolMemberRequest(BaseModel):
@@ -338,8 +339,15 @@ async def _build_export(session: AsyncSession, exercise_id: int, current_user: U
     members = (
         await session.exec(select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id))
     ).all()
+    definition = await get_scenario_definition(session, ex.scenario_id)
     return {
         "exercise": _exercise_out(ex),
+        # Debrief notes (#112) — owner-only export path, so safe to include here even
+        # though they're kept out of the participant-visible ExercisePublic.
+        "debrief": {
+            "scenario_debrief_notes": definition.debrief_notes if definition else None,
+            "debrief_notes": ex.debrief_notes,
+        },
         "members": [_member_out(m) for m in members],
         "injects": [_export_inject_row(i) for i in injects],
         "responses": [_export_response_row(r) for r in responses],
@@ -369,6 +377,19 @@ async def exercise_timeline(exercise_id: int, current_user: FacilitatorDep, sess
     """Merged, chronological event feed for the exercise (facilitator-owner only, #111)."""
     await require_exercise_owner(session, exercise_id, current_user)
     return await build_timeline(session, exercise_id)
+
+
+@router.get("/{exercise_id}/debrief", response_model=DebriefNotes)
+async def get_debrief(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    """Owner-only debrief notes (#112): the scenario author's read-only talking points
+    plus the editable exercise-level notes. Never exposed to participants/observers."""
+    ex = await require_exercise_owner(session, exercise_id, current_user)
+    definition = await get_scenario_definition(session, ex.scenario_id)
+    return DebriefNotes(
+        exercise_id=exercise_id,
+        scenario_debrief_notes=definition.debrief_notes if definition else None,
+        debrief_notes=ex.debrief_notes,
+    )
 
 
 @router.get("/{exercise_id}/export.csv")

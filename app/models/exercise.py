@@ -37,6 +37,9 @@ class Exercise(SQLModel, table=True):
     state: ExerciseState = Field(default=ExerciseState.draft)
     current_node_id: str | None = None  # tracks active inject in the scenario tree
     llm_enabled: bool = Field(default=False)
+    # Facilitator's live/after-action observations (#112) — the raw material of the
+    # after-action report. Owner-only; never exposed to participants/observers.
+    debrief_notes: str | None = None
     started_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     ended_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     created_by: int = Field(foreign_key="user.id")

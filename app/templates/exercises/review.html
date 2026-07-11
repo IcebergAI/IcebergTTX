@@ -28,6 +28,35 @@
     </div>
   </template>
 
+  <!-- Debrief notes -->
+  <div x-show="!loading" x-cloak class="mt-6 grid gap-4 md:grid-cols-2">
+    <!-- Scenario author's prompts (read-only) -->
+    <div class="surface rounded-lg p-4">
+      <div class="smallcaps text-muted mb-2">Scenario debrief prompts</div>
+      <template x-if="hasScenarioDebrief">
+        <p class="text-[13.5px] whitespace-pre-wrap text-ink-soft" x-text="scenarioDebrief"></p>
+      </template>
+      <template x-if="!hasScenarioDebrief">
+        <p class="text-[13px] text-faint">The scenario author didn't provide debrief notes.</p>
+      </template>
+    </div>
+    <!-- Facilitator's observations (editable) -->
+    <div class="surface rounded-lg p-4">
+      <div class="flex items-center justify-between mb-2">
+        <div class="smallcaps text-muted">Facilitator debrief notes</div>
+        <span x-show="debriefSaved" x-cloak class="pill mono bg-st-active">Saved</span>
+      </div>
+      <textarea x-model="debriefNotes" rows="6"
+                placeholder="What did you observe? Decisions, gaps, follow-up actions…"
+                class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"></textarea>
+      <div class="mt-2 flex justify-end">
+        <button @click="saveDebrief()" :disabled="debriefSaving"
+                class="btn btn-primary h-8 px-3 text-[13px]"
+                x-text="debriefSaving ? 'Saving…' : 'Save notes'"></button>
+      </div>
+    </div>
+  </div>
+
   <!-- Timeline -->
   <div x-show="!loading && events.length" class="mt-6">
     <div class="section-title mb-4">Timeline</div>
