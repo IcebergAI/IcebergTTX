@@ -25,7 +25,7 @@ Closes #
 - [ ] `ruff check .` and `ruff format --check .` pass
 - [ ] `pytest` passes locally (Docker running for testcontainers)
 - [ ] Added or updated tests for the change
-- [ ] Rebuilt Tailwind CSS if templates/CSS/JS changed (`static/css/output.css` committed)
+- [ ] Verified Tailwind compilation if templates/CSS/JS changed (`output.css` is generated and ignored)
 - [ ] Added an Alembic migration if the DB schema changed
 - [ ] Updated docs (README / CLAUDE.md / PLAN.md) as needed
 

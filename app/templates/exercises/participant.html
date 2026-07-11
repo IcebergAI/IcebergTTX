@@ -112,7 +112,7 @@
                 <div class="mt-5 rounded-md p-4 ring-rule paper-soft">
 
                   <!-- Branch options -->
-                  <template x-if="inj._options && inj._options.length">
+                  <template x-if="hasOptions(inj)">
                     <div class="mb-4">
                       <div class="smallcaps text-muted mb-2">Decision</div>
                       <div class="space-y-1.5">
@@ -129,13 +129,22 @@
                     </div>
                   </template>
 
-                  <div class="smallcaps text-muted mb-1.5"
-                       x-text="inj._options && inj._options.length ? 'Reasoning' : 'Response'"></div>
-                  <textarea :id="'resp_' + inj.id" x-model="freeText[inj.id]"
-                            placeholder="What will your team do next?"
-                            rows="4"
-                            :disabled="exercise.state === 'paused'"
-                            class="w-full rounded-md ring-rule px-3 py-2 text-[13.5px] resize-none bg-surface disabled:opacity-50"></textarea>
+                  <template x-if="requiresFreeText(inj)">
+                    <div>
+                      <div class="smallcaps text-muted mb-1.5"
+                           x-text="hasOptions(inj) ? 'Reasoning' : 'Response'"></div>
+                      <textarea :id="'resp_' + inj.id" x-model="freeText[inj.id]"
+                                placeholder="What will your team do next?"
+                                rows="4"
+                                :disabled="exercise.state === 'paused'"
+                                class="w-full rounded-md ring-rule px-3 py-2 text-[13.5px] resize-none bg-surface disabled:opacity-50"></textarea>
+                    </div>
+                  </template>
+
+                  <p x-show="hasOptions(inj) && !requiresFreeText(inj)"
+                     class="text-[12.5px] text-muted">
+                    Choose one decision. No written response is required.
+                  </p>
 
                   <div class="flex items-center gap-3 mt-3">
                     <button @click="submitResponse(inj)"
@@ -144,7 +153,11 @@
                       <span x-text="submitting[inj.id] ? 'Submitting…' : 'Submit response'"></span>
                     </button>
                   </div>
+                  <p x-show="responseValidationMessage(inj) && !responseErrors[inj.id]"
+                     class="mt-2 text-[12.5px] text-muted"
+                     x-text="responseValidationMessage(inj)"></p>
                   <p x-show="responseErrors[inj.id]"
+                     aria-live="polite"
                      class="mt-2 text-[12.5px] text-red-400"
                      x-text="responseErrors[inj.id]"></p>
                 </div>

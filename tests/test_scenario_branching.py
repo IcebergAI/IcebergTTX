@@ -112,9 +112,11 @@ async def test_get_inject_node_not_found(sample_definition: ScenarioDefinition):
 
 # ── service: get_next_inject_ids ──────────────────────────────────────────────
 
-async def test_get_next_inject_ids(sample_definition: ScenarioDefinition):
+async def test_get_next_inject_ids_requires_choice_for_branch(
+    sample_definition: ScenarioDefinition,
+):
     nexts = get_next_inject_ids(sample_definition, "inject_01")
-    assert "inject_02" in nexts
+    assert nexts == []
 
 
 async def test_get_next_inject_ids_leaf(sample_definition: ScenarioDefinition):
@@ -175,7 +177,7 @@ async def test_multi_level_branch():
 
     assert resolve_branch(defn, "a", "go_b") == "b"
     assert resolve_branch(defn, "a", "go_c") == "c"
-    assert get_next_inject_ids(defn, "a") == ["b", "c"]
+    assert get_next_inject_ids(defn, "a") == []
 
 
 # ── export_definition memoisation (#22) ───────────────────────────────────────

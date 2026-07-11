@@ -6,12 +6,61 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.inject import Inject, InjectState
 from app.models.response import Response
 from app.schemas.api import ResponsePublic
+from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.access_control import inject_matches_group
 from app.services.scenario_service import (
     definition_for_exercise,
+    get_inject_node,
     get_next_inject_ids,
     resolve_branch,
 )
+
+
+def response_validation_error(
+    node: InjectNode | None,
+    *,
+    content: str,
+    selected_option: str | None,
+) -> str | None:
+    """Return a field-specific error when a response does not satisfy its inject.
+
+    Option-bearing injects always require an exact option ID from their scenario
+    node. ``free_text_response`` controls whether those injects additionally
+    require prose; injects without options always remain free-text responses.
+    """
+    option_ids = {option.id for option in node.options} if node else set()
+
+    if option_ids:
+        if not selected_option:
+            return "selected_option is required for this inject"
+        if selected_option not in option_ids:
+            return "selected_option is not valid for this inject"
+    elif selected_option is not None:
+        return "selected_option is not valid for this inject"
+
+    content_required = node is None or not option_ids or node.free_text_response
+    if content_required and not content.strip():
+        return "content is required for this inject"
+    return None
+
+
+def response_next_inject_ids(
+    definition: ScenarioDefinition,
+    scenario_node_id: str,
+    selected_option: str | None,
+) -> list[str]:
+    """Resolve one selected branch, or the successor of a non-branching node."""
+    node = get_inject_node(definition, scenario_node_id)
+    if node is None:
+        return []
+    if node.options:
+        if not selected_option:
+            return []
+        next_id = resolve_branch(definition, scenario_node_id, selected_option)
+        return [next_id] if next_id else []
+    if selected_option is not None:
+        return []
+    return get_next_inject_ids(definition, scenario_node_id)
 
 
 async def submit_response(
@@ -59,11 +108,7 @@ async def _compute_next_inject_ids(
     if not inject or not inject.scenario_node_id:
         return []
 
-    if selected_option:
-        next_id = resolve_branch(definition, inject.scenario_node_id, selected_option)
-        return [next_id] if next_id else []
-
-    return get_next_inject_ids(definition, inject.scenario_node_id)
+    return response_next_inject_ids(definition, inject.scenario_node_id, selected_option)
 
 
 async def response_next_inject_suggestions(session: AsyncSession, response: Response) -> list[dict]:
@@ -123,6 +168,7 @@ async def broadcast_response_submitted(
 
 def response_payload(r: Response, next_injects: list[dict] | None = None) -> dict:
     """Canonical response serialization (HTTP + WS) via the ResponsePublic schema (#31)."""
+    assert r.id is not None
     model = ResponsePublic(
         id=r.id,
         inject_id=r.inject_id,

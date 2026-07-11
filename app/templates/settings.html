@@ -24,16 +24,21 @@
       <div class="section-title mb-4">
         <h2 class="smallcaps text-muted">Profile</h2>
       </div>
-      <div class="grid gap-3" style="grid-template-columns: minmax(180px, 1fr) 140px;">
-        <input type="text" x-model="displayName"
-               class="ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
-               placeholder="Display name" />
+      <div class="grid gap-3" style="grid-template-columns: minmax(180px, 1fr) 140px; align-items: end;">
+        <div>
+          <label for="settings-display-name" class="block smallcaps text-muted mb-1">Display name</label>
+          <input id="settings-display-name" type="text" x-model="displayName"
+                 aria-describedby="settings-profile-message"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
+                 placeholder="Display name" />
+        </div>
         <button @click="saveProfile()" :disabled="savingProfile"
                 class="btn btn-primary h-9 px-4 text-[13px] justify-center disabled:opacity-50">
           <span x-text="savingProfile ? 'Saving…' : 'Save name'"></span>
         </button>
       </div>
-      <p class="text-[12.5px] text-muted mt-2" x-text="profileMessage"></p>
+      <p id="settings-profile-message" class="text-[12.5px] text-muted mt-2"
+         role="status" aria-live="polite" aria-atomic="true" x-text="profileMessage"></p>
     </section>
 
     <section class="surface p-5">
@@ -41,19 +46,31 @@
         <h2 class="smallcaps text-muted">Password</h2>
       </div>
       <div class="grid gap-3 max-w-md">
-        <input type="password" x-model="newPassword" autocomplete="new-password"
-               class="ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
-               placeholder="New password (min 12 characters)" />
-        <input type="password" x-model="confirmPassword" autocomplete="new-password"
-               class="ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
-               placeholder="Confirm new password" />
+        <div>
+          <label for="settings-new-password" class="block smallcaps text-muted mb-1">New password</label>
+          <input id="settings-new-password" type="password" x-model="newPassword"
+                 autocomplete="new-password"
+                 aria-describedby="settings-password-requirements settings-password-message"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
+                 placeholder="At least 12 characters" />
+        </div>
+        <div>
+          <label for="settings-confirm-password" class="block smallcaps text-muted mb-1">Confirm new password</label>
+          <input id="settings-confirm-password" type="password" x-model="confirmPassword"
+                 autocomplete="new-password" aria-describedby="settings-password-message"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
+                 placeholder="Enter the new password again" />
+        </div>
         <button @click="changePassword()" :disabled="savingPassword"
                 class="btn btn-primary h-9 px-4 text-[13px] justify-center disabled:opacity-50">
           <span x-text="savingPassword ? 'Saving…' : 'Change password'"></span>
         </button>
       </div>
-      <p class="text-[12.5px] text-muted mt-2" x-text="passwordMessage"></p>
-      <p class="text-[12.5px] text-muted mt-1">Changing your password signs out all other sessions.</p>
+      <p id="settings-password-message" class="text-[12.5px] text-muted mt-2"
+         role="status" aria-live="polite" aria-atomic="true" x-text="passwordMessage"></p>
+      <p id="settings-password-requirements" class="text-[12.5px] text-muted mt-1">
+        Use at least 12 characters. Changing your password signs out all other sessions.
+      </p>
     </section>
 
     <section class="surface p-5">
@@ -84,15 +101,16 @@
         </template>
       </div>
       <div class="mt-4 max-w-xs">
-        <label class="block smallcaps text-muted mb-1">Preview team</label>
-        <select x-model="viewTeam" @change="setPreviewTeam()"
+        <label for="settings-preview-team" class="block smallcaps text-muted mb-1">Preview team</label>
+        <select id="settings-preview-team" x-model="viewTeam" @change="setPreviewTeam()"
+                aria-describedby="settings-role-preview-help"
                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface">
           <template x-for="team in previewTeamOptions" :key="team.id">
             <option :value="team.id" x-text="teamLabel(team)"></option>
           </template>
         </select>
       </div>
-      <p class="text-[12.5px] text-muted mt-3">
+      <p id="settings-role-preview-help" class="text-[12.5px] text-muted mt-3">
         Preview mode changes normal navigation and API access. It does not change your account role.
       </p>
     </section>
@@ -122,7 +140,8 @@
           </div>
         </template>
       </div>
-      <p class="text-[12.5px] text-muted mt-3" x-text="sampleMessage"></p>
+      <p class="text-[12.5px] text-muted mt-3" role="status" aria-live="polite"
+         aria-atomic="true" x-text="sampleMessage"></p>
     </section>
 
     <!-- Version + beta feedback (issue #118). Version is a server-rendered

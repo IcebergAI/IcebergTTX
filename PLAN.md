@@ -331,6 +331,7 @@ Stored as a JSON blob in `Scenario.definition`. Validated against `ScenarioDefin
 **Design choices:**
 - JSON stored as blob — always read/written as a unit; normalising injects into rows would complicate the branching graph
 - Branching is "pull not push" — facilitator manually releases the next inject after seeing which branch was triggered
+- Option-bearing responses require an exact option from their scenario node; `free_text_response` controls whether reasoning is also required, while no-option injects always require content
 - `triggers_communications` delays use `asyncio.create_task(asyncio.sleep(...))` — fine for single-process SQLite; would use a task queue in a multi-process deployment
 
 ---

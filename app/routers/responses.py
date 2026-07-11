@@ -25,6 +25,7 @@ from app.services.response_service import (
     broadcast_response_submitted,
     response_next_inject_suggestions,
     response_payload,
+    response_validation_error,
     submit_response,
 )
 from app.services.scenario_service import get_inject_node, get_scenario_definition
@@ -38,7 +39,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 class SubmitResponseRequest(BaseModel):
     inject_id: int
-    content: str
+    content: str = ""
     selected_option: str | None = None
 
 
@@ -105,18 +106,16 @@ async def submit(
     if definition and inject.scenario_node_id is not None:
         node = get_inject_node(definition, inject.scenario_node_id)
 
-    if node and (node.free_text_response or not node.options) and not body.content.strip():
+    validation_error = response_validation_error(
+        node,
+        content=body.content,
+        selected_option=body.selected_option,
+    )
+    if validation_error:
         raise HTTPException(
-            status_code=422,
-            detail="content is required for this inject",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=validation_error,
         )
-
-    if body.selected_option is not None:
-        if not node or body.selected_option not in {option.id for option in node.options}:
-            raise HTTPException(
-                status_code=422,
-                detail="selected_option is not valid for this inject",
-            )
 
     group_id = await exercise_group_for_user(session, exercise_id, current_user)
 

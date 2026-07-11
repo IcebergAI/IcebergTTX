@@ -140,7 +140,7 @@ committed `uv.lock`:
 ```bash
 uv sync --extra dev             # create .venv from the lockfile + dev tools
 cp .env.example .env            # set SECRET_KEY
-uv run uvicorn app.main:app --reload   # applies migrations to head on startup
+uv run iceberg-ttx-dev            # Tailwind build/watch + Uvicorn reload
 ```
 
 Run the test suite with `uv run pytest` (a real Postgres is spun up per worker via
