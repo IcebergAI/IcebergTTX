@@ -16,6 +16,7 @@ import logging
 import re
 from contextvars import ContextVar
 from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from app.config import settings
@@ -24,7 +25,14 @@ from app.services.background import spawn
 audit_logger = logging.getLogger("iceberg_ttx.audit")
 
 APP_NAME = "iceberg-ttx"
-APP_VERSION = "0.1.0"
+# Single source of truth: derive the version from the installed package metadata
+# (pyproject.toml `version`), so audit events always match the built/released
+# artefact and there is no second literal to drift (#73). Falls back when the
+# package isn't installed (e.g. running straight from a source checkout).
+try:
+    APP_VERSION = version(APP_NAME)
+except PackageNotFoundError:  # pragma: no cover - always installed in image/dev
+    APP_VERSION = "0.0.0+unknown"
 
 # Per-request "where" metadata, populated by AuditContextMiddleware.
 _request_ctx: ContextVar[dict[str, Any]] = ContextVar("audit_request_ctx", default={})
