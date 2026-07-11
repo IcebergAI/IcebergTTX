@@ -25,19 +25,15 @@ async def exercise_ws(
     ws: WebSocket,
     exercise_id: int,
     session: SessionDep,
-    token: Annotated[str | None, Query()] = None,
     view_role: Annotated[str | None, Query()] = None,
     view_team: Annotated[str | None, Query()] = None,
 ):
     # Auth source (#68): browsers can't set headers on a WS upgrade, so they rely
     # on the httpOnly `access_token` cookie the browser already sends — keeping the
-    # JWT out of the URL (and out of proxy access logs). An explicit `?token=` is a
-    # fallback for non-browser clients. The cookie path is ambient, so it gets a
-    # CSWSH Origin check (mirroring CSRFOriginMiddleware); the explicit-token path,
-    # like a Bearer header, is exempt.
-    if token:
-        auth_token = token
-    elif cookie_token := ws.cookies.get("access_token"):
+    # JWTs are never accepted in URLs: query strings are routinely retained by
+    # reverse-proxy access logs. Browser upgrades use the httpOnly cookie and the
+    # ambient-cookie origin check mirrors normal HTTP CSRF protection.
+    if cookie_token := ws.cookies.get("access_token"):
         if not origin_allowed(ws.headers.get("origin"), ws.headers.get("host")):
             await ws.close(code=4003)
             return
