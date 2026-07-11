@@ -85,7 +85,10 @@ spec:
               command: ["/bin/sh", "-c"]
               args:
                 - |
-                  set -euo pipefail
+                  # postgres:17 uses a POSIX /bin/sh, which does not support
+                  # bash's `pipefail` option. This script has no pipelines, so
+                  # `-eu` provides the intended fail-fast behaviour.
+                  set -eu
                   ts="$(date -u +%Y%m%dT%H%M%SZ)"
                   out="/backups/iceberg_ttx-${ts}.dump"
                   echo "Dumping ${PGDATABASE} to ${out}"
