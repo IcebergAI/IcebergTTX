@@ -120,6 +120,7 @@ def _member_out(m: ExerciseMember) -> dict:
 
 @router.get("", response_model=list[ExercisePublic])
 async def list_exercises(current_user: CurrentUserDep, session: SessionDep):
+    assert current_user.id is not None
     q = select(Exercise)
     if is_admin(current_user):
         pass  # admins see every exercise
@@ -129,7 +130,9 @@ async def list_exercises(current_user: CurrentUserDep, session: SessionDep):
         member_ids = select(ExerciseMember.exercise_id).where(
             ExerciseMember.user_id == current_user.id
         )
-        q = q.where(or_(Exercise.created_by == current_user.id, col(Exercise.id).in_(member_ids)))
+        q = q.where(
+            or_(col(Exercise.created_by) == current_user.id, col(Exercise.id).in_(member_ids))
+        )
     else:
         q = q.join(ExerciseMember).where(ExerciseMember.user_id == current_user.id)
     # Deterministic order (#96). Without it Postgres returns heap order, which shifts
