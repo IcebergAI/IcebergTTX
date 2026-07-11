@@ -84,6 +84,18 @@ async def test_authenticated_user_can_load_communications_hub(
     assert "No active exercise selected" in r.text
 
 
+async def test_participant_response_form_explains_required_fields(
+    client: AsyncClient, participant_token: str
+):
+    client.cookies.set("access_token", participant_token)
+    r = await client.get("/exercises/1/participate")
+    assert r.status_code == 200
+    assert 'x-if="hasOptions(inj)"' in r.text
+    assert 'x-if="requiresFreeText(inj)"' in r.text
+    assert "No written response is required." in r.text
+    assert 'x-text="responseValidationMessage(inj)"' in r.text
+
+
 async def test_facilitator_preview_participant_can_load_scenarios_for_testing(
     client: AsyncClient, facilitator_token: str
 ):

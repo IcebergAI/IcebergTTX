@@ -189,13 +189,34 @@ document.addEventListener('alpine:init', () => {
       return 'Later brief';
     },
 
+    hasOptions(inj) {
+      return !!(inj._options && inj._options.length);
+    },
+
+    hasValidSelectedOption(inj) {
+      const selected = this.selectedOption[inj.id];
+      return this.hasOptions(inj) && inj._options.some(opt => opt.id === selected);
+    },
+
     requiresFreeText(inj) {
-      return inj.free_text_response !== false || !(inj._options && inj._options.length);
+      return inj.free_text_response !== false || !this.hasOptions(inj);
+    },
+
+    responseValidationMessage(inj) {
+      if (this.hasOptions(inj) && !this.hasValidSelectedOption(inj)) {
+        return 'Select a decision to continue.';
+      }
+      if (this.requiresFreeText(inj) && !(this.freeText[inj.id] || '').trim()) {
+        return this.hasOptions(inj)
+          ? 'Explain the reasoning for your decision.'
+          : 'Enter a response to continue.';
+      }
+      return '';
     },
 
     canSubmit(inj) {
-      if (this.exercise.state === 'paused' || this.submitting[inj.id]) return false;
-      return !this.requiresFreeText(inj) || !!(this.freeText[inj.id] || '').trim();
+      if (this.exercise.state !== 'active' || this.submitting[inj.id]) return false;
+      return !this.responseValidationMessage(inj);
     },
 
     canComment(inj) {
@@ -240,7 +261,11 @@ document.addEventListener('alpine:init', () => {
 
     async submitResponse(inj) {
       const content = (this.freeText[inj.id] || '').trim();
-      if (!content) return;
+      const validationMessage = this.responseValidationMessage(inj);
+      if (validationMessage) {
+        this.responseErrors = { ...this.responseErrors, [inj.id]: validationMessage };
+        return;
+      }
       this.responseErrors = { ...this.responseErrors, [inj.id]: '' };
       this.submitting = { ...this.submitting, [inj.id]: true };
       const r = await apiFetch(`/exercises/${exerciseId}/responses`, {
