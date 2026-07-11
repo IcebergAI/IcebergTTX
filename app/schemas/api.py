@@ -67,6 +67,16 @@ class ExercisePublic(BaseModel):
         )
 
 
+class DebriefNotes(BaseModel):
+    """Owner-only debrief payload (#112): the scenario author's read-only talking
+    points alongside the editable exercise-level notes. Never returned by the
+    participant-visible exercise routes."""
+
+    exercise_id: int
+    scenario_debrief_notes: str | None = None  # read-only, from the scenario definition
+    debrief_notes: str | None = None  # editable, facilitator's observations
+
+
 class MemberPublic(BaseModel):
     id: int
     exercise_id: int
