@@ -16,7 +16,7 @@ from app.models.inject_comment import InjectComment
 from app.models.response import Response
 from app.models.scenario import Scenario
 from app.models.user import User, UserRole
-from app.schemas.api import ExercisePublic, MemberPublic
+from app.schemas.api import ExercisePublic, MemberPublic, TimelineEvent
 from app.services import audit_service
 from app.services.access_control import (
     is_actual_facilitator,
@@ -32,6 +32,7 @@ from app.services.exercise_service import (
     update_member_group,
 )
 from app.services.scenario_service import get_scenario_definition
+from app.services.timeline_service import build_timeline
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
 
@@ -361,6 +362,13 @@ async def export_json(exercise_id: int, current_user: FacilitatorDep, session: S
         content=data,
         headers={"Content-Disposition": f'attachment; filename="exercise_{exercise_id}.json"'},
     )
+
+
+@router.get("/{exercise_id}/timeline", response_model=list[TimelineEvent])
+async def exercise_timeline(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    """Merged, chronological event feed for the exercise (facilitator-owner only, #111)."""
+    await require_exercise_owner(session, exercise_id, current_user)
+    return await build_timeline(session, exercise_id)
 
 
 @router.get("/{exercise_id}/export.csv")

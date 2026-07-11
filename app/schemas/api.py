@@ -172,6 +172,46 @@ class AssessmentPublic(BaseModel):
     assessed_at: str
 
 
+class TimelineEvent(BaseModel):
+    """One event in the merged exercise timeline (#111).
+
+    A flat model where each ``kind`` populates a different subset of the optional
+    payload fields (same "one model, optional fields" convention as the *Public
+    schemas above). ``at`` is an ISO timestamp string.
+    """
+
+    kind: str  # inject_released | response | communication | comment | state_change
+    at: str
+    # inject_released
+    inject_id: int | None = None
+    scenario_node_id: str | None = None
+    title: str | None = None
+    target_teams: list[str] | None = None
+    released_by: int | None = None
+    # response
+    response_id: int | None = None
+    selected_option: str | None = None
+    decision_quality: str | None = None
+    # communication
+    communication_id: int | None = None
+    direction: CommDirection | None = None
+    external_entity: str | None = None
+    subject: str | None = None
+    sender_id: int | None = None
+    sender_team: str | None = None
+    visible_to_teams: list[str] | None = None
+    triggered_by_inject_id: int | None = None
+    # comment
+    comment_id: int | None = None
+    # response + comment
+    user_id: int | None = None
+    group_id: str | None = None
+    content: str | None = None
+    # state_change
+    action: str | None = None
+    actor_id: int | None = None
+
+
 class SuggestedInjectPublic(BaseModel):
     id: int
     exercise_id: int

@@ -189,6 +189,13 @@ def exercise_facilitate(exercise_id: int, request: Request, user: FacilitatorUse
     )
 
 
+@router.get("/exercises/{exercise_id}/review", response_class=HTMLResponse)
+def exercise_review(exercise_id: int, request: Request, user: FacilitatorUser):
+    return templates.TemplateResponse(
+        request, "exercises/review.html", {"user": user, "exercise_id": exercise_id}
+    )
+
+
 @router.get("/exercises/{exercise_id}/participate", response_class=HTMLResponse)
 def exercise_participate(exercise_id: int, request: Request, user: LoggedInUser):
     return templates.TemplateResponse(
