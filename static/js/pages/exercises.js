@@ -98,8 +98,25 @@ document.addEventListener('alpine:init', () => {
     pingInterval: null,
     reconnectTimeout: null,
     destroyed: false,
+    _nowMs: 0,              // ticked every 1s so the pause-aware clock re-renders (#116)
+    clockInterval: null,
 
     get isObserver() { return this.role === 'observer'; },
+    // Pause-aware exercise clock (#116) — same computation as the facilitator console.
+    get elapsedStr() {
+      const secs = this.effectiveElapsedSeconds();
+      return secs == null ? '—' : this.fmtClock(secs);
+    },
+    effectiveElapsedSeconds() {
+      const ex = this.exercise;
+      if (!ex || !ex.started_at) return null;
+      const start = new Date(ex.started_at).getTime();
+      let ref;
+      if (ex.state === 'paused' && ex.paused_at) ref = new Date(ex.paused_at).getTime();
+      else if (ex.state === 'completed' && ex.ended_at) ref = new Date(ex.ended_at).getTime();
+      else ref = this._nowMs || Date.now();
+      return Math.max(0, (ref - start) / 1000 - (ex.accumulated_pause_seconds || 0));
+    },
     get currentBriefId() {
       const current = this.injects.find(inj => inj.state === 'released' && !this.submitted[inj.id]);
       return current ? current.id : null;
@@ -127,6 +144,8 @@ document.addEventListener('alpine:init', () => {
         }
       }
       this.loading = false;
+      this._nowMs = Date.now();
+      this.clockInterval = setInterval(() => { this._nowMs = Date.now(); }, 1000);
       this.connectWs();
     },
 
@@ -214,7 +233,9 @@ document.addEventListener('alpine:init', () => {
             await this._enrichAndAdd(msg.payload);
           }
           if (msg.type === 'exercise_state_change') {
-            this.exercise = { ...this.exercise, state: msg.payload.state };
+            // Merge the full payload so the clock pauses/resumes in step with the
+            // facilitator (needs paused_at/accumulated_pause_seconds, not just state).
+            this.exercise = { ...this.exercise, ...msg.payload };
           }
           if (msg.type === 'inject_comment_created') {
             this.upsertComment(msg.payload);
@@ -225,8 +246,10 @@ document.addEventListener('alpine:init', () => {
 
     destroy() {
       this.destroyed = true;
+      if (this.clockInterval) clearInterval(this.clockInterval);
       if (this.pingInterval) clearInterval(this.pingInterval);
       if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+      this.clockInterval = null;
       this.pingInterval = null;
       this.reconnectTimeout = null;
       if (this.ws) {
@@ -330,11 +353,17 @@ document.addEventListener('alpine:init', () => {
     pingInterval: null,
     reconnectTimeout: null,
     destroyed: false,
-    elapsedStr: '—',
-    elapsedInterval: null,
+    _nowMs: 0,              // ticked every 1s so the pause-aware clock/countdowns re-render (#116)
+    clockInterval: null,
+    scheduleDraft: {},      // per-inject offset-minutes input model
 
     // Shell getters — the CSP build cannot evaluate `?.` in directives.
     get exState() { return this.exercise ? this.exercise.state : ''; },
+    // Pause-aware exercise clock (#116) — ticks client-side from server timestamps.
+    get elapsedStr() {
+      const secs = this.effectiveElapsedSeconds();
+      return secs == null ? '—' : this.fmtClock(secs);
+    },
     get exTitle() { return (this.exercise && this.exercise.title) || '…'; },
     get exId() { return this.exercise ? 'EX-' + this.padId(this.exercise.id, 3) : ''; },
     get commsHref() { return this.exercise ? '/exercises/' + this.exercise.id + '/communications' : '#'; },
@@ -452,6 +481,64 @@ document.addEventListener('alpine:init', () => {
       this.$nextTick(() => { el.value = value || ''; });
     },
 
+    // Pause-aware effective elapsed seconds (#116): wall time since start minus all
+    // completed pause spans; frozen at paused_at/ended_at when not running.
+    effectiveElapsedSeconds() {
+      const ex = this.exercise;
+      if (!ex || !ex.started_at) return null;
+      const start = new Date(ex.started_at).getTime();
+      let ref;
+      if (ex.state === 'paused' && ex.paused_at) ref = new Date(ex.paused_at).getTime();
+      else if (ex.state === 'completed' && ex.ended_at) ref = new Date(ex.ended_at).getTime();
+      else ref = this._nowMs || Date.now();
+      return Math.max(0, (ref - start) / 1000 - (ex.accumulated_pause_seconds || 0));
+    },
+
+    isScheduled(inj) {
+      return inj.state === 'pending' && inj.release_offset_minutes != null;
+    },
+
+    // Seconds until a pending scheduled inject auto-releases (negative once due).
+    countdownSeconds(inj) {
+      if (inj.release_offset_minutes == null) return null;
+      const elapsed = this.effectiveElapsedSeconds();
+      if (elapsed == null) return null;
+      return inj.release_offset_minutes * 60 - elapsed;
+    },
+
+    countdownLabel(inj) {
+      const rem = this.countdownSeconds(inj);
+      return rem == null ? '' : this.fmtCountdown(rem);
+    },
+
+    // Placeholder for the offset input — shows the current offset when one is set.
+    schedulePlaceholder(inj) {
+      return inj.release_offset_minutes == null ? 'min' : inj.release_offset_minutes + 'm';
+    },
+
+    async saveSchedule(inj) {
+      const raw = this.scheduleDraft[inj.id];
+      const minutes = (raw === '' || raw == null) ? null : parseInt(raw, 10);
+      await this._patchSchedule(inj, (minutes != null && !isNaN(minutes) && minutes >= 0) ? minutes : null);
+    },
+
+    async cancelSchedule(inj) {
+      await this._patchSchedule(inj, null);
+    },
+
+    async _patchSchedule(inj, minutes) {
+      const r = await apiFetch(`/exercises/${exerciseId}/injects/${inj.id}/schedule`, {
+        method: 'PATCH',
+        body: JSON.stringify({ release_offset_minutes: minutes }),
+      });
+      if (r && r.ok) {
+        const updated = await r.json();
+        const idx = this.injects.findIndex(i => i.id === updated.id);
+        if (idx !== -1) this.injects[idx] = { ...this.injects[idx], ...updated };
+        this.scheduleDraft = { ...this.scheduleDraft, [inj.id]: '' };
+      }
+    },
+
     async init() {
       await this.load();
       this.connectWs();
@@ -490,17 +577,15 @@ document.addEventListener('alpine:init', () => {
         }
       }
       this.loading = false;
-      this._startElapsed();
+      this._startClock();
     },
 
-    _startElapsed() {
-      if (this.elapsedInterval) clearInterval(this.elapsedInterval);
-      if (this.exercise?.started_at) {
-        this.elapsedStr = this.fmtElapsed(this.exercise.started_at);
-        this.elapsedInterval = setInterval(() => {
-          if (this.exercise?.started_at) this.elapsedStr = this.fmtElapsed(this.exercise.started_at);
-        }, 10000);
-      }
+    // One 1s tick drives both the pause-aware exercise clock and every scheduled-inject
+    // countdown via `_nowMs` (a reactive dep of the getters). No per-second WS traffic.
+    _startClock() {
+      if (this.clockInterval) clearInterval(this.clockInterval);
+      this._nowMs = Date.now();
+      this.clockInterval = setInterval(() => { this._nowMs = Date.now(); }, 1000);
     },
 
     connectWs() {
@@ -521,11 +606,17 @@ document.addEventListener('alpine:init', () => {
             };
             this.responses.unshift(r);
           }
+          if (msg.type === 'inject_updated') {
+            const idx = this.injects.findIndex(i => i.id === msg.payload.id);
+            if (idx !== -1) this.injects[idx] = { ...this.injects[idx], ...msg.payload };
+          }
           if (msg.type === 'inject_comment_created') {
             this.upsertComment(msg.payload);
           }
           if (msg.type === 'exercise_state_change') {
-            this.exercise = { ...this.exercise, state: msg.payload.state };
+            // Merge the full payload so pause_at/accumulated_pause_seconds keep the clock
+            // correct on other clients, not just `state` (#116).
+            this.exercise = { ...this.exercise, ...msg.payload };
           }
           if (msg.type === 'assessment_ready') {
             this.assessments[msg.payload.response_id] = msg.payload.assessment;
@@ -540,10 +631,10 @@ document.addEventListener('alpine:init', () => {
 
     destroy() {
       this.destroyed = true;
-      if (this.elapsedInterval) clearInterval(this.elapsedInterval);
+      if (this.clockInterval) clearInterval(this.clockInterval);
       if (this.pingInterval) clearInterval(this.pingInterval);
       if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
-      this.elapsedInterval = null;
+      this.clockInterval = null;
       this.pingInterval = null;
       this.reconnectTimeout = null;
       if (this.ws) {
@@ -557,7 +648,7 @@ document.addEventListener('alpine:init', () => {
       const r = await apiFetch(`/exercises/${exerciseId}/${action}`, { method: 'POST' });
       if (r && r.ok) {
         this.exercise = await r.json();
-        this._startElapsed();
+        this._startClock();
         // The rail caches the live set and never re-inits on soft-nav (#96).
         document.dispatchEvent(new CustomEvent('dt:exercises-changed'));
       }
