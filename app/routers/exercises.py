@@ -39,6 +39,7 @@ from app.services.access_control import (
     require_operational_mutability,
 )
 from app.services.background import spawn
+from app.services.csv_export import spreadsheet_safe_row
 from app.services.exercise_service import (
     create_exercise,
     enrol_member,
@@ -622,18 +623,20 @@ async def export_csv(exercise_id: int, current_user: FacilitatorDep, session: Se
     buf = io.StringIO()
     writer = csv.writer(buf)
     cols = ["inject_id", "inject_title", "user_id", "selected_option", "content", "submitted_at"]
-    writer.writerow(cols)
+    writer.writerow(spreadsheet_safe_row(cols))
     inject_map = {i["id"]: i["title"] for i in data["injects"]}
     for r in data["responses"]:
         writer.writerow(
-            [
-                r["inject_id"],
-                inject_map.get(r["inject_id"], ""),
-                r["user_id"],
-                r["selected_option"] or "",
-                r["content"],
-                r["submitted_at"],
-            ]
+            spreadsheet_safe_row(
+                [
+                    r["inject_id"],
+                    inject_map.get(r["inject_id"], ""),
+                    r["user_id"],
+                    r["selected_option"] or "",
+                    r["content"],
+                    r["submitted_at"],
+                ]
+            )
         )
     buf.seek(0)
     return StreamingResponse(
