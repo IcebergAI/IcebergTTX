@@ -143,12 +143,16 @@ async def assess_response(session, response, inject, definition):
         recommended_branch_option_id=output.recommended_branch_option_id,
     )
     session.add(assessment)
-    await session.commit()
-    await session.refresh(assessment)
-
+    await session.flush()
+    assert assessment.id is not None
     response.assessment_id = assessment.id
     session.add(response)
-    await session.commit()
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    await session.refresh(assessment)
 
     return assessment
 
