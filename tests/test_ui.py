@@ -450,6 +450,8 @@ def test_touch_target_geometry_across_core_routes(page: Page):
     exercise_id = _make_exercise(page, scenario_id, title="Touch target exercise")
     _enrol_participant(page, exercise_id)
     api_post(page, f"/exercises/{exercise_id}/start")
+    first_inject = api_get(page, f"/exercises/{exercise_id}/injects").json()[0]
+    api_post(page, f"/exercises/{exercise_id}/injects/{first_inject['id']}/release")
 
     desktop_routes = [
         "/dashboard",
@@ -468,11 +470,23 @@ def test_touch_target_geometry_across_core_routes(page: Page):
         )
 
     # A real phone interaction: changing facilitator panes is the primary live
-    # exercise navigation at 390px, then all visible targets remain 44px.
+    # exercise navigation. Check every specified responsive boundary.
+    for width, minimum in ((320, 44), (390, 44), (768, 40)):
+        page.set_viewport_size({"width": width, "height": 844})
+        page.goto(f"{BASE}/exercises/{exercise_id}/facilitate")
+        page.get_by_test_id("facilitator-tab-responses").click()
+        expect(page.get_by_test_id("facilitator-pane-responses")).to_be_visible()
+        _assert_visible_control_geometry(page, minimum)
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+
+    # The participant response controls are a separate touch-first surface and
+    # must meet the same 44px phone baseline.
     page.set_viewport_size({"width": 390, "height": 844})
-    page.goto(f"{BASE}/exercises/{exercise_id}/facilitate")
-    page.get_by_test_id("facilitator-tab-responses").click()
-    expect(page.get_by_test_id("facilitator-pane-responses")).to_be_visible()
+    login_participant(page)
+    page.goto(f"{BASE}/exercises/{exercise_id}/participate")
+    expect(page.locator("body")).to_contain_text("Initial Alert")
     _assert_visible_control_geometry(page, 44)
     assert page.evaluate(
         "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
