@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from app.config import settings
@@ -100,17 +101,28 @@ def _parse_json(text: str, fallback: dict) -> dict:
         return fallback
 
 
-async def assess_response(session, response, inject, definition):
+async def _assess_response_result(session, response, inject, definition):
+    """Return the assessment plus whether this invocation created it."""
     from app.models.assessment import ResponseAssessment
 
+    response_id = response.id
+    assert response_id is not None
     if response.assessment_id is not None:
         existing = await session.get(ResponseAssessment, response.assessment_id)
         if existing is not None:
-            return existing
+            return existing, False
+
+    existing = (
+        await session.exec(
+            select(ResponseAssessment).where(ResponseAssessment.response_id == response_id)
+        )
+    ).one_or_none()
+    if existing is not None:
+        return existing, False
 
     provider = active_provider()
     if provider is None:
-        return None
+        return None, False
 
     cached, selected_line = _build_context(inject, definition, response)
     user_prompt = (
@@ -141,43 +153,63 @@ async def assess_response(session, response, inject, definition):
         output = output.model_copy(update={"recommended_branch_option_id": None})
 
     assessment = ResponseAssessment(
-        response_id=response.id,
+        response_id=response_id,
         llm_model=provider.llm_model_label,
         assessment_text=output.assessment_text,
         decision_quality=output.decision_quality,
         recommended_branch_option_id=output.recommended_branch_option_id,
     )
     session.add(assessment)
-    await session.flush()
-    assert assessment.id is not None
-    response.assessment_id = assessment.id
-    session.add(response)
     try:
+        await session.flush()
+        assert assessment.id is not None
+        response.assessment_id = assessment.id
+        session.add(response)
         await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        existing = (
+            await session.exec(
+                select(ResponseAssessment).where(
+                    ResponseAssessment.response_id == response_id
+                )
+            )
+        ).one_or_none()
+        if existing is not None:
+            return existing, False
+        raise
     except Exception:
         await session.rollback()
         raise
     await session.refresh(assessment)
 
+    return assessment, True
+
+
+async def assess_response(session, response, inject, definition):
+    assessment, _ = await _assess_response_result(session, response, inject, definition)
     return assessment
 
 
-async def suggest_inject(session, response, inject, exercise, definition):
+async def _suggest_inject_result(session, response, inject, exercise, definition):
+    """Return the suggestion plus whether this invocation created it."""
     from app.models.suggested_inject import SuggestedInject
 
+    response_id = response.id
+    assert response_id is not None
     existing = (
         await session.exec(
             select(SuggestedInject).where(
-                SuggestedInject.triggered_by_response_id == response.id
+                SuggestedInject.triggered_by_response_id == response_id
             )
         )
     ).first()
     if existing is not None:
-        return existing
+        return existing, False
 
     provider = active_provider()
     if provider is None:
-        return None
+        return None, False
 
     cached, selected_line = _build_context(inject, definition, response)
     user_prompt = (
@@ -210,16 +242,39 @@ async def suggest_inject(session, response, inject, exercise, definition):
             target_teams = None
     suggested = SuggestedInject(
         exercise_id=exercise.id,
-        triggered_by_response_id=response.id,
+        triggered_by_response_id=response_id,
         title=output.title,
         content=output.content,
         target_teams=target_teams,
         llm_model=provider.llm_model_label,
     )
     session.add(suggested)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        existing = (
+            await session.exec(
+                select(SuggestedInject).where(
+                    SuggestedInject.triggered_by_response_id == response_id
+                )
+            )
+        ).one_or_none()
+        if existing is not None:
+            return existing, False
+        raise
+    except Exception:
+        await session.rollback()
+        raise
     await session.refresh(suggested)
 
+    return suggested, True
+
+
+async def suggest_inject(session, response, inject, exercise, definition):
+    suggested, _ = await _suggest_inject_result(
+        session, response, inject, exercise, definition
+    )
     return suggested
 
 
@@ -257,34 +312,39 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
 
         definition = export_definition(scenario)
 
-        assessment = await assess_response(session, response, inject, definition)
-
-        await manager.send_to_facilitators(
-            exercise_id,
-            {
-                "type": "assessment_ready",
-                "exercise_id": exercise_id,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "payload": {
-                    "response_id": response_id,
-                    "assessment": _assessment_payload(assessment),
-                },
-            },
+        assessment, assessment_created = await _assess_response_result(
+            session, response, inject, definition
         )
 
-        node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
-        if node and node.free_text_response:
-            suggested = await suggest_inject(session, response, inject, exercise, definition)
-
+        if assessment is not None and assessment_created:
             await manager.send_to_facilitators(
                 exercise_id,
                 {
-                    "type": "inject_suggested",
+                    "type": "assessment_ready",
                     "exercise_id": exercise_id,
                     "timestamp": datetime.now(UTC).isoformat(),
-                    "payload": _suggested_payload(suggested),
+                    "payload": {
+                        "response_id": response_id,
+                        "assessment": _assessment_payload(assessment),
+                    },
                 },
             )
+
+        node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
+        if node and node.free_text_response:
+            suggested, suggested_created = await _suggest_inject_result(
+                session, response, inject, exercise, definition
+            )
+            if suggested is not None and suggested_created:
+                await manager.send_to_facilitators(
+                    exercise_id,
+                    {
+                        "type": "inject_suggested",
+                        "exercise_id": exercise_id,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "payload": _suggested_payload(suggested),
+                    },
+                )
 
 
 def _build_summary_context(report: dict) -> tuple[str, str]:

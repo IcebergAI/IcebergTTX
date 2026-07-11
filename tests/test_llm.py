@@ -93,7 +93,7 @@ async def test_assess_response_stores_assessment(
     from app.models.inject import Inject, InjectState
     from app.models.response import Response
     from app.models.scenario import Scenario
-    from app.services.llm_service import assess_response
+    from app.services.llm_service import _assess_response_result
     from app.services.scenario_service import export_definition
 
     inject = Inject(
@@ -121,12 +121,19 @@ async def test_assess_response_stores_assessment(
     scenario = (await session.get(Scenario, active_exercise.scenario_id))
     definition = export_definition(scenario)
 
-    with patch(
-        "app.services.llm_service.active_provider",
-        return_value=_fake_provider(_assessment_json()),
-    ):
-        assessment = await assess_response(session, response, inject, definition)
+    provider = _fake_provider(_assessment_json())
+    with patch("app.services.llm_service.active_provider", return_value=provider):
+        assessment, created = await _assess_response_result(
+            session, response, inject, definition
+        )
+        replayed, replay_created = await _assess_response_result(
+            session, response, inject, definition
+        )
 
+    assert created is True
+    assert replay_created is False
+    assert replayed.id == assessment.id
+    provider.complete.assert_awaited_once()
     assert assessment.id is not None
     assert assessment.response_id == response.id
     assert assessment.decision_quality == "good"
@@ -144,7 +151,7 @@ async def test_suggest_inject_stores_suggestion(
     from app.models.inject import Inject, InjectState
     from app.models.response import Response
     from app.models.scenario import Scenario
-    from app.services.llm_service import suggest_inject
+    from app.services.llm_service import _suggest_inject_result
     from app.services.scenario_service import export_definition
 
     inject = Inject(
@@ -172,12 +179,19 @@ async def test_suggest_inject_stores_suggestion(
     scenario = (await session.get(Scenario, active_exercise.scenario_id))
     definition = export_definition(scenario)
 
-    with patch(
-        "app.services.llm_service.active_provider",
-        return_value=_fake_provider(_suggestion_json()),
-    ):
-        suggested = await suggest_inject(session, response, inject, active_exercise, definition)
+    provider = _fake_provider(_suggestion_json())
+    with patch("app.services.llm_service.active_provider", return_value=provider):
+        suggested, created = await _suggest_inject_result(
+            session, response, inject, active_exercise, definition
+        )
+        replayed, replay_created = await _suggest_inject_result(
+            session, response, inject, active_exercise, definition
+        )
 
+    assert created is True
+    assert replay_created is False
+    assert replayed.id == suggested.id
+    provider.complete.assert_awaited_once()
     assert suggested.id is not None
     assert suggested.exercise_id == active_exercise.id
     assert suggested.title == "Ransomware Note Found"
