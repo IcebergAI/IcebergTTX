@@ -213,7 +213,8 @@ async def test_update_scenario(
 
 async def test_update_in_use_scenario_creates_revision(
     client: AsyncClient,
-    facilitator_token: str,
+    second_facilitator_token: str,
+    second_facilitator,
     sample_scenario: Scenario,
     sample_definition: ScenarioDefinition,
     draft_exercise: Exercise,
@@ -222,13 +223,14 @@ async def test_update_in_use_scenario_creates_revision(
     resp = await client.put(
         f"/api/scenarios/{sample_scenario.id}",
         json=updated.model_dump(),
-        headers=_headers(facilitator_token),
+        headers=_headers(second_facilitator_token),
     )
     assert resp.status_code == 200
     assert resp.json()["id"] != sample_scenario.id
+    assert resp.json()["created_by"] == second_facilitator.id
 
     original = await client.get(
-        f"/api/scenarios/{sample_scenario.id}", headers=_headers(facilitator_token)
+        f"/api/scenarios/{sample_scenario.id}", headers=_headers(second_facilitator_token)
     )
     assert original.json()["title"] == sample_definition.title
 

@@ -106,12 +106,13 @@ async def update(
     scenario_id: int, body: ScenarioDefinition, current_user: FacilitatorDep, session: SessionDep
 ):
     scenario = await _get_or_404(session, scenario_id)
-    if scenario.created_by != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Scenario owner access required",
-        )
-    scenario = await update_scenario(session, scenario, definition=body)
+    assert current_user.id is not None
+    scenario = await update_scenario(
+        session,
+        scenario,
+        definition=body,
+        updated_by=current_user.id,
+    )
     return _scenario_detail(scenario)
 
 

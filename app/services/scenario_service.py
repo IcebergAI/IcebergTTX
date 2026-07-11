@@ -38,14 +38,20 @@ async def update_scenario(
     scenario: Scenario,
     *,
     definition: ScenarioDefinition,
+    updated_by: int | None = None,
 ) -> Scenario:
     # Exercises capture a scenario at creation time semantically, so never rewrite
-    # an in-use definition. Return a new owner-owned revision for future exercises.
+    # an in-use definition. Preserve the collaborative library by returning a new
+    # editor-owned revision for future exercises instead of denying non-owner edits.
     in_use = (
         await session.exec(select(Exercise.id).where(Exercise.scenario_id == scenario.id))
     ).first()
     if in_use is not None:
-        return await create_scenario(session, definition=definition, created_by=scenario.created_by)
+        return await create_scenario(
+            session,
+            definition=definition,
+            created_by=updated_by or scenario.created_by,
+        )
     scenario.title = definition.title
     scenario.description = definition.description
     scenario.tags = definition.tags or None
