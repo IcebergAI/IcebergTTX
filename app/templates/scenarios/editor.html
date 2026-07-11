@@ -162,9 +162,11 @@
     </div>
     <div class="flex flex-wrap gap-2">
       <template x-if="!scenarioId">
-        <label class="btn btn-ghost h-8 px-3 text-[13px] cursor-pointer">
+        <label for="scenario-import-json"
+               class="btn btn-ghost h-8 px-3 text-[13px] cursor-pointer">
           Import JSON
-          <input type="file" accept=".json" class="hidden" @change="importFile($event)" />
+          <input id="scenario-import-json" type="file" accept=".json" class="hidden"
+                 @change="importFile($event)" />
         </label>
       </template>
       <button @click="save()" :disabled="saving || blockingIssues.length > 0"
@@ -176,14 +178,12 @@
     </div>
   </div>
 
-  <template x-if="error">
-    <div class="mb-4 rounded-md px-4 py-3 text-[13px]" style="background:#fee2e2; color:#b91c1c;"
-         x-text="error"></div>
-  </template>
-  <template x-if="success">
-    <div class="mb-4 rounded-md px-4 py-3 text-[13px]" style="background:#dcfce7; color:#166534;"
-         x-text="success"></div>
-  </template>
+  <div id="scenario-form-error" x-cloak x-show="error" role="alert" aria-live="assertive"
+       aria-atomic="true" class="mb-4 rounded-md px-4 py-3 text-[13px]"
+       style="background:#fee2e2; color:#b91c1c;" x-text="error"></div>
+  <div id="scenario-form-success" x-cloak x-show="success" role="status" aria-live="polite"
+       aria-atomic="true" class="mb-4 rounded-md px-4 py-3 text-[13px]"
+       style="background:#dcfce7; color:#166534;" x-text="success"></div>
 
   <div class="scenario-builder">
     <!-- Left outline -->
@@ -277,44 +277,50 @@
 
         <div class="grid gap-4">
           <div>
-            <label class="block smallcaps text-muted mb-1">Title <span class="text-red-400">*</span></label>
-            <input type="text" x-model="form.title"
+            <label for="scenario-title" class="block smallcaps text-muted mb-1">
+              Title <span class="text-red-400">*</span>
+            </label>
+            <input id="scenario-title" type="text" x-model="form.title" required
+                   aria-describedby="scenario-form-error"
                    class="scenario-field"
                    data-testid="scenario-title" />
           </div>
 
           <div>
-            <label class="block smallcaps text-muted mb-1">Description</label>
-            <textarea x-model="form.description" rows="3"
+            <label for="scenario-description" class="block smallcaps text-muted mb-1">Description</label>
+            <textarea id="scenario-description" x-model="form.description" rows="3"
                       class="scenario-field resize-none"
                       data-testid="scenario-description"></textarea>
           </div>
 
           <div class="grid gap-3" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
             <div>
-              <label class="block smallcaps text-muted mb-1">Author</label>
-              <input type="text" x-model="form.metadata.author"
+              <label for="scenario-author" class="block smallcaps text-muted mb-1">Author</label>
+              <input id="scenario-author" type="text" x-model="form.metadata.author"
                      placeholder="IcebergTTX"
                      class="scenario-field"
                      data-testid="scenario-author" />
             </div>
             <div>
-              <label class="block smallcaps text-muted mb-1">Estimated duration</label>
+              <label for="scenario-duration" class="block smallcaps text-muted mb-1">Estimated duration</label>
               <div class="flex items-center gap-2">
-                <input type="number" min="1" step="1"
+                <input id="scenario-duration" type="number" min="1" step="1"
                        x-model="form.metadata.estimated_duration_minutes"
+                       aria-describedby="scenario-duration-unit"
                        class="scenario-field"
                        data-testid="scenario-duration" />
-                <span class="text-[13px] text-muted shrink-0">minutes</span>
+                <span id="scenario-duration-unit" class="text-[13px] text-muted shrink-0">minutes</span>
               </div>
             </div>
           </div>
 
           <div>
-            <label class="block smallcaps text-muted mb-1">Tags</label>
-            <input type="text" x-model="tagsInput" placeholder="cyber, ransomware, GDPR"
+            <label for="scenario-tags" class="block smallcaps text-muted mb-1">Tags</label>
+            <input id="scenario-tags" type="text" x-model="tagsInput"
+                   placeholder="cyber, ransomware, GDPR" aria-describedby="scenario-tags-help"
                    class="scenario-field"
                    data-testid="scenario-tags" />
+            <p id="scenario-tags-help" class="text-[12px] text-faint mt-1.5">Separate tags with commas.</p>
             <div class="flex flex-wrap gap-1.5 mt-2">
               <template x-for="tag in tagsList" :key="tag">
                 <span class="pill text-[10.5px]" x-text="tag"></span>
@@ -324,8 +330,11 @@
           </div>
 
           <div>
-            <label class="block smallcaps text-muted mb-1">Start inject</label>
-            <select x-model="form.start_inject_id"
+            <label for="scenario-start-inject" class="block smallcaps text-muted mb-1">
+              Start inject <span class="text-red-400">*</span>
+            </label>
+            <select id="scenario-start-inject" x-model="form.start_inject_id" required
+                    aria-describedby="scenario-form-error"
                     class="scenario-field"
                     data-testid="scenario-start-inject">
               <template x-for="inj in form.injects" :key="inj._key">
@@ -335,8 +344,8 @@
           </div>
 
           <div>
-            <label class="block smallcaps text-muted mb-1">Debrief notes</label>
-            <textarea x-model="form.debrief_notes" rows="3"
+            <label for="scenario-debrief" class="block smallcaps text-muted mb-1">Debrief notes</label>
+            <textarea id="scenario-debrief" x-model="form.debrief_notes" rows="3"
                       class="scenario-field resize-none"
                       data-testid="scenario-debrief"></textarea>
           </div>
@@ -361,15 +370,24 @@
         <div class="space-y-2">
           <template x-for="(team, i) in form.participant_teams" :key="team._key">
             <div class="scenario-tabular validation-card">
-              <input type="text" x-model="team.id"
-                     @focus="team._editingId = team.id"
-                     @change="commitTeamId(team)"
-                     placeholder="team_01"
-                     class="scenario-field compact mono"
-                     data-testid="team-id" />
-              <input type="text" x-model="team.label" placeholder="Team label"
-                     class="scenario-field compact"
-                     data-testid="team-label" />
+              <div>
+                <label :for="fieldId('team-id', team._key)"
+                       class="block smallcaps text-muted mb-1">Team ID</label>
+                <input :id="fieldId('team-id', team._key)" type="text" x-model="team.id"
+                       @focus="team._editingId = team.id"
+                       @change="commitTeamId(team)"
+                       placeholder="team_01"
+                       class="scenario-field compact mono"
+                       data-testid="team-id" />
+              </div>
+              <div>
+                <label :for="fieldId('team-label', team._key)"
+                       class="block smallcaps text-muted mb-1">Team name</label>
+                <input :id="fieldId('team-label', team._key)" type="text"
+                       x-model="team.label" placeholder="Team label"
+                       class="scenario-field compact"
+                       data-testid="team-label" />
+              </div>
               <button @click="removeTeam(i)" type="button"
                       class="smallcaps text-red-400 hover:text-red-600">Remove</button>
             </div>
@@ -407,24 +425,34 @@
           <div class="space-y-5">
             <div class="grid gap-3" style="grid-template-columns: minmax(130px, .7fr) minmax(0, 1.5fr);">
               <div>
-                <label class="block smallcaps text-muted mb-1">ID <span class="text-red-400">*</span></label>
-                <input type="text" x-model="activeInject.id"
+                <label :for="fieldId('inject-id', activeInject._key)"
+                       class="block smallcaps text-muted mb-1">
+                  ID <span class="text-red-400">*</span>
+                </label>
+                <input :id="fieldId('inject-id', activeInject._key)" type="text"
+                       x-model="activeInject.id" required aria-describedby="scenario-form-error"
                        @focus="activeInject._editingId = activeInject.id"
                        @change="commitInjectId(activeInject)"
                        class="scenario-field mono"
                        data-testid="inject-id" />
               </div>
               <div>
-                <label class="block smallcaps text-muted mb-1">Title</label>
-                <input type="text" x-model="activeInject.title"
+                <label :for="fieldId('inject-title', activeInject._key)"
+                       class="block smallcaps text-muted mb-1">
+                  Title <span class="text-red-400">*</span>
+                </label>
+                <input :id="fieldId('inject-title', activeInject._key)" type="text"
+                       x-model="activeInject.title" required aria-describedby="scenario-form-error"
                        class="scenario-field"
                        data-testid="inject-title" />
               </div>
             </div>
 
             <div>
-              <label class="block smallcaps text-muted mb-1">Content</label>
-              <textarea x-model="activeInject.content" rows="5"
+              <label :for="fieldId('inject-content', activeInject._key)"
+                     class="block smallcaps text-muted mb-1">Content</label>
+              <textarea :id="fieldId('inject-content', activeInject._key)"
+                        x-model="activeInject.content" rows="5"
                         class="scenario-field resize-none"
                         data-testid="inject-content"></textarea>
             </div>
@@ -433,10 +461,15 @@
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div class="smallcaps text-muted">Response mode</div>
-                  <div class="text-[13px] text-muted mt-0.5">Participants can explain reasoning in free text.</div>
+                  <div id="inject-response-help" class="text-[13px] text-muted mt-0.5">
+                    Participants can explain reasoning in free text.
+                  </div>
                 </div>
-                <label class="inline-flex items-center gap-2 text-[13px] text-ink-soft">
-                  <input type="checkbox" x-model="activeInject.free_text_response"
+                <label :for="fieldId('inject-free-text', activeInject._key)"
+                       class="inline-flex items-center gap-2 text-[13px] text-ink-soft">
+                  <input :id="fieldId('inject-free-text', activeInject._key)" type="checkbox"
+                         x-model="activeInject.free_text_response"
+                         aria-describedby="inject-response-help"
                          class="rounded accent-accent-ink"
                          data-testid="inject-free-text" />
                   Allow free-text response
@@ -448,7 +481,9 @@
               <div class="flex items-center justify-between gap-3 mb-2">
                 <div>
                   <div class="smallcaps text-muted">Target teams</div>
-                  <div class="text-[12.5px] text-muted mt-0.5">Leave all unchecked for a shared inject.</div>
+                  <div id="inject-target-teams-help" class="text-[12.5px] text-muted mt-0.5">
+                    Leave all unchecked for a shared inject.
+                  </div>
                 </div>
                 <button type="button" x-show="form.participant_teams.length"
                         @click="activeInject.target_teams = []"
@@ -456,9 +491,11 @@
               </div>
               <div x-show="form.participant_teams.length" class="flex flex-wrap gap-2">
                 <template x-for="team in form.participant_teams" :key="team._key">
-                  <label class="target-chip"
+                  <label :for="fieldId('inject-target-team', activeInject._key, team._key)"
+                         class="target-chip"
                          :class="{ 'is-on': injectTargetsTeam(activeInject, team.id) }">
-                    <input type="checkbox"
+                    <input :id="fieldId('inject-target-team', activeInject._key, team._key)"
+                           type="checkbox" aria-describedby="inject-target-teams-help"
                            :checked="injectTargetsTeam(activeInject, team.id)"
                            @change="toggleInjectTeam(activeInject, team.id, $event.target.checked)"
                            class="accent-accent-ink"
@@ -476,7 +513,9 @@
               <div class="flex items-center justify-between gap-3 mb-3">
                 <div>
                   <div class="smallcaps text-muted">Progression</div>
-                  <div class="text-[12.5px] text-muted mt-0.5">Use choices for branching, or a linear next inject for free-text-only steps.</div>
+                  <div id="inject-progression-help" class="text-[12.5px] text-muted mt-0.5">
+                    Use choices for branching, or a linear next inject for free-text-only steps.
+                  </div>
                 </div>
                 <button @click="addOption(activeInject)" type="button"
                         class="btn btn-ghost h-8 px-3 text-[13px]"
@@ -485,24 +524,41 @@
               <div class="space-y-2">
                 <template x-for="(opt, j) in activeInject.options" :key="opt._key">
                   <div class="branch-row validation-card">
-                    <input type="text" x-model="opt.id"
-                           @change="opt.id = normalizeId(opt.id, nextOptionId(activeInject))"
-                           placeholder="opt_01"
-                           class="scenario-field compact mono"
-                           data-testid="option-id" />
-                    <input type="text" x-model="opt.label" placeholder="Option label"
-                           class="scenario-field compact"
-                           data-testid="option-label" />
-                    <select :value="opt.next_inject_id || ''"
-                            x-effect="syncSelectValue($el, opt.next_inject_id)"
-                            @change="opt.next_inject_id = $event.target.value || null"
-                            class="scenario-field compact mono"
-                            data-testid="option-next">
-                      <option value="">End branch</option>
-                      <template x-for="other in form.injects" :key="other._key">
-                        <option :value="other.id" x-text="other.id || 'untitled'"></option>
-                      </template>
-                    </select>
+                    <div>
+                      <label :for="fieldId('option-id', activeInject._key, opt._key)"
+                             class="block smallcaps text-muted mb-1">Option ID</label>
+                      <input :id="fieldId('option-id', activeInject._key, opt._key)" type="text"
+                             x-model="opt.id"
+                             @change="opt.id = normalizeId(opt.id, nextOptionId(activeInject))"
+                             placeholder="opt_01" aria-describedby="inject-progression-help"
+                             class="scenario-field compact mono"
+                             data-testid="option-id" />
+                    </div>
+                    <div>
+                      <label :for="fieldId('option-label', activeInject._key, opt._key)"
+                             class="block smallcaps text-muted mb-1">Option label</label>
+                      <input :id="fieldId('option-label', activeInject._key, opt._key)" type="text"
+                             x-model="opt.label" placeholder="Option label"
+                             aria-describedby="inject-progression-help"
+                             class="scenario-field compact"
+                             data-testid="option-label" />
+                    </div>
+                    <div>
+                      <label :for="fieldId('option-next', activeInject._key, opt._key)"
+                             class="block smallcaps text-muted mb-1">Next inject</label>
+                      <select :id="fieldId('option-next', activeInject._key, opt._key)"
+                              :value="opt.next_inject_id || ''"
+                              x-effect="syncSelectValue($el, opt.next_inject_id)"
+                              @change="opt.next_inject_id = $event.target.value || null"
+                              aria-describedby="inject-progression-help"
+                              class="scenario-field compact mono"
+                              data-testid="option-next">
+                        <option value="">End branch</option>
+                        <template x-for="other in form.injects" :key="other._key">
+                          <option :value="other.id" x-text="other.id || 'untitled'"></option>
+                        </template>
+                      </select>
+                    </div>
                     <button @click="activeInject.options.splice(j, 1)" type="button"
                             class="smallcaps text-red-400 hover:text-red-600">Remove</button>
                   </div>
@@ -510,8 +566,11 @@
                 <div x-show="activeInject.options.length === 0"
                      class="validation-card">
                   <div class="grid gap-2" style="grid-template-columns: minmax(120px, .55fr) minmax(0, 1fr); align-items: center;">
-                    <label class="smallcaps text-muted">Linear next</label>
-                    <select x-model="activeInject.next_inject_id"
+                    <label :for="fieldId('inject-linear-next', activeInject._key)"
+                           class="smallcaps text-muted">Linear next</label>
+                    <select :id="fieldId('inject-linear-next', activeInject._key)"
+                            x-model="activeInject.next_inject_id"
+                            aria-describedby="inject-progression-help"
                             class="scenario-field compact mono"
                             data-testid="inject-linear-next">
                       <option value="">End scenario</option>
@@ -528,20 +587,30 @@
               <div class="flex items-center justify-between gap-3 mb-3">
                 <div>
                   <div class="smallcaps text-muted">Expected actions</div>
-                  <div class="text-[12.5px] text-muted mt-0.5">Evaluator cues shown in the facilitator console.</div>
+                  <div id="inject-expected-actions-help" class="text-[12.5px] text-muted mt-0.5">
+                    Evaluator cues shown in the facilitator console.
+                  </div>
                 </div>
                 <button @click="addExpectedAction(activeInject)" type="button"
                         class="btn btn-ghost h-8 px-3 text-[13px]"
                         data-testid="add-expected-action">+ Add action</button>
               </div>
               <div class="space-y-2">
-                <template x-for="(action, k) in activeInject.expected_actions" :key="k">
+                <template x-for="(action, k) in activeInject.expected_actions"
+                          :key="activeInject._actionKeys[k]">
                   <div class="flex gap-2 items-center validation-card">
-                    <input type="text" x-model="activeInject.expected_actions[k]"
-                           placeholder="e.g. Notify CISO immediately"
-                           class="scenario-field compact flex-1"
-                           data-testid="expected-action" />
-                    <button @click="activeInject.expected_actions.splice(k, 1)" type="button"
+                    <div class="flex-1">
+                      <label :for="fieldId('expected-action', activeInject._key, activeInject._actionKeys[k])"
+                             class="block smallcaps text-muted mb-1"
+                             x-text="'Action ' + (k + 1)"></label>
+                      <input :id="fieldId('expected-action', activeInject._key, activeInject._actionKeys[k])"
+                             type="text" x-model="activeInject.expected_actions[k]"
+                             placeholder="e.g. Notify CISO immediately"
+                             aria-describedby="inject-expected-actions-help"
+                             class="scenario-field compact"
+                             data-testid="expected-action" />
+                    </div>
+                    <button @click="removeExpectedAction(activeInject, k)" type="button"
                             class="smallcaps text-red-400 hover:text-red-600">Remove</button>
                   </div>
                 </template>
@@ -560,7 +629,9 @@
         <div class="flex items-center justify-between gap-3 mb-3">
           <div>
             <div class="smallcaps text-muted">Readiness</div>
-            <div class="text-[13px] text-muted mt-0.5" x-text="readinessLabel"></div>
+            <div id="scenario-readiness-summary" class="text-[13px] text-muted mt-0.5"
+                 role="status" aria-live="polite" aria-atomic="true"
+                 x-text="readinessLabel"></div>
           </div>
           <span class="pill text-[10.5px]" :style="readinessPillStyle" x-text="readinessState"></span>
         </div>
@@ -580,7 +651,7 @@
           </div>
         </div>
 
-        <div class="space-y-2">
+        <div class="space-y-2" role="status" aria-live="polite" aria-atomic="true">
           <template x-for="issue in validationIssues" :key="issue.text">
             <button type="button"
                     @click="focusIssue(issue)"

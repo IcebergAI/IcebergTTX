@@ -1,14 +1,30 @@
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlmodel import select
+from sqlalchemy import update
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.exercise import VALID_TRANSITIONS, Exercise, ExerciseMember, ExerciseState
+from app.models.exercise import (
+    VALID_TRANSITIONS,
+    Exercise,
+    ExerciseMember,
+    ExerciseState,
+    ExerciseStateTransition,
+    transition_action,
+)
 from app.models.scenario import Scenario
 from app.models.user import User
 from app.services.inject_service import seed_injects_from_scenario
 from app.services.scenario_service import export_definition
+
+
+@dataclass(frozen=True)
+class ExerciseTransitionResult:
+    exercise: Exercise
+    transition: ExerciseStateTransition
+    action: str
 
 
 async def create_exercise(
@@ -41,32 +57,102 @@ async def create_exercise(
 
 
 async def transition_state(
-    session: AsyncSession, exercise: Exercise, new_state: ExerciseState
+    session: AsyncSession,
+    exercise: Exercise,
+    new_state: ExerciseState,
+    *,
+    actor_id: int | None = None,
 ) -> Exercise:
-    if new_state not in VALID_TRANSITIONS[exercise.state]:
+    """Compatibility wrapper returning the updated Exercise.
+
+    API callers that need the durable event for a post-commit projection should use
+    ``transition_state_with_history`` directly.
+    """
+    result = await transition_state_with_history(session, exercise, new_state, actor_id=actor_id)
+    return result.exercise
+
+
+async def transition_state_with_history(
+    session: AsyncSession,
+    exercise: Exercise,
+    new_state: ExerciseState,
+    *,
+    actor_id: int | None = None,
+) -> ExerciseTransitionResult:
+    """Atomically change state and append its authoritative lifecycle event.
+
+    The conditional UPDATE is a compare-and-swap on the state observed by the
+    caller. A request that waited behind or raced another transition therefore
+    receives 409 instead of overwriting the newer state. The history row and
+    Exercise update share one transaction; callers may safely emit external
+    projections only after this function returns.
+    """
+    previous_state = exercise.state
+    if new_state not in VALID_TRANSITIONS[previous_state]:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot transition from '{exercise.state}' to '{new_state}'",
+            detail=f"Cannot transition from '{previous_state}' to '{new_state}'",
         )
 
     now = datetime.now(UTC)
+    values: dict = {"state": new_state}
     if new_state == ExerciseState.active and exercise.started_at is None:
-        exercise.started_at = now
-    # Pause-aware clock (#116): entering `paused` stamps `paused_at`; resuming folds the
-    # just-finished pause span into `accumulated_pause_seconds` and clears `paused_at`.
+        values["started_at"] = now
+    # Include pacing fields in the same compare-and-swap update as state so a
+    # stale lifecycle request cannot overwrite a completed pause calculation.
     if new_state == ExerciseState.paused:
-        exercise.paused_at = now
+        values["paused_at"] = now
     if new_state == ExerciseState.active and exercise.paused_at is not None:
-        exercise.accumulated_pause_seconds += (now - exercise.paused_at).total_seconds()
-        exercise.paused_at = None
+        values["accumulated_pause_seconds"] = (
+            exercise.accumulated_pause_seconds + (now - exercise.paused_at).total_seconds()
+        )
+        values["paused_at"] = None
     if new_state == ExerciseState.completed:
-        exercise.ended_at = now
+        values["ended_at"] = now
 
-    exercise.state = new_state
-    session.add(exercise)
-    await session.commit()
-    await session.refresh(exercise)
-    return exercise
+    assert exercise.id is not None
+    statement = (
+        update(Exercise)
+        .where(col(Exercise.id) == exercise.id, col(Exercise.state) == previous_state)
+        .values(**values)
+        .returning(col(Exercise.id))
+        .execution_options(synchronize_session=False)
+    )
+    result = await session.exec(statement)
+    if result.scalar_one_or_none() is None:
+        current = (
+            await session.exec(select(Exercise.state).where(Exercise.id == exercise.id))
+        ).one_or_none()
+        await session.rollback()
+        if current is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Exercise state changed from '{previous_state}' to '{current}' "
+                "while this request was in flight; reload and try again"
+            ),
+        )
+
+    transition = ExerciseStateTransition(
+        exercise_id=exercise.id,
+        from_state=previous_state,
+        to_state=new_state,
+        actor_id=actor_id if actor_id is not None else exercise.created_by,
+        transitioned_at=now,
+    )
+    session.add(transition)
+    try:
+        await session.flush()
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+
+    updated = await session.get(Exercise, exercise.id, populate_existing=True)
+    assert updated is not None
+    action = transition_action(previous_state, new_state)
+    return ExerciseTransitionResult(exercise=updated, transition=transition, action=action)
 
 
 async def broadcast_exercise_state(exercise: Exercise) -> None:
@@ -115,10 +201,9 @@ async def validate_group_id(
 
 
 async def default_group_for_user(
-    session: AsyncSession, exercise: Exercise, user_id: int
+    session: AsyncSession, exercise: Exercise, user: User
 ) -> str | None:
-    user = await session.get(User, user_id)
-    if not user or not user.team:
+    if not user.team:
         return None
     return user.team if user.team in await scenario_group_ids(session, exercise) else None
 
@@ -131,6 +216,10 @@ async def enrol_member(
     group_id: str | None = None,
 ) -> ExerciseMember:
     assert exercise.id is not None
+    user = await session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
     normalized_group_id = await validate_group_id(session, exercise, group_id)
     existing = (
         await session.exec(
@@ -145,7 +234,7 @@ async def enrol_member(
     resolved_group_id = (
         normalized_group_id
         if normalized_group_id is not None
-        else await default_group_for_user(session, exercise, user_id)
+        else await default_group_for_user(session, exercise, user)
     )
     member = ExerciseMember(
         exercise_id=exercise.id,

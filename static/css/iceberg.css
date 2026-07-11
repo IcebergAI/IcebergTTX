@@ -22,8 +22,8 @@
   --surface-ink:  oklch(0.22 0.026 256);
   --ink:          oklch(0.26 0.026 262);
   --ink-soft:     oklch(0.44 0.022 260);
-  --muted:        oklch(0.58 0.017 258);
-  --faint:        oklch(0.70 0.012 258);
+  --muted:        oklch(0.52 0.017 258);
+  --faint:        oklch(0.55 0.012 258);
   --line:         oklch(0.915 0.008 248);
   --line-strong:  oklch(0.855 0.012 248);
 
@@ -34,6 +34,7 @@
   --accent-soft:  oklch(0.955 0.028 226);
   --accent-line:  oklch(0.86 0.055 226);
   --accent-glow:  oklch(0.66 0.118 226 / 0.16);
+  --primary-ink:  oklch(1 0 0);
 
   /* Status / severity semantics */
   --c-warn:  oklch(0.70 0.15 70);
@@ -46,7 +47,7 @@
   --rail-2:      oklch(0.285 0.026 256);
   --rail-line:   oklch(0.34 0.022 256);
   --rail-ink:    oklch(0.80 0.02 250);
-  --rail-faint:  oklch(0.60 0.018 252);
+  --rail-faint:  oklch(0.66 0.018 252);
 
   --radius: 9px;
   --radius-sm: 6px;
@@ -71,7 +72,7 @@ html[data-theme="dark"] {
   --ink:         oklch(0.93 0.012 250);
   --ink-soft:    oklch(0.80 0.015 252);
   --muted:       oklch(0.66 0.016 255);
-  --faint:       oklch(0.55 0.014 256);
+  --faint:       oklch(0.64 0.014 256);
   --line:        oklch(0.32 0.018 256);
   --line-strong: oklch(0.40 0.022 256);
 
@@ -81,6 +82,7 @@ html[data-theme="dark"] {
   --accent-soft: oklch(0.30 0.05 232);
   --accent-line: oklch(0.44 0.07 230);
   --accent-glow: oklch(0.72 0.12 226 / 0.22);
+  --primary-ink: oklch(0.15 0.02 256);
 
   --c-warn: oklch(0.79 0.14 72);
   --c-ok:   oklch(0.74 0.13 158);
@@ -90,7 +92,7 @@ html[data-theme="dark"] {
   --rail-2:     oklch(0.235 0.022 256);
   --rail-line:  oklch(0.30 0.02 256);
   --rail-ink:   oklch(0.82 0.02 250);
-  --rail-faint: oklch(0.62 0.018 252);
+  --rail-faint: oklch(0.66 0.018 252);
 
   --shadow:      0 1px 2px oklch(0 0 0 / 0.30), 0 1px 1px oklch(0 0 0 / 0.24);
   --shadow-lift: 0 8px 24px -10px oklch(0 0 0 / 0.55), 0 2px 6px -2px oklch(0 0 0 / 0.4);
@@ -326,11 +328,11 @@ code, .code { font-family: var(--fs-mono); font-size: 0.86em; background: var(--
 }
 .btn:active { transform: translateY(0.5px); }
 .btn:focus-visible { outline: none; box-shadow: var(--ring); }
-.btn-primary, .btn--primary { background: var(--accent-ink); color: #fff; }
-.btn-primary:hover, .btn--primary:hover { background: var(--accent-deep); color: #fff; }
+.btn-primary, .btn--primary { background: var(--accent-ink); color: var(--primary-ink); }
+.btn-primary:hover, .btn--primary:hover { background: var(--accent-deep); color: var(--primary-ink); }
 .btn-ghost, .btn--ghost { background: var(--surface); color: var(--ink); border-color: var(--line-strong); }
 .btn-ghost:hover, .btn--ghost:hover { border-color: var(--accent-line); color: var(--accent-deep); }
-.btn-accent, .btn--accent { background: var(--accent); color: #fff; }
+.btn-accent, .btn--accent { background: var(--accent); color: var(--surface-ink); }
 .btn-accent:hover, .btn--accent:hover { filter: brightness(1.08); }
 .btn--ink { background: var(--ink); color: var(--paper); }
 .btn--ink:hover { filter: brightness(1.15); }

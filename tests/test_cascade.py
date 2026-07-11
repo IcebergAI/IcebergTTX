@@ -13,7 +13,12 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.assessment import ResponseAssessment
 from app.models.communication import CommDirection, Communication
-from app.models.exercise import Exercise, ExerciseMember
+from app.models.exercise import (
+    Exercise,
+    ExerciseMember,
+    ExerciseState,
+    ExerciseStateTransition,
+)
 from app.models.inject import Inject
 from app.models.inject_comment import InjectComment
 from app.models.response import Response
@@ -102,6 +107,14 @@ async def test_delete_exercise_cascades_children(
     session: AsyncSession, bare_exercise: Exercise, participant: User
 ):
     await _build_inject(session, bare_exercise, participant)
+    from app.services.exercise_service import transition_state
+
+    await transition_state(
+        session,
+        bare_exercise,
+        ExerciseState.active,
+        actor_id=participant.id,
+    )
     assert await _count(session, Inject) == 1
     assert await _count(session, Response) == 1
     assert await _count(session, ResponseAssessment) == 1
@@ -109,6 +122,7 @@ async def test_delete_exercise_cascades_children(
     assert await _count(session, InjectComment) == 1
     assert await _count(session, Communication) == 1
     assert await _count(session, ExerciseMember) == 1
+    assert await _count(session, ExerciseStateTransition) == 1
 
     await session.delete(bare_exercise)
     await session.commit()
@@ -120,6 +134,7 @@ async def test_delete_exercise_cascades_children(
     assert await _count(session, InjectComment) == 0
     assert await _count(session, Communication) == 0
     assert await _count(session, ExerciseMember) == 0
+    assert await _count(session, ExerciseStateTransition) == 0
 
 
 async def test_delete_inject_cascades_responses_and_nulls_communication(

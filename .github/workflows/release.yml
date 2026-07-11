@@ -123,12 +123,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          # docker/metadata-action normalises a SemVer Git tag such as
+          # v0.1.0-beta.1 to the published OCI tag 0.1.0-beta.1.
+          IMAGE_TAG: ${{ steps.meta.outputs.version }}
         run: |
           notes_file="$(mktemp)"
           {
             echo "Container image published to GHCR — SBOM + SLSA provenance attested, cosign-signed:"
             echo ""
-            echo "    ${IMAGE}:${TAG}"
+            echo "    ${IMAGE}:${IMAGE_TAG}"
             echo ""
             echo "Pull, verify (cosign / attestation), and deploy instructions: docs/RELEASING.md."
           } > "$notes_file"

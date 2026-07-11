@@ -19,10 +19,12 @@ from app.database import make_async_url
 from app.models import (  # noqa: F401
     assessment,
     audit,
+    audit_settings,
     communication,
     exercise,
     inject,
     inject_comment,
+    proxy_settings,
     report_summary,
     response,
     scenario,

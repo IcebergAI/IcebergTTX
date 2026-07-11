@@ -1,16 +1,21 @@
 import json
 import logging
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, Mock
+from uuid import uuid4
 
+import pytest
+from fastapi import HTTPException
 from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.exercise import Exercise, ExerciseState
+from app.models.exercise import Exercise, ExerciseState, ExerciseStateTransition
 from app.models.inject import Inject
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.exercise_service import transition_state
+from app.services.ws_manager import manager
 
 
 def _bearer(token: str) -> dict:
@@ -361,6 +366,34 @@ async def test_start_exercise(client: AsyncClient, facilitator_token: str, draft
     assert data["started_at"] is not None
 
 
+async def test_start_persists_authoritative_transition_history(
+    client: AsyncClient,
+    facilitator_token: str,
+    facilitator: User,
+    session: AsyncSession,
+    draft_exercise: Exercise,
+):
+    r = await client.post(
+        f"/api/exercises/{draft_exercise.id}/start",
+        headers=_bearer(facilitator_token),
+    )
+    assert r.status_code == 200
+
+    transitions = (
+        await session.exec(
+            select(ExerciseStateTransition).where(
+                ExerciseStateTransition.exercise_id == draft_exercise.id
+            )
+        )
+    ).all()
+    assert len(transitions) == 1
+    transition = transitions[0]
+    assert transition.from_state == ExerciseState.draft
+    assert transition.to_state == ExerciseState.active
+    assert transition.actor_id == facilitator.id
+    assert transition.transitioned_at.isoformat() == r.json()["started_at"]
+
+
 async def test_pause_exercise(client: AsyncClient, facilitator_token: str, active_exercise):
     r = await client.post(
         f"/api/exercises/{active_exercise.id}/pause",
@@ -426,6 +459,150 @@ async def test_invalid_transition_completed_to_active(
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 409
+
+
+async def test_stale_transition_cannot_revert_completed_exercise(
+    sample_definition: ScenarioDefinition,
+):
+    """Two real sessions observe active; completion wins and the stale pause loses."""
+    from app.database import engine
+    from app.services.exercise_service import create_exercise
+    from app.services.scenario_service import create_scenario
+
+    user_id = scenario_id = exercise_id = None
+    unique = uuid4().hex
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as setup:
+            facilitator = User(
+                email=f"lifecycle-{unique}@example.test",
+                display_name="Lifecycle Concurrency",
+                role=UserRole.facilitator,
+            )
+            setup.add(facilitator)
+            await setup.commit()
+            await setup.refresh(facilitator)
+            user_id = facilitator.id
+            scenario = await create_scenario(
+                setup, definition=sample_definition, created_by=facilitator.id
+            )
+            scenario_id = scenario.id
+            exercise = await create_exercise(
+                setup,
+                scenario_id=scenario.id,
+                title=f"Lifecycle concurrency {unique}",
+                created_by=facilitator.id,
+            )
+            exercise = await transition_state(
+                setup,
+                exercise,
+                ExerciseState.active,
+                actor_id=facilitator.id,
+            )
+            exercise_id = exercise.id
+
+        async with (
+            AsyncSession(engine, expire_on_commit=False) as completion_session,
+            AsyncSession(engine, expire_on_commit=False) as stale_pause_session,
+        ):
+            completion_view = await completion_session.get(Exercise, exercise_id)
+            stale_pause_view = await stale_pause_session.get(Exercise, exercise_id)
+            assert completion_view is not None and stale_pause_view is not None
+            assert completion_view.state == stale_pause_view.state == ExerciseState.active
+
+            completed = await transition_state(
+                completion_session,
+                completion_view,
+                ExerciseState.completed,
+                actor_id=user_id,
+            )
+            assert completed.state == ExerciseState.completed
+
+            with pytest.raises(HTTPException) as exc_info:
+                await transition_state(
+                    stale_pause_session,
+                    stale_pause_view,
+                    ExerciseState.paused,
+                    actor_id=user_id,
+                )
+            assert exc_info.value.status_code == 409
+
+        async with AsyncSession(engine, expire_on_commit=False) as verify:
+            stored = await verify.get(Exercise, exercise_id)
+            assert stored is not None
+            assert stored.state == ExerciseState.completed
+            transitions = (
+                await verify.exec(
+                    select(ExerciseStateTransition).where(
+                        ExerciseStateTransition.exercise_id == exercise_id
+                    )
+                )
+            ).all()
+            assert [(row.from_state, row.to_state) for row in transitions] == [
+                (ExerciseState.draft, ExerciseState.active),
+                (ExerciseState.active, ExerciseState.completed),
+            ]
+    finally:
+        async with AsyncSession(engine, expire_on_commit=False) as cleanup:
+            if exercise_id is not None:
+                exercise = await cleanup.get(Exercise, exercise_id)
+                if exercise is not None:
+                    await cleanup.delete(exercise)
+                    await cleanup.commit()
+            if scenario_id is not None:
+                from app.models.scenario import Scenario
+
+                scenario = await cleanup.get(Scenario, scenario_id)
+                if scenario is not None:
+                    await cleanup.delete(scenario)
+                    await cleanup.commit()
+            if user_id is not None:
+                user = await cleanup.get(User, user_id)
+                if user is not None:
+                    await cleanup.delete(user)
+                    await cleanup.commit()
+
+
+async def test_commit_failure_rolls_back_transition_and_skips_broadcast(
+    monkeypatch,
+    session: AsyncSession,
+    facilitator: User,
+    draft_exercise: Exercise,
+):
+    from app.routers.exercises import _transition
+    from app.services import audit_service
+
+    exercise_id = draft_exercise.id
+    broadcast = AsyncMock()
+    audit_emit = Mock()
+    monkeypatch.setattr(manager, "broadcast_to_exercise", broadcast)
+    monkeypatch.setattr(audit_service, "emit", audit_emit)
+
+    async def fail_commit(_session) -> None:
+        raise RuntimeError("simulated commit failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(AsyncSession, "commit", fail_commit)
+        with pytest.raises(RuntimeError, match="simulated commit failure"):
+            await _transition(
+                exercise_id,
+                facilitator,
+                session,
+                ExerciseState.active,
+            )
+
+    stored = await session.get(Exercise, exercise_id, populate_existing=True)
+    assert stored is not None
+    assert stored.state == ExerciseState.draft
+    transitions = (
+        await session.exec(
+            select(ExerciseStateTransition).where(
+                ExerciseStateTransition.exercise_id == exercise_id
+            )
+        )
+    ).all()
+    assert transitions == []
+    broadcast.assert_not_awaited()
+    audit_emit.assert_not_called()
 
 
 async def test_start_sets_started_at_only_once(
@@ -496,6 +673,19 @@ async def test_enrol_member_rejects_unknown_group(
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert r.status_code == 422
+
+
+async def test_enrol_member_rejects_unknown_user(
+    client: AsyncClient, facilitator_token: str, draft_exercise
+):
+    r = await client.post(
+        f"/api/exercises/{draft_exercise.id}/members",
+        json={"user_id": 2_147_483_647},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+
+    assert r.status_code == 404
+    assert r.json() == {"detail": "User not found"}
 
 
 async def test_enrol_member_idempotent(

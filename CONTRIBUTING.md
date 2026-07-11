@@ -26,7 +26,7 @@ committed `uv.lock`. In short:
 ```bash
 uv sync --extra dev              # create .venv from the lockfile + dev tools
 cp .env.example .env             # set SECRET_KEY (see the README)
-uv run uvicorn app.main:app --reload
+uv run iceberg-ttx-dev           # Tailwind build/watch + Uvicorn reload
 ```
 
 The backend targets **Python 3.14+**, FastAPI (fully async), and PostgreSQL via
@@ -46,8 +46,8 @@ uv run pytest                   # full test suite (needs Docker running)
 
 - **Add tests** for new behaviour or bug fixes — one test file per resource, async
   (`asyncio_mode = "auto"`); fixtures live in `tests/conftest.py`.
-- **Frontend/CSS changes** — rebuild the Tailwind output and commit it:
-  `tailwindcss -i static/css/input.css -o static/css/output.css`.
+- **Frontend/CSS changes** — run `uv run iceberg-ttx-dev`; it rebuilds the
+  ignored `static/css/output.css` as templates and design-system CSS change.
 - **Schema changes** — edit the models, then generate a migration with
   `alembic revision --autogenerate -m "describe change"` and commit the generated
   file under `alembic/versions/`.

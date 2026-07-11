@@ -102,6 +102,41 @@ async def test_ws_ping_pong(
         assert "payload" in msg
 
 
+async def test_ws_broadcasts_canonical_exercise_state_change_after_commit(
+    client: AsyncClient,
+    facilitator: User,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+):
+    async with (
+        aconnect_ws(_ws_url(active_exercise.id, facilitator_token), client) as facilitator_ws,
+        aconnect_ws(_ws_url(active_exercise.id, participant_token), client) as participant_ws,
+    ):
+        response = await client.post(
+            f"/api/exercises/{active_exercise.id}/pause",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+        assert response.status_code == 200
+        facilitator_message = await facilitator_ws.receive_json()
+        participant_message = await participant_ws.receive_json()
+
+    assert facilitator_message == participant_message
+    message = facilitator_message
+    assert message["type"] == "exercise_state_change"
+    assert message["exercise_id"] == active_exercise.id
+    payload = message["payload"]
+    assert payload["transition_id"] > 0
+    assert payload["exercise_id"] == active_exercise.id
+    assert payload["previous_state"] == "active"
+    assert payload["new_state"] == "paused"
+    assert payload["state"] == "paused"  # backwards-compatible alias
+    assert payload["actor_id"] == facilitator.id
+    assert payload["transitioned_at"] == message["timestamp"]
+    assert payload["started_at"] == response.json()["started_at"]
+    assert payload["ended_at"] is None
+
+
 # ── Inject released event ─────────────────────────────────────────────────────
 
 async def test_ws_receives_inject_released(

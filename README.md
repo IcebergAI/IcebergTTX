@@ -24,7 +24,7 @@ ships with Docker Compose and Kubernetes deployment manifests.
 
 - **Scenario library** — build branching inject trees (or linear chained flows) in the visual scenario builder, or import/export them as JSON
 - **Live exercises** — facilitator releases injects in real time via WebSocket push
-- **Participant responses** — free-text and multiple-choice, driving scenario branches
+- **Participant responses** — branch decisions require an explicit choice; injects can require that choice alone or choice plus free-text reasoning
 - **Team comment threads** — participants discuss released injects in group-scoped comment threads
 - **Simulated communications** — two-pane inbox/outbox for regulatory, press, and executive comms
 - **LLM assessment** — Claude evaluates participant decisions and suggests follow-up injects
@@ -83,8 +83,8 @@ cp .env.example .env
 # Outside DEV_MODE the app refuses to start if SECRET_KEY is unset/weak, or if the selected
 # LLM_PROVIDER is missing its credentials (set LLM_PROVIDER=none to run without the LLM).
 
-# Run the development server
-uv run uvicorn app.main:app --reload
+# Compile CSS, watch templates/design tokens, and run the development server
+uv run iceberg-ttx-dev
 ```
 
 Open [http://localhost:8000](http://localhost:8000). Self-registration always creates a **participant**; privileged roles are assigned out-of-band. Create your first admin/facilitator with the bootstrap command:
@@ -431,11 +431,14 @@ uv run pytest tests/ --ignore=tests/test_ui.py   # skip live Playwright tests
 
 The shared Iceberg design system (cool-grey oklch tokens, cyan accent, and the
 `.rail`/`.workspace` component vocabulary) lives in `static/css/iceberg.css`,
-which `input.css` imports alongside Tailwind. After editing templates or the
-design system, rebuild the Tailwind output:
+which `input.css` imports alongside Tailwind. `uv run iceberg-ttx-dev` performs
+an initial build before Uvicorn starts, then watches templates and design-system
+CSS for changes. The generated `output.css` is intentionally ignored because
+Docker and the development command build it from the committed sources. For a
+one-off production-style build:
 
 ```bash
-tailwindcss -i static/css/input.css -o static/css/output.css
+uv run tailwindcss -i static/css/input.css -o static/css/output.css --minify
 ```
 
 ## Project Structure

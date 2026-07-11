@@ -189,13 +189,34 @@ document.addEventListener('alpine:init', () => {
       return 'Later brief';
     },
 
+    hasOptions(inj) {
+      return !!(inj._options && inj._options.length);
+    },
+
+    hasValidSelectedOption(inj) {
+      const selected = this.selectedOption[inj.id];
+      return this.hasOptions(inj) && inj._options.some(opt => opt.id === selected);
+    },
+
     requiresFreeText(inj) {
-      return inj.free_text_response !== false || !(inj._options && inj._options.length);
+      return inj.free_text_response !== false || !this.hasOptions(inj);
+    },
+
+    responseValidationMessage(inj) {
+      if (this.hasOptions(inj) && !this.hasValidSelectedOption(inj)) {
+        return 'Select a decision to continue.';
+      }
+      if (this.requiresFreeText(inj) && !(this.freeText[inj.id] || '').trim()) {
+        return this.hasOptions(inj)
+          ? 'Explain the reasoning for your decision.'
+          : 'Enter a response to continue.';
+      }
+      return '';
     },
 
     canSubmit(inj) {
-      if (this.exercise.state === 'paused' || this.submitting[inj.id]) return false;
-      return !this.requiresFreeText(inj) || !!(this.freeText[inj.id] || '').trim();
+      if (this.exercise.state !== 'active' || this.submitting[inj.id]) return false;
+      return !this.responseValidationMessage(inj);
     },
 
     canComment(inj) {
@@ -212,9 +233,12 @@ document.addEventListener('alpine:init', () => {
             await this._enrichAndAdd(msg.payload);
           }
           if (msg.type === 'exercise_state_change') {
-            // Merge the full payload so the clock pauses/resumes in step with the
-            // facilitator (needs paused_at/accumulated_pause_seconds, not just state).
-            this.exercise = { ...this.exercise, ...msg.payload };
+            this.exercise = {
+              ...this.exercise,
+              ...msg.payload,
+              state: msg.payload.new_state || msg.payload.state,
+            };
+            document.dispatchEvent(new CustomEvent('dt:exercises-changed'));
           }
           if (msg.type === 'inject_comment_created') {
             this.upsertComment(msg.payload);
@@ -240,7 +264,11 @@ document.addEventListener('alpine:init', () => {
 
     async submitResponse(inj) {
       const content = (this.freeText[inj.id] || '').trim();
-      if (!content) return;
+      const validationMessage = this.responseValidationMessage(inj);
+      if (validationMessage) {
+        this.responseErrors = { ...this.responseErrors, [inj.id]: validationMessage };
+        return;
+      }
       this.responseErrors = { ...this.responseErrors, [inj.id]: '' };
       this.submitting = { ...this.submitting, [inj.id]: true };
       const r = await apiFetch(`/exercises/${exerciseId}/responses`, {
@@ -642,9 +670,13 @@ document.addEventListener('alpine:init', () => {
             this.upsertComment(msg.payload);
           }
           if (msg.type === 'exercise_state_change') {
-            // Merge the full payload so pause_at/accumulated_pause_seconds keep the clock
-            // correct on other clients, not just `state` (#116).
-            this.exercise = { ...this.exercise, ...msg.payload };
+            this.exercise = {
+              ...this.exercise,
+              ...msg.payload,
+              state: msg.payload.new_state || msg.payload.state,
+            };
+            this._startElapsed();
+            document.dispatchEvent(new CustomEvent('dt:exercises-changed'));
           }
           if (msg.type === 'assessment_ready') {
             this.assessments[msg.payload.response_id] = msg.payload.assessment;
