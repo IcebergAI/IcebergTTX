@@ -350,6 +350,34 @@ async def test_response_records_group_and_facilitator_gets_pending_next_inject(
         }
     ]
 
+    from sqlmodel import select
+
+    from app.models.exercise import ExerciseProgress
+    from app.models.inject import InjectProgress, InjectState
+
+    inject_progress = (
+        await session.exec(
+            select(InjectProgress).where(
+                InjectProgress.inject_id == first["id"],
+                InjectProgress.group_id == "it_ops",
+            )
+        )
+    ).one()
+    assert inject_progress.state == InjectState.resolved
+    assert inject_progress.resolved_by == participant.id
+    assert inject_progress.resolution_reason == "participant_response"
+
+    cursor = (
+        await session.exec(
+            select(ExerciseProgress).where(
+                ExerciseProgress.exercise_id == exercise.id,
+                ExerciseProgress.group_id == "it_ops",
+            )
+        )
+    ).one()
+    assert cursor.current_node_id == "b"
+    assert cursor.current_inject_id == first["id"]
+
 
 async def test_free_text_linear_response_suggests_next_inject(
     client: AsyncClient,
