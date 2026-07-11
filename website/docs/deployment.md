@@ -34,6 +34,15 @@ Caddy serves the app over **HTTPS on port 443** (redirecting `:80`), serves
 compiled static files directly, and proxies everything else — including WebSocket
 upgrades at `/ws/` — to uvicorn.
 
+!!! tip "Build vs. published image"
+    `docker compose up` **builds** the image locally from source. To run a
+    **published release** instead, comment out the `build:` block on the `app`
+    service in `docker-compose.yml` and uncomment the
+    `image: ghcr.io/icebergai/iceberg-ttx:<version>` line, then `docker compose up -d`.
+    Releases follow [SemVer](https://semver.org/) (the current line is `0.x` beta);
+    each image is published to GHCR with an SBOM, SLSA provenance, and a cosign
+    signature. See the repository `docs/RELEASING.md` for tags and verification.
+
 - Set `SITE_ADDRESS` to your public domain for an automatic **Let's Encrypt**
   certificate (certs persist in the `caddy_data` volume).
 - The default `SITE_ADDRESS=localhost` uses Caddy's **internal self-signed CA**, so
@@ -82,10 +91,12 @@ kubectl exec -n iceberg-ttx deploy/iceberg-ttx-app -- \
     python -m app.bootstrap_admin --email you@example.com --name "You"
 ```
 
-Before applying, replace the placeholders: values in `k8s/secrets.yaml`, the image
-reference in `k8s/app/deployment.yaml` and `k8s/caddy/deployment.yaml` (the
-copy-static init container uses the app image), and the hostname / issuer /
-`ingressClassName` in `k8s/caddy/ingress.yaml`.
+Before applying, fill in the placeholders in `k8s/secrets.yaml` and set the
+hostname / issuer / `ingressClassName` in `k8s/caddy/ingress.yaml`. The manifests
+already reference the published image `ghcr.io/icebergai/iceberg-ttx` in
+`k8s/app/deployment.yaml` and `k8s/caddy/deployment.yaml` (the copy-static init
+container reuses the app image) — set the release tag you want and **pin by digest**
+(`ghcr.io/icebergai/iceberg-ttx@sha256:…`) in production for reproducible rollouts.
 
 !!! note "TLS in Kubernetes"
     Caddy runs as a plain-HTTP (`:8080`) **internal** reverse proxy; TLS is
@@ -123,13 +134,14 @@ step instead.
 
 ## Local development
 
+Dependencies are managed with [uv](https://docs.astral.sh/uv/) against the
+committed `uv.lock`:
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env       # set SECRET_KEY
-uvicorn app.main:app --reload   # applies migrations to head on startup
+uv sync --extra dev             # create .venv from the lockfile + dev tools
+cp .env.example .env            # set SECRET_KEY
+uv run uvicorn app.main:app --reload   # applies migrations to head on startup
 ```
 
-Run the test suite with `pytest` (a real Postgres is spun up per worker via
+Run the test suite with `uv run pytest` (a real Postgres is spun up per worker via
 testcontainers).

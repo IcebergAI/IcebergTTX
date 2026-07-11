@@ -114,6 +114,11 @@ docker compose up -d
 docker compose ps
 ```
 
+> `docker compose up` **builds** the image locally. To run a **published release**
+> instead, comment out `build:` on the `app` service in `docker-compose.yml` and
+> uncomment the `image: ghcr.io/icebergai/iceberg-ttx:<version>` line (see
+> [Versioning & Releases](#versioning--releases)).
+
 Caddy serves the app over **HTTPS on port 443** (and redirects `:80`). It serves compiled static files directly and proxies everything else (including WebSocket upgrades at `/ws/`) to uvicorn. Set `SITE_ADDRESS` in `.env` to your public domain for an automatic Let's Encrypt certificate; the default `localhost` uses Caddy's **internal self-signed CA**, so `docker compose up` works over HTTPS immediately for local testing (your browser will warn on the untrusted cert — expected).
 
 Create your first admin account once the stack is up:
