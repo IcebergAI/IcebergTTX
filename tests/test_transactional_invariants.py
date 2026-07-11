@@ -1,6 +1,7 @@
 """PostgreSQL concurrency and rollback coverage for #125."""
 
 import asyncio
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -13,7 +14,9 @@ from app.models.exercise import Exercise, ExerciseState
 from app.models.inject import Inject, InjectState
 from app.models.response import Response
 from app.models.scenario import Scenario
+from app.models.suggested_inject import SuggestedInject, SuggestedInjectStatus
 from app.models.user import User, UserRole
+from app.routers.suggested_injects import approve as approve_suggested_inject
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.exercise_service import create_exercise, transition_state
 from app.services.inject_service import release_inject
@@ -85,16 +88,15 @@ async def _cleanup(
 
 
 async def test_stale_inject_release_emits_one_committed_state_change(monkeypatch):
-    """Two independent sessions observing pending cannot both release an inject."""
+    """Simultaneous releases commit and emit side effects exactly once."""
     facilitator_id, participant_id, scenario_id, exercise_id, inject_id = (
         await _persisted_active_exercise()
     )
 
-    async def no_side_effect(*_):
-        return None
-
-    monkeypatch.setattr("app.services.inject_service._broadcast_inject_released", no_side_effect)
-    monkeypatch.setattr("app.services.inject_service._trigger_communications", no_side_effect)
+    broadcast = AsyncMock()
+    trigger = AsyncMock()
+    monkeypatch.setattr("app.services.inject_service._broadcast_inject_released", broadcast)
+    monkeypatch.setattr("app.services.inject_service._trigger_communications", trigger)
     try:
         async with (
             AsyncSession(engine, expire_on_commit=False) as winner_session,
@@ -103,14 +105,76 @@ async def test_stale_inject_release_emits_one_committed_state_change(monkeypatch
             winner_view = await winner_session.get(Inject, inject_id)
             loser_view = await loser_session.get(Inject, inject_id)
             assert winner_view is not None and loser_view is not None
-            winner = await release_inject(winner_session, winner_view, facilitator_id)
-            assert winner.state == InjectState.released
-            with pytest.raises(HTTPException) as exc_info:
-                await release_inject(loser_session, loser_view, facilitator_id)
-            assert exc_info.value.status_code == 409
+            outcomes = await asyncio.gather(
+                release_inject(winner_session, winner_view, facilitator_id),
+                release_inject(loser_session, loser_view, facilitator_id),
+                return_exceptions=True,
+            )
+            winners = [outcome for outcome in outcomes if isinstance(outcome, Inject)]
+            conflicts = [outcome for outcome in outcomes if isinstance(outcome, HTTPException)]
+            assert len(winners) == 1 and winners[0].state == InjectState.released
+            assert len(conflicts) == 1 and conflicts[0].status_code == 409
+            broadcast.assert_awaited_once()
+            trigger.assert_awaited_once()
         async with AsyncSession(engine, expire_on_commit=False) as verify:
             stored = await verify.get(Inject, inject_id)
             assert stored is not None and stored.state == InjectState.released
+    finally:
+        await _cleanup(exercise_id, scenario_id, facilitator_id, participant_id)
+
+
+async def test_concurrent_suggestion_approval_creates_one_inject():
+    """The suggestion row lock serializes replays into one durable approval."""
+    facilitator_id, participant_id, scenario_id, exercise_id, inject_id = (
+        await _persisted_active_exercise()
+    )
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as setup:
+            response = Response(
+                inject_id=inject_id,
+                exercise_id=exercise_id,
+                user_id=participant_id,
+                content="Contain the incident",
+            )
+            setup.add(response)
+            await setup.flush()
+            assert response.id is not None
+            suggestion = SuggestedInject(
+                exercise_id=exercise_id,
+                triggered_by_response_id=response.id,
+                title="Follow-up",
+                content="Validate containment",
+                llm_model="test-provider",
+            )
+            setup.add(suggestion)
+            await setup.commit()
+            suggestion_id = suggestion.id
+            assert suggestion_id is not None
+
+        async def approve_once():
+            async with AsyncSession(engine, expire_on_commit=False) as concurrent_session:
+                facilitator = await concurrent_session.get(User, facilitator_id)
+                assert facilitator is not None
+                return await approve_suggested_inject(
+                    exercise_id,
+                    suggestion_id,
+                    facilitator,
+                    concurrent_session,
+                )
+
+        outcomes = await asyncio.gather(approve_once(), approve_once(), return_exceptions=True)
+        assert sum(isinstance(outcome, dict) for outcome in outcomes) == 1
+        conflicts = [outcome for outcome in outcomes if isinstance(outcome, HTTPException)]
+        assert len(conflicts) == 1 and conflicts[0].status_code == 409
+
+        async with AsyncSession(engine, expire_on_commit=False) as verify:
+            suggestion = await verify.get(SuggestedInject, suggestion_id)
+            assert suggestion is not None
+            assert suggestion.status == SuggestedInjectStatus.approved
+            injects = (
+                await verify.exec(select(Inject).where(Inject.exercise_id == exercise_id))
+            ).all()
+            assert len(injects) == 2
     finally:
         await _cleanup(exercise_id, scenario_id, facilitator_id, participant_id)
 
