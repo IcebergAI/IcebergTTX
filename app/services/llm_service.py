@@ -103,6 +103,11 @@ def _parse_json(text: str, fallback: dict) -> dict:
 async def assess_response(session, response, inject, definition):
     from app.models.assessment import ResponseAssessment
 
+    if response.assessment_id is not None:
+        existing = await session.get(ResponseAssessment, response.assessment_id)
+        if existing is not None:
+            return existing
+
     provider = active_provider()
     if provider is None:
         return None
@@ -159,6 +164,16 @@ async def assess_response(session, response, inject, definition):
 
 async def suggest_inject(session, response, inject, exercise, definition):
     from app.models.suggested_inject import SuggestedInject
+
+    existing = (
+        await session.exec(
+            select(SuggestedInject).where(
+                SuggestedInject.triggered_by_response_id == response.id
+            )
+        )
+    ).first()
+    if existing is not None:
+        return existing
 
     provider = active_provider()
     if provider is None:
