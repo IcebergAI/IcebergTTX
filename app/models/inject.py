@@ -30,6 +30,10 @@ class Inject(SQLModel, table=True):
     )
     group_id: str | None = None           # exercise-scoped group; None = shared/all groups
     sequence_order: int = Field(default=0)
+    # Scheduled release (#116): minutes after exercise start at which this inject
+    # auto-releases. None = manual-only ("pull not push" default). Seeded from the
+    # scenario node's `release_at_minutes`, but runtime-mutable (set/cancel per inject).
+    release_offset_minutes: int | None = Field(default=None)
     state: InjectState = Field(default=InjectState.pending)
     released_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     released_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")

@@ -52,6 +52,13 @@ async def transition_state(
     now = datetime.now(UTC)
     if new_state == ExerciseState.active and exercise.started_at is None:
         exercise.started_at = now
+    # Pause-aware clock (#116): entering `paused` stamps `paused_at`; resuming folds the
+    # just-finished pause span into `accumulated_pause_seconds` and clears `paused_at`.
+    if new_state == ExerciseState.paused:
+        exercise.paused_at = now
+    if new_state == ExerciseState.active and exercise.paused_at is not None:
+        exercise.accumulated_pause_seconds += (now - exercise.paused_at).total_seconds()
+        exercise.paused_at = None
     if new_state == ExerciseState.completed:
         exercise.ended_at = now
 
@@ -60,6 +67,27 @@ async def transition_state(
     await session.commit()
     await session.refresh(exercise)
     return exercise
+
+
+async def broadcast_exercise_state(exercise: Exercise) -> None:
+    """Push a state/timing change to every connected client (#116).
+
+    Carries the full serialised exercise so each client's pause-aware clock stays
+    correct (pause/resume must freeze/continue on participant views too). Sent on every
+    lifecycle transition; there is no per-second traffic — the clock ticks client-side.
+    """
+    from app.schemas.api import ExercisePublic
+    from app.services.ws_manager import manager
+
+    await manager.broadcast_to_exercise(
+        exercise.id,
+        {
+            "type": "exercise_state_change",
+            "exercise_id": exercise.id,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "payload": ExercisePublic.from_model(exercise).model_dump(mode="json"),
+        },
+    )
 
 
 async def scenario_group_ids(session: AsyncSession, exercise: Exercise) -> set[str]:

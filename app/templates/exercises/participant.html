@@ -32,6 +32,9 @@
         </template>
 
         <div class="ml-auto flex items-center gap-3">
+          <span x-show="exercise.state !== 'draft'" class="mono text-[12px] text-muted"
+                :title="exercise.state === 'paused' ? 'Elapsed (paused)' : 'Elapsed exercise time'"
+                x-text="elapsedStr"></span>
           <a :href="'/exercises/' + exercise.id + '/communications'"
              class="text-[12.5px] text-muted hover:text-ink">Communications</a>
           <span class="flex items-center gap-1.5 smallcaps"

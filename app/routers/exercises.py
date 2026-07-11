@@ -34,6 +34,7 @@ from app.services.access_control import (
 )
 from app.services.background import spawn
 from app.services.exercise_service import (
+    broadcast_exercise_state,
     create_exercise,
     enrol_member,
     remove_member,
@@ -44,6 +45,10 @@ from app.services.llm.service import active_provider
 from app.services.llm_service import run_summary_pipeline
 from app.services.report_service import build_report, render_markdown
 from app.services.scenario_service import get_scenario_definition
+from app.services.schedule_service import (
+    cancel_exercise_schedules,
+    schedule_exercise_injects,
+)
 from app.services.timeline_service import build_timeline
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
@@ -201,6 +206,14 @@ async def _transition(
     ex = await require_exercise_owner(session, exercise_id, current_user)
     result = await transition_state(session, ex, target)
     audit_service.emit(action, actor=current_user, target_type="exercise", target_id=exercise_id)
+    # Pacing (#116): push the new state/timing so every client's clock stays in sync, and
+    # arm or defer scheduled inject releases. Start/resume arm pending timers; pause/
+    # complete cancel them (pause defers — resume re-arms with the remaining offset).
+    await broadcast_exercise_state(result)
+    if target == ExerciseState.active:
+        await schedule_exercise_injects(session, result)
+    else:
+        cancel_exercise_schedules(exercise_id)
     return _exercise_out(result)
 
 

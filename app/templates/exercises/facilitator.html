@@ -16,7 +16,9 @@
     </div>
 
     <span class="pill mono" x-text="exState || 'loading'"></span>
-    <span x-show="exState === 'active'" class="mono text-[12px] text-muted" x-text="elapsedStr"></span>
+    <span x-show="exState !== 'draft'" class="mono text-[12px] text-muted"
+          :title="exState === 'paused' ? 'Elapsed (paused)' : 'Elapsed exercise time'"
+          x-text="elapsedStr"></span>
 
     <div class="fac-console__actions ml-auto flex items-center gap-2">
       <span class="fac-console__connection smallcaps" :class="wsConnected ? 'text-faint' : 'text-red-400'"
@@ -149,13 +151,32 @@
                               x-text="'live ' + fmtTime(inj.released_at)"></span>
                         <span x-show="inj.state === 'resolved'"
                               class="mono text-[10.5px] text-faint">resolved</span>
+                        <!-- Scheduled auto-release countdown (#116) -->
+                        <span x-show="isScheduled(inj)"
+                              class="pill mono ring-1 ring-inset text-[10px] bg-surface-2 text-ink-soft ring-line"
+                              :title="'Auto-releases at ' + inj.release_offset_minutes + ' min'"
+                              x-text="'⏱ ' + countdownLabel(inj)"></span>
                       </div>
                     </div>
-                    <button x-show="inj.state === 'pending'"
-                            @click="releaseInject(inj)"
-                            class="btn btn-primary h-6 px-2.5 text-[11.5px] shrink-0">
-                      Release
-                    </button>
+                    <div x-show="inj.state === 'pending'" class="flex flex-col items-end gap-1 shrink-0">
+                      <button @click="releaseInject(inj)"
+                              class="btn btn-primary h-6 px-2.5 text-[11.5px]">
+                        Release
+                      </button>
+                      <div class="flex items-center gap-1">
+                        <input type="number" min="0" step="1"
+                               x-model="scheduleDraft[inj.id]"
+                               :placeholder="schedulePlaceholder(inj)"
+                               class="w-14 rounded-md ring-rule px-1.5 py-0.5 text-[11px] mono bg-surface"
+                               title="Auto-release offset in minutes from exercise start" />
+                        <button @click="saveSchedule(inj)"
+                                class="btn btn-ghost h-6 px-2 text-[11px]"
+                                title="Set scheduled release">Set</button>
+                        <button x-show="isScheduled(inj)" @click="cancelSchedule(inj)"
+                                class="btn btn-ghost h-6 px-2 text-[11px] text-red-400"
+                                title="Cancel scheduled release">✕</button>
+                      </div>
+                    </div>
                   </div>
 
                   <!-- Expected actions (from scenario definition) -->
