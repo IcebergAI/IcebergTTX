@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -6,9 +7,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.dependencies import require_admin, require_role
-from app.models.user import User, UserRole
+from app.models.user import LOCAL_AUTH_PROVIDER, User, UserRole
 from app.schemas.api import UserPublic
-from app.schemas.auth import AdminCreateUserRequest
+from app.schemas.auth import AdminCreateUserRequest, AdminResetPasswordRequest
 from app.services import audit_service
 from app.services.auth_service import hash_password
 
@@ -27,6 +28,8 @@ def _user_out(u: User) -> dict:
         "role": u.role,
         "team": u.team,
         "is_active": u.is_active,
+        "is_admin": u.is_admin,
+        "must_change_password": u.must_change_password,
     }
 
 
@@ -60,3 +63,44 @@ async def create_user(body: AdminCreateUserRequest, admin: AdminDep, session: Se
         reason=f"role={user.role.value} is_admin={user.is_admin}",
     )
     return _user_out(user)
+
+
+@router.post("/{user_id}/reset-password", response_model=UserPublic)
+async def reset_password(
+    user_id: int,
+    body: AdminResetPasswordRequest,
+    admin: AdminDep,
+    session: SessionDep,
+):
+    """Admin-driven password reset (#66). Sets a temporary password on another
+    user, revokes their existing sessions, and flags must_change_password so they
+    are prompted to set their own on next login. SSO accounts have no local
+    password and are rejected."""
+    target = await session.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if target.auth_provider != LOCAL_AUTH_PROVIDER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot reset the password of an SSO account.",
+        )
+    # Capture the PK for the audit event before the object is touched by any
+    # credential-derived value, so nothing password-shaped can reach the log.
+    target_id = target.id
+    target.hashed_password = hash_password(body.password)
+    # Revoke all previously-issued tokens (#14). Truncated to whole seconds so a
+    # token minted at this instant (iat is second-precision) isn't self-rejected.
+    target.token_valid_after = datetime.now(UTC).replace(microsecond=0)
+    target.must_change_password = body.must_change_password
+    session.add(target)
+    await session.commit()
+    await session.refresh(target)
+    audit_service.emit(
+        "admin.password_reset",
+        actor=admin,
+        target_type="user",
+        target_id=target_id,
+        reason="temporary password set by admin",
+        severity="warning",
+    )
+    return _user_out(target)

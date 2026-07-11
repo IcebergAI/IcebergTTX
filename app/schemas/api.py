@@ -31,6 +31,8 @@ class UserPublic(BaseModel):
     role: UserRole
     team: str | None = None
     is_active: bool
+    is_admin: bool = False
+    must_change_password: bool = False
 
 
 class ExercisePublic(BaseModel):

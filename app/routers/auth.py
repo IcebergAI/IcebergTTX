@@ -208,13 +208,18 @@ async def update_me(
         # Revoke all previously-issued tokens (#14). Truncated to whole seconds so
         # a freshly-minted token (iat is second-precision) is not itself rejected.
         current_user.token_valid_after = datetime.now(UTC).replace(microsecond=0)
+        # Changing the password satisfies any admin-set temp-password requirement (#66).
+        current_user.must_change_password = False
     current_user.sqlmodel_update(update_data)
     session.add(current_user)
     await session.commit()
     await session.refresh(current_user)
     if new_password is not None:
         # Re-issue so the caller's own session survives its own password change;
-        # every earlier token is now revoked by the token_valid_after bump.
+        # every earlier token is now revoked by the token_valid_after bump. The
+        # fresh token rides ONLY in the httpOnly cookie — never the response body,
+        # so page-context JS can't read/exfiltrate it (the client drops its stale
+        # localStorage bearer and falls back to the cookie).
         token = create_access_token(
             subject=current_user.email, role=current_user.role.value, is_admin=current_user.is_admin
         )

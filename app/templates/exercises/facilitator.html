@@ -147,7 +147,7 @@
                    class="mt-1.5 flex items-center gap-2 min-w-0 text-[11.5px] text-muted">
                 <span class="truncate" x-text="newAttachmentName"></span>
                 <button type="button"
-                        @click="newAttachment = null; $refs.injectAttachment.value = ''"
+                        @click="clearInjectAttachment()"
                         class="ml-auto text-faint hover:text-ink">Remove</button>
               </div>
             </div>
@@ -336,7 +336,7 @@
                     </div>
                     <select :value="m.group_id || ''"
                             x-effect="syncSelectValue($el, m.group_id)"
-                            @change="m.group_id = $event.target.value || null; setMemberGroup(m, m.group_id)"
+                            @change="changeMemberGroup(m, $event.target.value)"
                             class="w-24 rounded-md ring-rule px-1.5 py-1 text-[11px] bg-surface shrink-0">
                       <option value="">None</option>
                       <template x-for="group in groupDefs" :key="group.id">

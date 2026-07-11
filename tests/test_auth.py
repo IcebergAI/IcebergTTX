@@ -298,3 +298,52 @@ async def test_password_change_sets_token_valid_after(
     assert resp.status_code == 200
     await session.refresh(facilitator)
     assert facilitator.token_valid_after is not None
+    # The re-issued token must ride ONLY in the httpOnly cookie, never the body,
+    # so page-context JS can't read it (#66 security review).
+    assert "access_token" not in resp.json()
+
+
+async def test_password_change_clears_must_change_password(
+    client: AsyncClient, session: AsyncSession, facilitator: User, facilitator_token: str
+):
+    """#66: changing your own password satisfies an admin-set temp-password flag."""
+    facilitator.must_change_password = True
+    session.add(facilitator)
+    await session.commit()
+    resp = await client.put(
+        "/api/auth/me",
+        json={"password": "brandnewpass1234"},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["must_change_password"] is False
+    await session.refresh(facilitator)
+    assert facilitator.must_change_password is False
+
+
+async def test_must_change_password_gate_blocks_writes(
+    client: AsyncClient, session: AsyncSession, facilitator: User, facilitator_token: str
+):
+    """#66 server-side backstop: while the temp-password flag is set, app writes
+    are 403'd, but reads and the password-change endpoint stay reachable so the
+    user can satisfy the requirement rather than driving the app via the API."""
+    facilitator.must_change_password = True
+    session.add(facilitator)
+    await session.commit()
+    auth = {"Authorization": f"Bearer {facilitator_token}"}
+
+    # Reads still work — the shell needs them to funnel the user to /settings.
+    assert (await client.get("/api/auth/me", headers=auth)).status_code == 200
+    assert (await client.get("/api/exercises", headers=auth)).status_code == 200
+
+    # A state-changing app request is blocked by the gate (before any role/body check).
+    blocked = await client.post(
+        "/api/exercises", headers=auth, json={"title": "Blocked", "scenario_id": 1}
+    )
+    assert blocked.status_code == 403
+
+    # The auth namespace stays open, so the user can still change their password.
+    ok = await client.put("/api/auth/me", headers=auth, json={"password": "brandnewpass1234"})
+    assert ok.status_code == 200
+    await session.refresh(facilitator)
+    assert facilitator.must_change_password is False
