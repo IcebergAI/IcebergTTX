@@ -46,6 +46,17 @@ async def test_admin_create_user(client: AsyncClient, admin_token: str):
     assert any(u["email"] == "invited@example.com" for u in listing.json())
 
 
+async def test_list_users_exposes_is_admin(
+    client: AsyncClient, admin_token: str, admin: User, participant: User
+):
+    """The admin console needs is_admin to flag admins (a facilitator may also be
+    an admin), so the listing must carry it."""
+    listing = (await client.get("/api/users", headers=_headers(admin_token))).json()
+    by_email = {u["email"]: u for u in listing}
+    assert by_email[admin.email]["is_admin"] is True
+    assert by_email[participant.email]["is_admin"] is False
+
+
 async def test_admin_create_user_duplicate_email(
     client: AsyncClient, admin_token: str, facilitator: User
 ):

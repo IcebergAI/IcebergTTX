@@ -589,6 +589,13 @@ document.addEventListener('alpine:init', () => {
       if (mr && mr.ok) this.members = await mr.json();
     },
 
+    // Single-call wrapper for the group <select> @change — the strict-CSP Alpine
+    // parser (#77) can't evaluate a compound "a = b; f()" directive expression.
+    changeMemberGroup(member, value) {
+      member.group_id = value || null;
+      this.setMemberGroup(member, member.group_id);
+    },
+
     async setMemberGroup(member, groupId) {
       const r = await apiFetch(`/exercises/${exerciseId}/members/${member.user_id}`, {
         method: 'PATCH',
@@ -599,6 +606,12 @@ document.addEventListener('alpine:init', () => {
         const idx = this.members.findIndex(m => m.user_id === member.user_id);
         if (idx !== -1) this.members[idx] = updated;
       }
+    },
+
+    // Clear the pending inject attachment (single-call for the CSP parser, #77).
+    clearInjectAttachment() {
+      this.newAttachment = null;
+      if (this.$refs.injectAttachment) this.$refs.injectAttachment.value = '';
     },
 
     async approveSuggestion(s) {

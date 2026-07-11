@@ -41,7 +41,10 @@
                 <div class="font-medium" x-text="u.display_name"></div>
                 <div class="mono text-[11.5px] text-faint" x-text="u.email"></div>
               </td>
-              <td class="px-4 py-3 capitalize" x-text="u.role"></td>
+              <td class="px-4 py-3">
+                <span class="capitalize" x-text="u.role"></span>
+                <span class="pill ml-1" x-show="u.is_admin" x-cloak>Admin</span>
+              </td>
               <td class="px-4 py-3 mono text-[12px]" x-text="u.team || '—'"></td>
               <td class="px-4 py-3">
                 <span class="pill" x-show="!u.is_active" x-cloak>Disabled</span>

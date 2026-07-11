@@ -28,6 +28,7 @@ def _user_out(u: User) -> dict:
         "role": u.role,
         "team": u.team,
         "is_active": u.is_active,
+        "is_admin": u.is_admin,
         "must_change_password": u.must_change_password,
     }
 

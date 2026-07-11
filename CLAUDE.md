@@ -112,7 +112,7 @@ forwarding (#24) → strict CSP (#77) → OIDC/SSO (#25) → Caddy reverse proxy
 cookie auth (#68) → pluggable AI providers (#26) → outbound proxy (#97). Per-phase
 detail lives in git history / merged PRs.
 
-Current test count: **400 passing** (1 skipped).
+Current test count: **401 passing** (1 skipped).
 
 ---
 
