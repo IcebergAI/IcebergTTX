@@ -13,6 +13,8 @@
     </div>
     <div class="flex items-center gap-2">
       <span class="pill" :class="stateBadgeClass(exState)" x-text="exState"></span>
+      <a :href="reportMdHref" target="_blank" class="btn h-8 px-3 text-[13px]">Markdown</a>
+      <a :href="reportHref" class="btn h-8 px-3 text-[13px]">Report ↗</a>
       <a :href="facilitateHref" class="btn h-8 px-3 text-[13px]">← Console</a>
     </div>
   </div>

@@ -403,3 +403,51 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   #app-main { transition: none !important; transform: none !important; }
   ::view-transition-old(app-main), ::view-transition-new(app-main) { animation: none !important; }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ *  Print — after-action report (#113). The first @media print in the app.
+ *  Drops the command-center chrome, forces the light token set (so a report
+ *  printed from dark mode is still black-on-white), and tightens page margins
+ *  for browser "Save as PDF".
+ * ────────────────────────────────────────────────────────────────────────── */
+@media print {
+  @page { margin: 16mm 14mm; }
+
+  /* Force the light palette regardless of the active theme. */
+  :root, :root[data-theme="dark"], :root[data-theme="light"] {
+    --paper: #ffffff !important;
+    --surface: #ffffff !important;
+    --surface-2: #f6f7f9 !important;
+    --ink: #16181d !important;
+    --ink-soft: #33373f !important;
+    --muted: #565b64 !important;
+    --faint: #767b84 !important;
+    --line: #d9dde2 !important;
+    --line-strong: #c3c8cf !important;
+    color-scheme: light !important;
+  }
+
+  html, body { background: #fff !important; }
+
+  /* Hide the app shell + any interactive-only affordances. */
+  .brandbar, .rail, .topbar, .no-print { display: none !important; }
+
+  /* Let the report use the full page width. */
+  .app, #app-main, .canvas, .workspace, .report-page {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+    width: auto !important;
+  }
+
+  .report-page { color: #16181d; }
+  .report-section { break-inside: avoid; }
+  .report-inject { break-inside: avoid; }
+  a { text-decoration: none !important; color: inherit !important; }
+}
+
+/* Screen-hidden, print-only content (e.g. the final summary prose when the
+ *  editable textarea is what shows on screen). Paired with .no-print above. */
+.print-only { display: none; }
+@media print { .print-only { display: block !important; } }

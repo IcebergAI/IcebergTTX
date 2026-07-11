@@ -80,6 +80,8 @@ document.addEventListener('alpine:init', () => {
     get exTitle() { return (this.exercise && this.exercise.title) || '…'; },
     get exId() { return this.exercise ? 'EX-' + this.padId(this.exercise.id, 3) : ''; },
     get facilitateHref() { return '/exercises/' + exerciseId + '/facilitate'; },
+    get reportHref() { return '/exercises/' + exerciseId + '/report'; },
+    get reportMdHref() { return '/api/exercises/' + exerciseId + '/report.md'; },
     get isEmpty() { return !this.loading && this.events.length === 0; },
 
     userName(id) {

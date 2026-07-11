@@ -67,6 +67,24 @@ class ExercisePublic(BaseModel):
         )
 
 
+class ExecutiveSummaryPublic(BaseModel):
+    """LLM-drafted (and facilitator-editable) executive summary for the report (#113)."""
+
+    exercise_id: int
+    summary_text: str
+    llm_model: str
+    edited: bool
+    generated_at: str
+
+
+class ReportSummaryState(BaseModel):
+    """Executive-summary state for the review UI: whether AI drafting is available
+    (a provider is configured AND the exercise opted in) plus the current summary."""
+
+    available: bool
+    summary: ExecutiveSummaryPublic | None = None
+
+
 class DebriefNotes(BaseModel):
     """Owner-only debrief payload (#112): the scenario author's read-only talking
     points alongside the editable exercise-level notes. Never returned by the

@@ -3,7 +3,7 @@ import io
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -13,10 +13,18 @@ from app.dependencies import get_current_user, require_role
 from app.models.exercise import Exercise, ExerciseMember, ExerciseState
 from app.models.inject import Inject
 from app.models.inject_comment import InjectComment
+from app.models.report_summary import ExecutiveSummary
 from app.models.response import Response
 from app.models.scenario import Scenario
 from app.models.user import User, UserRole
-from app.schemas.api import DebriefNotes, ExercisePublic, MemberPublic, TimelineEvent
+from app.schemas.api import (
+    DebriefNotes,
+    ExecutiveSummaryPublic,
+    ExercisePublic,
+    MemberPublic,
+    ReportSummaryState,
+    TimelineEvent,
+)
 from app.services import audit_service
 from app.services.access_control import (
     is_actual_facilitator,
@@ -24,6 +32,7 @@ from app.services.access_control import (
     require_exercise_access,
     require_exercise_owner,
 )
+from app.services.background import spawn
 from app.services.exercise_service import (
     create_exercise,
     enrol_member,
@@ -31,6 +40,9 @@ from app.services.exercise_service import (
     transition_state,
     update_member_group,
 )
+from app.services.llm.service import active_provider
+from app.services.llm_service import run_summary_pipeline
+from app.services.report_service import build_report, render_markdown
 from app.services.scenario_service import get_scenario_definition
 from app.services.timeline_service import build_timeline
 
@@ -54,6 +66,10 @@ class UpdateExerciseRequest(BaseModel):
     title: str | None = None
     llm_enabled: bool | None = None
     debrief_notes: str | None = None  # #112 — owner-only, editable in any live state
+
+
+class UpdateSummaryRequest(BaseModel):
+    summary_text: str
 
 
 class EnrolMemberRequest(BaseModel):
@@ -390,6 +406,109 @@ async def get_debrief(exercise_id: int, current_user: FacilitatorDep, session: S
         scenario_debrief_notes=definition.debrief_notes if definition else None,
         debrief_notes=ex.debrief_notes,
     )
+
+
+# ── After-action report (#113) ────────────────────────────────────────────────
+
+
+def _summary_public(s: ExecutiveSummary) -> ExecutiveSummaryPublic:
+    return ExecutiveSummaryPublic(
+        exercise_id=s.exercise_id,
+        summary_text=s.summary_text,
+        llm_model=s.llm_model,
+        edited=s.edited,
+        generated_at=s.generated_at.isoformat(),
+    )
+
+
+async def _get_summary_row(session: AsyncSession, exercise_id: int) -> ExecutiveSummary | None:
+    return (
+        await session.exec(
+            select(ExecutiveSummary).where(ExecutiveSummary.exercise_id == exercise_id)
+        )
+    ).first()
+
+
+@router.get("/{exercise_id}/report")
+async def report_json(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    """Structured after-action report data (facilitator-owner only, #113). Rendered by
+    the print-friendly HTML view and available for programmatic use."""
+    await require_exercise_owner(session, exercise_id, current_user)
+    report = await build_report(session, exercise_id)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+    return report
+
+
+@router.get("/{exercise_id}/report.md")
+async def report_markdown(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    """Markdown after-action report download (facilitator-owner only, #113)."""
+    await require_exercise_owner(session, exercise_id, current_user)
+    report = await build_report(session, exercise_id)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+    audit_service.emit(
+        "exercise.export",
+        actor=current_user,
+        target_type="exercise",
+        target_id=exercise_id,
+        reason="format=report.md",
+        severity="warning",
+    )
+    return PlainTextResponse(
+        render_markdown(report),
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": f'attachment; filename="report_{exercise_id}.md"',
+        },
+    )
+
+
+@router.get("/{exercise_id}/report/summary", response_model=ReportSummaryState)
+async def get_report_summary(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    """Current executive summary + whether AI drafting is available (#113)."""
+    ex = await require_exercise_owner(session, exercise_id, current_user)
+    row = await _get_summary_row(session, exercise_id)
+    available = active_provider() is not None and ex.llm_enabled
+    return ReportSummaryState(
+        available=available, summary=_summary_public(row) if row else None
+    )
+
+
+@router.post("/{exercise_id}/report/summary", status_code=status.HTTP_202_ACCEPTED)
+async def draft_report_summary(
+    exercise_id: int, current_user: FacilitatorDep, session: SessionDep
+):
+    """Kick off an LLM draft of the executive summary (#113). Gated on both a
+    configured provider AND the exercise's own AI opt-in — 409 if either is off."""
+    ex = await require_exercise_owner(session, exercise_id, current_user)
+    if active_provider() is None or not ex.llm_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="AI summary unavailable: no provider configured or exercise AI disabled",
+        )
+    spawn(run_summary_pipeline(exercise_id))
+    return {"status": "accepted"}
+
+
+@router.patch("/{exercise_id}/report/summary", response_model=ExecutiveSummaryPublic)
+async def edit_report_summary(
+    exercise_id: int,
+    body: UpdateSummaryRequest,
+    current_user: FacilitatorDep,
+    session: SessionDep,
+):
+    """Facilitator edits the drafted summary before it lands in the report (#113)."""
+    await require_exercise_owner(session, exercise_id, current_user)
+    row = await _get_summary_row(session, exercise_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No summary to edit")
+    row.summary_text = body.summary_text
+    row.edited = True
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return _summary_public(row)
 
 
 @router.get("/{exercise_id}/export.csv")
