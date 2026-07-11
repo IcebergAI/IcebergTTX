@@ -1,7 +1,9 @@
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Literal
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlmodel import select
 
 from app.config import settings
@@ -10,6 +12,28 @@ from app.schemas.api import AssessmentPublic, ExecutiveSummaryPublic, SuggestedI
 from app.services.llm.service import active_provider
 
 logger = logging.getLogger(__name__)
+
+_MAX_LLM_TEXT = 12_000
+_MAX_LLM_TITLE = 300
+_MAX_LLM_TEAMS = 100
+
+
+class AssessmentOutput(BaseModel):
+    """Strict, untrusted provider response for a participant assessment."""
+
+    model_config = ConfigDict(extra="forbid")
+    assessment_text: str = Field(min_length=1, max_length=_MAX_LLM_TEXT)
+    decision_quality: Literal["good", "adequate", "poor"] | None = None
+    recommended_branch_option_id: str | None = Field(default=None, max_length=200)
+
+
+class SuggestedInjectOutput(BaseModel):
+    """Strict, untrusted provider response for a suggested inject."""
+
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=_MAX_LLM_TITLE)
+    content: str = Field(min_length=1, max_length=_MAX_LLM_TEXT)
+    target_teams: list[str] | None = Field(default=None, max_length=_MAX_LLM_TEAMS)
 
 _ASSESSMENT_SYSTEM = (
     "You are an expert tabletop exercise facilitator. "
@@ -68,9 +92,10 @@ def _build_context(inject, definition, response) -> tuple[str, str]:
 
 
 def _parse_json(text: str, fallback: dict) -> dict:
-    """Parse an LLM JSON reply; return ``fallback`` on invalid JSON."""
+    """Parse an LLM JSON object; return ``fallback`` for malformed/non-object output."""
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else fallback
     except json.JSONDecodeError:
         return fallback
 
@@ -98,12 +123,24 @@ async def assess_response(session, response, inject, definition):
         "recommended_branch_option_id": None,
     })
 
+    try:
+        output = AssessmentOutput.model_validate(data)
+    except ValidationError:
+        output = AssessmentOutput(
+            assessment_text=(text.strip() or "Provider returned invalid assessment")[:_MAX_LLM_TEXT]
+        )
+    option_ids = {option.id for option in node.options} if (node := next(
+        (item for item in definition.injects if item.id == inject.scenario_node_id), None
+    )) else set()
+    if output.recommended_branch_option_id not in option_ids:
+        output = output.model_copy(update={"recommended_branch_option_id": None})
+
     assessment = ResponseAssessment(
         response_id=response.id,
         llm_model=provider.llm_model_label,
-        assessment_text=data.get("assessment_text", text),
-        decision_quality=data.get("decision_quality"),
-        recommended_branch_option_id=data.get("recommended_branch_option_id"),
+        assessment_text=output.assessment_text,
+        decision_quality=output.decision_quality,
+        recommended_branch_option_id=output.recommended_branch_option_id,
     )
     session.add(assessment)
     await session.commit()
