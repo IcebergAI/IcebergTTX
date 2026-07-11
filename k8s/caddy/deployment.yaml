@@ -33,7 +33,7 @@ spec:
         # Caddy serves from this volume directly — no shared PVC required. Uses the
         # same image as the app so static files always match the deployed version.
         - name: copy-static
-          image: your-registry/iceberg-ttx:latest  # REPLACE — same tag as app
+          image: ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.1  # same tag as the app image
           # cp -rL (not -a): runs as non-root, so it must not try to preserve the
           # source files' ownership (uid 1000) — that chown would fail. Static
           # assets stay world-readable, which is all Caddy needs.
