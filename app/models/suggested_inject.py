@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column, DateTime, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -18,6 +18,9 @@ class SuggestedInjectStatus(StrEnum):
 
 
 class SuggestedInject(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("triggered_by_response_id", name="uq_suggested_inject_response"),
+    )
     id: int | None = Field(default=None, primary_key=True)
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
     triggered_by_response_id: int = Field(foreign_key="response.id", ondelete="CASCADE")
