@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 import time
 from pathlib import Path
 
+# Development-only supervisor; every command uses an argv list and ``shell=False``.
 ROOT = Path(__file__).resolve().parents[1]
 INPUT_CSS = ROOT / "static" / "css" / "input.css"
 OUTPUT_CSS = ROOT / "static" / "css" / "output.css"
@@ -40,14 +41,20 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
 def main() -> int:
     """Compile CSS, then supervise Tailwind watch mode and Uvicorn reload mode."""
     try:
-        subprocess.run(_tailwind_command(), cwd=ROOT, check=True)
+        # The executable is the resolved Tailwind binary from the locked dev environment.
+        subprocess.run(  # nosec B603
+            _tailwind_command(), cwd=ROOT, check=True
+        )
     except (RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"Unable to prepare development assets: {exc}", file=sys.stderr)
         return 1
 
     processes = [
-        subprocess.Popen(_tailwind_command(watch=True), cwd=ROOT),
-        subprocess.Popen(
+        # Both child commands are fixed argv lists; no shell evaluates user input.
+        subprocess.Popen(  # nosec B603
+            _tailwind_command(watch=True), cwd=ROOT
+        ),
+        subprocess.Popen(  # nosec B603
             [sys.executable, "-m", "uvicorn", "app.main:app", "--reload", *sys.argv[1:]],
             cwd=ROOT,
         ),
