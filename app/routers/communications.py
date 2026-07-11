@@ -15,6 +15,8 @@ from app.services.communication_service import (
     all_team_ids_for_exercise,
     broadcast_communication,
     comm_payload,
+    communication_read_at,
+    communication_read_times,
     create_communication,
     list_communications,
     mark_read,
@@ -76,6 +78,7 @@ async def _comm_visible_to_user(session: AsyncSession, comm: Communication, user
 
 @router.get("", response_model=list[CommunicationPublic])
 async def list_comms(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
+    assert current_user.id is not None
     await require_exercise_access(session, exercise_id, current_user)
     team = None
     if current_user.role == UserRole.participant:
@@ -90,7 +93,19 @@ async def list_comms(exercise_id: int, current_user: CurrentUserDep, session: Se
         user_team=team,
         participant_view=current_user.role == UserRole.participant,
     )
-    return [await comm_payload(c, session) for c in comms]
+    comm_ids = [c.id for c in comms if c.id is not None]
+    read_times = await communication_read_times(session, comm_ids, current_user.id)
+    payloads = []
+    for communication in comms:
+        assert communication.id is not None
+        payloads.append(
+            await comm_payload(
+                communication,
+                session,
+                read_at=read_times.get(communication.id),
+            )
+        )
+    return payloads
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=CommunicationPublic)
@@ -185,5 +200,22 @@ async def get_comm(
     c = await _get_comm_or_404(session, exercise_id, comm_id)
     if not await _comm_visible_to_user(session, c, current_user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Communication not found")
-    updated = await mark_read(session, c, current_user.id)
-    return await comm_payload(updated, session)
+    read_at = await communication_read_at(session, comm_id, current_user.id)
+    return await comm_payload(c, session, read_at=read_at)
+
+
+@router.put("/{comm_id}/read", response_model=CommunicationPublic)
+async def put_comm_read(
+    exercise_id: int,
+    comm_id: int,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+):
+    """Idempotently mark one visible communication read for the current user."""
+    assert current_user.id is not None
+    await require_exercise_access(session, exercise_id, current_user)
+    communication = await _get_comm_or_404(session, exercise_id, comm_id)
+    if not await _comm_visible_to_user(session, communication, current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Communication not found")
+    receipt = await mark_read(session, comm_id, current_user.id)
+    return await comm_payload(communication, session, read_at=receipt.read_at)

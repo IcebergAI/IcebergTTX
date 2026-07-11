@@ -191,7 +191,8 @@ class CommunicationPublic(BaseModel):
     triggered_by_inject_id: int | None = None
     visible_to_teams: list[str] | None = None
     sent_at: str
-    read_by: list[int]
+    is_read: bool = False
+    read_at: str | None = None
 
 
 class InjectCommentPublic(BaseModel):

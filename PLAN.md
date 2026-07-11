@@ -549,6 +549,15 @@ before changing that subsystem. Keep them current as the code changes.
 
 **Communications state guards**: participant outbound `send_comm` requires the exercise to be `active` (409 otherwise), consistent with response `submit` and inject-comment `create_comment` (#40). Facilitator `inject_comm` (simulated inbound) is **intentionally** unrestricted so facilitators can seed comms during `draft`/`paused` setup.
 
+**Communication read receipts**: reading a communication is an explicit, idempotent
+`PUT /api/exercises/{exercise_id}/communications/{communication_id}/read` operation.
+`GET` is side-effect free. `CommunicationRead` stores one immutable first-read
+timestamp per `(communication_id, user_id)`; concurrent readers cannot overwrite
+one another, retries retain the first timestamp, communication deletion cascades
+its receipts, and user deletion removes that user's receipts. Inbox payloads expose
+only the current viewer's `is_read` / `read_at` state rather than other users' IDs.
+The list route loads viewer read state in one batch query.
+
 **Group-scoped injects**: `Inject.group_id` and `ExerciseMember.group_id` allow injects to be targeted at specific exercise groups (teams). When `group_id` is `None` the inject is visible to all groups. The inject router resolves group membership via `exercise_group_for_user()` at query time.
 
 **File attachments on injects**: Injects support a single file attachment (`attachment_filename`, `attachment_path`, `attachment_content_type`, `attachment_size` on the `Inject` model). Files are stored under `uploads/inject_attachments/{exercise_id}/`. The inject router accepts `multipart/form-data`; `inject_attachment_payload()` builds the download URL returned in the inject payload. Uploads stream to disk in chunks and abort once `MAX_ATTACHMENT_BYTES` (25 MB) is exceeded, so an oversized upload is never fully buffered (#39). Content-type is confined to `ALLOWED_ATTACHMENT_TYPES` (`_normalize_content_type` — anything else, e.g. `text/html`/`image/svg+xml`, is stored and served as `application/octet-stream`), applied on both upload and download; downloads set `X-Content-Type-Options: nosniff` alongside the `Content-Disposition: attachment` implied by `filename` (#16).
