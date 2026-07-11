@@ -24,26 +24,36 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+
+      # Fail fast if pyproject deps changed without a matching uv.lock (#73):
+      # the lockfile is the reproducible-build source of truth.
+      - name: Verify lockfile is current
+        run: uv lock --check
+
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: uv sync --extra dev
 
       - name: Lint
-        run: ruff check app/ tests/
+        run: uv run ruff check app/ tests/
 
       - name: Security scan (bandit)
-        run: bandit -c pyproject.toml -r app/
+        run: uv run bandit -c pyproject.toml -r app/
 
       - name: Dependency audit (pip-audit)
         # Warn-only: an unfixable transitive CVE should surface in the logs, not
         # block every PR. Tighten to a hard failure once findings are triaged.
         continue-on-error: true
-        run: pip-audit --skip-editable
+        run: uv run pip-audit --skip-editable
 
       # The test suite starts its own Postgres via testcontainers (Docker is
       # available on GitHub-hosted runners) and sets DATABASE_URL itself. To run
       # against an external Postgres instead, set DATABASE_URL_OVERRIDE_FOR_TESTS.
       - name: Test
-        run: pytest
+        run: uv run pytest
         env:
           SECRET_KEY: test-secret-key-for-ci
 
