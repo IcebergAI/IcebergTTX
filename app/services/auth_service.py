@@ -4,6 +4,7 @@ import bcrypt
 import jwt
 
 from app.config import settings
+from app.schemas.auth import MAX_PASSWORD_BYTES
 
 
 def hash_password(password: str) -> str:
@@ -11,7 +12,19 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+    try:
+        plain_bytes = plain.encode()
+    except UnicodeEncodeError:
+        return False
+    if len(plain_bytes) > MAX_PASSWORD_BYTES:
+        return False
+    try:
+        return bcrypt.checkpw(plain_bytes, hashed.encode())
+    except (UnicodeEncodeError, ValueError):
+        # bcrypt rejects inputs over 72 bytes (and malformed stored hashes). Treat
+        # either as an ordinary verification failure so the login route records the
+        # attempt and returns the same response as every other invalid credential.
+        return False
 
 
 def create_access_token(subject: str, role: str, is_admin: bool = False) -> str:
