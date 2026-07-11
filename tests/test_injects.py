@@ -50,6 +50,16 @@ async def test_create_inject_with_teams(
     assert r.json()["target_teams"] == ["it_ops", "legal"]
 
 
+async def test_create_inject_rejects_unknown_or_duplicate_target_teams(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
+):
+    for teams in (["unknown"], ["it_ops", "it_ops"]):
+        r = await _create_inject(
+            client, facilitator_token, active_exercise.id, target_teams=teams
+        )
+        assert r.status_code == 422
+
+
 async def test_create_inject_with_attachment(
     client: AsyncClient,
     facilitator_token: str,

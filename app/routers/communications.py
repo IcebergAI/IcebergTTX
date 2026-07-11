@@ -22,7 +22,7 @@ from app.services.communication_service import (
     mark_read,
     sender_team_for_comm,
 )
-from app.services.exercise_service import validate_group_id
+from app.services.exercise_service import validate_team_ids
 
 router = APIRouter(prefix="/exercises/{exercise_id}/communications", tags=["communications"])
 
@@ -136,12 +136,9 @@ async def send_comm(
     sender_team = (
         await exercise_group_for_user(session, exercise_id, current_user) or current_user.team
     )
-    validated_teams = []
-    for team_id in (body.visible_to_teams or []):
-        team = await validate_group_id(session, exercise, team_id)
-        if team is not None:
-            validated_teams.append(team)
-    visible_to_teams = validated_teams or None
+    visible_to_teams = await validate_team_ids(
+        session, exercise, body.visible_to_teams, field="visible_to_teams"
+    )
     comm = await create_communication(
         session,
         exercise_id=exercise_id,
@@ -169,9 +166,9 @@ async def inject_comm(
     Intentionally has no exercise-state guard (unlike participant send_comm, #40):
     facilitators may seed simulated inbound comms during draft/paused setup.
     """
-    await require_exercise_access(session, exercise_id, current_user)
+    exercise = await require_exercise_access(session, exercise_id, current_user)
     visible_to_teams = (
-        body.visible_to_teams
+        await validate_team_ids(session, exercise, body.visible_to_teams, field="visible_to_teams")
         or await all_team_ids_for_exercise(session, exercise_id)
         or None
     )

@@ -190,6 +190,16 @@ async def test_send_outbound(
     assert "read_by" not in data
 
 
+async def test_facilitator_injected_comm_rejects_unknown_or_duplicate_audiences(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
+):
+    for teams in (["unknown"], ["it_ops", "it_ops"]):
+        response = await _inject_comm(
+            client, facilitator_token, active_exercise.id, visible_to_teams=teams
+        )
+        assert response.status_code == 422
+
+
 async def test_participant_send_blocked_when_not_active(
     client: AsyncClient,
     session: AsyncSession,

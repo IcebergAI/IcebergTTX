@@ -8,11 +8,24 @@ from pydantic import BaseModel, field_validator, model_validator
 # injects; this guards against pathological or malicious payloads (#18). Set well
 # above any realistic scenario so legitimate authoring is never blocked.
 MAX_INJECTS = 5000
+MAX_TRIGGER_DELAY_SECONDS = 86_400
+
+
+def _normalized_id(value: str, field: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{field} must not be blank")
+    return normalized
 
 
 class ParticipantTeam(BaseModel):
     id: str
     label: str
+
+    @field_validator("id")
+    @classmethod
+    def normalize_id(cls, value: str) -> str:
+        return _normalized_id(value, "participant team id")
 
 
 class TriggerComm(BaseModel):
@@ -29,11 +42,25 @@ class TriggerComm(BaseModel):
             raise ValueError("direction must be 'inbound' or 'outbound'")
         return v
 
+    @field_validator("delay_after_release_seconds")
+    @classmethod
+    def validate_delay(cls, value: int) -> int:
+        if not 0 <= value <= MAX_TRIGGER_DELAY_SECONDS:
+            raise ValueError(
+                f"delay_after_release_seconds must be between 0 and {MAX_TRIGGER_DELAY_SECONDS}"
+            )
+        return value
+
 
 class InjectOption(BaseModel):
     id: str
     label: str
     next_inject_id: str | None = None
+
+    @field_validator("id")
+    @classmethod
+    def normalize_id(cls, value: str) -> str:
+        return _normalized_id(value, "option id")
 
 
 class InjectNode(BaseModel):
@@ -51,6 +78,19 @@ class InjectNode(BaseModel):
     # inject auto-releases. None = manual-only. Purely a timing hint — it adds no graph
     # edge, so `_check_no_cycles` is unaffected.
     release_at_minutes: int | None = None
+
+    @field_validator("id")
+    @classmethod
+    def normalize_id(cls, value: str) -> str:
+        return _normalized_id(value, "inject id")
+
+    @field_validator("target_teams")
+    @classmethod
+    def normalize_target_teams(cls, values: list[str]) -> list[str]:
+        normalized = [_normalized_id(value, "target team id") for value in values]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("target_teams must not contain duplicates")
+        return normalized
 
     @field_validator("release_at_minutes")
     @classmethod
@@ -90,7 +130,10 @@ class ScenarioDefinition(BaseModel):
             # resolution) assumes inject ids are unique; a set would hide collisions.
             raise ValueError(f"duplicate inject id(s): {', '.join(dupes)}")
         inject_ids = set(ids)
-        team_ids = {t.id for t in self.participant_teams}
+        team_id_list = [team.id for team in self.participant_teams]
+        if len(team_id_list) != len(set(team_id_list)):
+            raise ValueError("participant_teams must not contain duplicate ids")
+        team_ids = set(team_id_list)
 
         # start_inject_id must exist
         if self.start_inject_id not in inject_ids:
@@ -99,7 +142,7 @@ class ScenarioDefinition(BaseModel):
         for inj in self.injects:
             # All target_teams must be defined
             for team in inj.target_teams:
-                if team_ids and team not in team_ids:
+                if team not in team_ids:
                     raise ValueError(
                         f"inject '{inj.id}': target_team '{team}' not in participant_teams"
                     )
@@ -108,6 +151,9 @@ class ScenarioDefinition(BaseModel):
                     f"inject '{inj.id}': next_inject_id '{inj.next_inject_id}' not found"
                 )
             # All next_inject_id references must exist
+            option_ids = [option.id for option in inj.options]
+            if len(option_ids) != len(set(option_ids)):
+                raise ValueError(f"inject '{inj.id}': option ids must be unique")
             for opt in inj.options:
                 if opt.next_inject_id is not None and opt.next_inject_id not in inject_ids:
                     raise ValueError(

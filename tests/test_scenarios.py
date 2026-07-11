@@ -1,4 +1,6 @@
+import pytest
 from httpx import AsyncClient
+from pydantic import ValidationError
 
 from app.models.scenario import Scenario
 from app.schemas.scenario_json import ScenarioDefinition
@@ -6,6 +8,34 @@ from app.schemas.scenario_json import ScenarioDefinition
 
 def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+def test_definition_rejects_duplicate_teams_options_and_unknown_audiences():
+    with pytest.raises(ValidationError):
+        ScenarioDefinition.model_validate(
+            {
+                "title": "Invalid",
+                "participant_teams": [{"id": "ops", "label": "Ops"}, {"id": "ops", "label": "Dup"}],
+                "injects": [{"id": "start", "title": "Start", "content": "x"}],
+                "start_inject_id": "start",
+            }
+        )
+    with pytest.raises(ValidationError):
+        ScenarioDefinition.model_validate(
+            {
+                "title": "Invalid",
+                "participant_teams": [{"id": "ops", "label": "Ops"}],
+                "injects": [
+                    {
+                        "id": "start",
+                        "title": "Start",
+                        "content": "x",
+                        "target_teams": ["other"],
+                    }
+                ],
+                "start_inject_id": "start",
+            }
+        )
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
