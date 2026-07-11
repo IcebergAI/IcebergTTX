@@ -166,13 +166,25 @@ async def _save_attachment(
     )
 
 
-def _delete_attachment_file(inject: Inject) -> None:
-    if not inject.attachment_path:
+def _delete_attachment_path(attachment_path: str | None) -> None:
+    if not attachment_path:
         return
+    path = Path(attachment_path)
     try:
-        Path(inject.attachment_path).unlink(missing_ok=True)
-    except OSError:
+        root = ATTACHMENT_ROOT.resolve()
+        resolved = path.resolve()
+        if root not in resolved.parents:
+            raise ValueError("attachment path escapes storage root")
+        resolved.unlink(missing_ok=True)
+        # Keep the hierarchy tidy after successful post-commit deletion; failure is
+        # harmless and reconciliation can retry later.
+        resolved.parent.rmdir()
+    except (OSError, ValueError):
         pass
+
+
+def _delete_attachment_file(inject: Inject) -> None:
+    _delete_attachment_path(inject.attachment_path)
 
 
 @router.get("", response_model=list[InjectPublic])
@@ -216,17 +228,22 @@ async def create(
     if group_id is None and target_teams and len(target_teams) == 1:
         group_id = target_teams[0]
     attachment_meta = await _save_attachment(attachment, exercise_id)
-    inject = await create_inject(
-        session,
-        exercise_id=exercise_id,
-        title=body.title,
-        content=body.content,
-        scenario_node_id=body.scenario_node_id,
-        target_teams=target_teams,
-        group_id=group_id,
-        sequence_order=body.sequence_order,
-        attachment=attachment_meta,
-    )
+    try:
+        inject = await create_inject(
+            session,
+            exercise_id=exercise_id,
+            title=body.title,
+            content=body.content,
+            scenario_node_id=body.scenario_node_id,
+            target_teams=target_teams,
+            group_id=group_id,
+            sequence_order=body.sequence_order,
+            attachment=attachment_meta,
+        )
+    except Exception:
+        if attachment_meta:
+            _delete_attachment_path(attachment_meta.path)
+        raise
     return await inject_payload(session, inject)
 
 
@@ -245,9 +262,9 @@ async def delete_inject(
     exercise_id: int, inject_id: int, current_user: FacilitatorDep, session: SessionDep
 ):
     inject = await get_inject_or_404(session, exercise_id, inject_id)
-    _delete_attachment_file(inject)
     await session.delete(inject)
     await session.commit()
+    _delete_attachment_file(inject)
     audit_service.emit(
         "inject.delete",
         actor=current_user,
