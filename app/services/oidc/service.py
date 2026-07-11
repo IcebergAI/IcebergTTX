@@ -176,6 +176,11 @@ async def provision_oidc_user(
             raise OIDCProvisionError("identity conflict")
         if not identity.email_verified:
             raise OIDCProvisionError("unverified email collision")
+        # Entra email claims are mutable and therefore cannot prove ownership of
+        # a pre-existing local account. Its stable subject remains the only safe
+        # returning-identity key (handled above).
+        if cfg.key == "entra":
+            raise OIDCProvisionError("entra email linking is disabled")
         # Link: attach the provider identity to the existing local row, preserving
         # its role / is_admin.
         by_email.auth_provider = cfg.key

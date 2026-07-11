@@ -140,6 +140,25 @@ async def test_links_verified_email_to_local_account(session, audit_events):
     assert any(a == "auth.oidc_link" for a, _ in audit_events)
 
 
+async def test_entra_verified_email_does_not_link_local_account(session):
+    local = User(
+        email="entra-link@sso.test",
+        display_name="Local",
+        hashed_password="hashed",
+        role=UserRole.facilitator,
+    )
+    session.add(local)
+    await session.commit()
+    cfg = _cfg()
+    cfg.key = "entra"
+
+    with pytest.raises(oidc_service.OIDCProvisionError) as exc:
+        await oidc_service.provision_oidc_user(
+            session, cfg=cfg, identity=_identity(subject="entra-sub", email=local.email)
+        )
+    assert exc.value.reason == "entra email linking is disabled"
+
+
 async def test_unverified_email_collision_denied(session):
     session.add(
         User(
