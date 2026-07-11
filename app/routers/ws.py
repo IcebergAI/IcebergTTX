@@ -7,7 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.database import engine, get_session
 from app.dependencies import resolve_user_from_token
 from app.middleware import origin_allowed
-from app.models.user import User, UserRole
+from app.models.user import UserRole
 from app.services.access_control import (
     exercise_member_for_user,
     is_actual_facilitator,
@@ -85,8 +85,13 @@ async def exercise_ws(
                 # connected for hours, while membership, role, or token validity can
                 # change at any time.
                 async with AsyncSession(engine) as heartbeat_session:
-                    current = await heartbeat_session.get(User, user_id)
-                    if current is None or not current.is_active:
+                    current = await resolve_user_from_token(
+                        auth_token,
+                        heartbeat_session,
+                        view_role,
+                        view_team,
+                    )
+                    if current is None:
                         await ws.close(code=4003)
                         break
                     try:
@@ -98,9 +103,14 @@ async def exercise_ws(
                         heartbeat_session, exercise_id, user_id
                     )
                     current_group = current_member.group_id if current_member else None
-                    if current.role == UserRole.participant and current_member is None:
-                        await ws.close(code=4003)
-                        break
+                    if current.role == UserRole.participant:
+                        if is_actual_facilitator(current):
+                            current_group = current_group or current.team
+                        else:
+                            if current_member is None:
+                                await ws.close(code=4003)
+                                break
+                            current_group = current_member.group_id or current.team
                     manager.refresh_authorization(
                         ws,
                         exercise_id,
