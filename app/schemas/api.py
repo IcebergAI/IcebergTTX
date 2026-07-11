@@ -89,6 +89,29 @@ class ExerciseStateChange(BaseModel):
     accumulated_pause_seconds: float = 0.0
 
 
+class ExerciseProgressCursorPublic(BaseModel):
+    group_id: str | None = None
+    current_node_id: str | None = None
+    current_inject_id: int | None = None
+    advanced_at: str
+    advanced_by: int | None = None
+
+
+class InjectResolutionPublic(BaseModel):
+    inject_id: int
+    group_id: str | None = None
+    state: InjectState
+    resolved_at: str | None = None
+    resolved_by: int | None = None
+    resolution_reason: str | None = None
+
+
+class ExerciseProgressionPublic(BaseModel):
+    exercise_id: int
+    cursors: list[ExerciseProgressCursorPublic]
+    resolutions: list[InjectResolutionPublic]
+
+
 class ExecutiveSummaryPublic(BaseModel):
     """LLM-drafted (and facilitator-editable) executive summary for the report (#113)."""
 
@@ -166,6 +189,9 @@ class InjectPublic(BaseModel):
     state: InjectState
     released_at: str | None = None
     released_by: int | None = None
+    resolved_at: str | None = None
+    resolved_by: int | None = None
+    resolution_reason: str | None = None
     # Scheduled release offset in minutes from exercise start (#116); None = manual-only.
     release_offset_minutes: int | None = None
     attachment: dict[str, Any] | None = None
@@ -188,6 +214,7 @@ class ResponsePublic(BaseModel):
     # Facilitator view only.
     next_injects: list[dict[str, Any]] | None = None
     next_inject_ids: list[str] | None = None
+    progression: ExerciseProgressionPublic | None = None
 
 
 class CommunicationPublic(BaseModel):
@@ -235,7 +262,9 @@ class TimelineEvent(BaseModel):
     schemas above). ``at`` is an ISO timestamp string.
     """
 
-    kind: str  # inject_released | response | communication | comment | state_change
+    kind: (
+        str  # inject_released | inject_resolved | response | communication | comment | state_change
+    )
     at: str
     # inject_released
     inject_id: int | None = None
@@ -243,6 +272,8 @@ class TimelineEvent(BaseModel):
     title: str | None = None
     target_teams: list[str] | None = None
     released_by: int | None = None
+    resolved_by: int | None = None
+    resolution_reason: str | None = None
     # response
     response_id: int | None = None
     selected_option: str | None = None

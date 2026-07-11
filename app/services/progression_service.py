@@ -8,6 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import ExerciseProgress
 from app.models.inject import Inject, InjectProgress, InjectState
+from app.services.scenario_service import definition_for_exercise
 
 
 async def seed_progression(
@@ -69,6 +70,16 @@ async def resolve_response_progression(
     progress.resolution_reason = "participant_response"
     session.add(progress)
 
+    # A team-specific physical inject has one progression context, so its legacy
+    # top-level state can safely mirror the authoritative per-context resolution.
+    # Shared injects remain released while other teams may still respond.
+    if inject.group_id is not None or context is None:
+        inject.state = InjectState.resolved
+        inject.resolved_at = now
+        inject.resolved_by = actor_id
+        inject.resolution_reason = "participant_response"
+        session.add(inject)
+
     cursor = (
         await session.exec(
             select(ExerciseProgress)
@@ -88,22 +99,79 @@ async def resolve_response_progression(
 
 
 async def release_is_allowed(session: AsyncSession, inject: Inject) -> bool:
-    """A group-specific branch may release only when it is that group's cursor."""
-    if not inject.group_id or not inject.scenario_node_id:
+    """Release a scenario node only for a context currently pointing at it.
+
+    Legacy exercises without progression rows remain operable. Independent root
+    nodes are also valid opening choices before a context has advanced.
+    """
+    if not inject.scenario_node_id:
         return True
-    cursor = (
-        await session.exec(
-            select(ExerciseProgress).where(
-                ExerciseProgress.exercise_id == inject.exercise_id,
-                ExerciseProgress.group_id == inject.group_id,
-            )
-        )
-    ).one_or_none()
-    # A scenario may deliberately have independent group-specific opening injects;
-    # before a group has advanced, the facilitator retains that manual choice.
-    # Once a response advances the cursor, only its selected successor may release.
-    return (
-        cursor is None
-        or cursor.current_inject_id is None
-        or cursor.current_node_id == inject.scenario_node_id
-    )
+
+    query = select(ExerciseProgress).where(ExerciseProgress.exercise_id == inject.exercise_id)
+    if inject.group_id is not None:
+        query = query.where(ExerciseProgress.group_id == inject.group_id)
+    cursors = (await session.exec(query)).all()
+    if not cursors:
+        return True
+    if any(cursor.current_node_id == inject.scenario_node_id for cursor in cursors):
+        return True
+    if any(cursor.current_inject_id is not None for cursor in cursors):
+        return False
+
+    definition = await definition_for_exercise(session, inject.exercise_id)
+    if definition is None:
+        return True
+    referenced = {
+        successor
+        for node in definition.injects
+        for successor in [
+            node.next_inject_id,
+            *(option.next_inject_id for option in node.options),
+        ]
+        if successor is not None
+    }
+    return inject.scenario_node_id not in referenced
+
+
+async def progression_snapshot(
+    session: AsyncSession,
+    exercise_id: int,
+    *,
+    group_id: str | None = None,
+    include_all_groups: bool = False,
+) -> dict:
+    """Serialize the authoritative cursor and resolution state for API/WS consumers."""
+    cursor_query = select(ExerciseProgress).where(ExerciseProgress.exercise_id == exercise_id)
+    inject_query = select(InjectProgress).where(InjectProgress.exercise_id == exercise_id)
+    if not include_all_groups:
+        cursor_query = cursor_query.where(ExerciseProgress.group_id == group_id)
+        inject_query = inject_query.where(InjectProgress.group_id == group_id)
+
+    cursors = (await session.exec(cursor_query)).all()
+    resolutions = (await session.exec(inject_query)).all()
+    return {
+        "exercise_id": exercise_id,
+        "cursors": [
+            {
+                "group_id": cursor.group_id,
+                "current_node_id": cursor.current_node_id,
+                "current_inject_id": cursor.current_inject_id,
+                "advanced_at": cursor.advanced_at.isoformat(),
+                "advanced_by": cursor.advanced_by,
+            }
+            for cursor in cursors
+        ],
+        "resolutions": [
+            {
+                "inject_id": resolution.inject_id,
+                "group_id": resolution.group_id,
+                "state": resolution.state,
+                "resolved_at": (
+                    resolution.resolved_at.isoformat() if resolution.resolved_at else None
+                ),
+                "resolved_by": resolution.resolved_by,
+                "resolution_reason": resolution.resolution_reason,
+            }
+            for resolution in resolutions
+        ],
+    }

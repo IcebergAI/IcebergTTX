@@ -396,6 +396,21 @@
 
       <!-- Participants -->
       <div class="px-4 pt-4 pb-3">
+        <div class="border-b rule pb-4 mb-4">
+          <div class="smallcaps text-muted mb-2">Progression</div>
+          <ul class="space-y-2">
+            <template x-for="cursor in progressionCursors" :key="cursor.group_id || 'shared'">
+              <li class="flex items-start justify-between gap-3 text-[12px]">
+                <span class="text-muted" x-text="progressionGroupLabel(cursor.group_id)"></span>
+                <span class="mono text-right" x-text="cursor.current_node_id || 'Complete'"></span>
+              </li>
+            </template>
+            <li x-show="progressionCursors.length === 0" class="text-[12px] text-faint">
+              No progression state.
+            </li>
+          </ul>
+        </div>
+
         <div class="flex items-center justify-between mb-2">
           <div class="smallcaps text-muted">Participants</div>
           <span class="mono text-[11px] text-faint" x-text="members.length + ' enrolled'"></span>

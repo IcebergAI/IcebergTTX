@@ -21,6 +21,7 @@ from app.models.user import User, UserRole
 from app.schemas.api import (
     DebriefNotes,
     ExecutiveSummaryPublic,
+    ExerciseProgressionPublic,
     ExercisePublic,
     ExerciseStateChange,
     MemberPublic,
@@ -29,6 +30,7 @@ from app.schemas.api import (
 )
 from app.services import audit_service
 from app.services.access_control import (
+    exercise_group_for_user,
     is_actual_facilitator,
     is_admin,
     require_exercise_access,
@@ -44,6 +46,7 @@ from app.services.exercise_service import (
 )
 from app.services.llm.service import active_provider
 from app.services.llm_service import run_summary_pipeline
+from app.services.progression_service import progression_snapshot
 from app.services.report_service import build_report, render_markdown
 from app.services.scenario_service import get_scenario_definition
 from app.services.schedule_service import (
@@ -155,6 +158,27 @@ async def create(body: CreateExerciseRequest, current_user: FacilitatorDep, sess
 @router.get("/{exercise_id}", response_model=ExercisePublic)
 async def get_exercise(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
     return _exercise_out(await require_exercise_access(session, exercise_id, current_user))
+
+
+@router.get("/{exercise_id}/progression", response_model=ExerciseProgressionPublic)
+async def get_exercise_progression(
+    exercise_id: int,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+):
+    await require_exercise_access(session, exercise_id, current_user)
+    participant_view = current_user.role == UserRole.participant
+    group_id = (
+        await exercise_group_for_user(session, exercise_id, current_user)
+        if participant_view
+        else None
+    )
+    return await progression_snapshot(
+        session,
+        exercise_id,
+        group_id=group_id,
+        include_all_groups=not participant_view,
+    )
 
 
 @router.get("/{exercise_id}/teams")
@@ -360,6 +384,9 @@ def _export_inject_row(i: Inject) -> dict:
         "state": i.state,
         "group_id": i.group_id,
         "released_at": i.released_at.isoformat() if i.released_at else None,
+        "resolved_at": i.resolved_at.isoformat() if i.resolved_at else None,
+        "resolved_by": i.resolved_by,
+        "resolution_reason": i.resolution_reason,
     }
 
 
@@ -513,15 +540,11 @@ async def get_report_summary(exercise_id: int, current_user: FacilitatorDep, ses
     ex = await require_exercise_owner(session, exercise_id, current_user)
     row = await _get_summary_row(session, exercise_id)
     available = active_provider() is not None and ex.llm_enabled
-    return ReportSummaryState(
-        available=available, summary=_summary_public(row) if row else None
-    )
+    return ReportSummaryState(available=available, summary=_summary_public(row) if row else None)
 
 
 @router.post("/{exercise_id}/report/summary", status_code=status.HTTP_202_ACCEPTED)
-async def draft_report_summary(
-    exercise_id: int, current_user: FacilitatorDep, session: SessionDep
-):
+async def draft_report_summary(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
     """Kick off an LLM draft of the executive summary (#113). Gated on both a
     configured provider AND the exercise's own AI opt-in — 409 if either is off."""
     ex = await require_exercise_owner(session, exercise_id, current_user)
