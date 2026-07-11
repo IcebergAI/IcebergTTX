@@ -175,14 +175,30 @@ async def suggest_inject(session, response, inject, exercise, definition):
 
     text = await _call(provider, _SUGGESTION_SYSTEM, cached, user_prompt)
     data = _parse_json(text, {"title": "Follow-up inject", "content": text, "target_teams": None})
-
-    target_teams = data.get("target_teams")
+    try:
+        output = SuggestedInjectOutput.model_validate(data)
+    except ValidationError:
+        output = SuggestedInjectOutput(
+            title="Follow-up inject",
+            content=(text.strip() or "Provider returned invalid suggestion")[:_MAX_LLM_TEXT],
+        )
+    allowed_teams = {team.id for team in definition.participant_teams}
+    target_teams = output.target_teams
+    if target_teams is not None:
+        target_teams = [team.strip() for team in target_teams]
+        if (
+            any(not team for team in target_teams)
+            or len(target_teams) != len(set(target_teams))
+            or not set(target_teams).issubset(allowed_teams)
+        ):
+            logger.warning("LLM suggestion had invalid target teams; using all-team audience")
+            target_teams = None
     suggested = SuggestedInject(
         exercise_id=exercise.id,
         triggered_by_response_id=response.id,
-        title=data.get("title", "Follow-up inject"),
-        content=data.get("content", text),
-        target_teams=target_teams or None,
+        title=output.title,
+        content=output.content,
+        target_teams=target_teams,
         llm_model=provider.llm_model_label,
     )
     session.add(suggested)
