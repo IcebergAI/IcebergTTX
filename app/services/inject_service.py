@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
+from sqlalchemy import update
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.inject import Inject, InjectState
@@ -32,6 +33,7 @@ async def create_inject(
     sequence_order: int = 0,
     release_offset_minutes: int | None = None,
     attachment: AttachmentMeta | None = None,
+    commit: bool = True,
 ) -> Inject:
     normalized_group_id = group_id.strip() if group_id and group_id.strip() else None
     normalized_targets = target_teams
@@ -52,8 +54,10 @@ async def create_inject(
         attachment_size=attachment.size if attachment else None,
     )
     session.add(inject)
-    await session.commit()
-    await session.refresh(inject)
+    await session.flush()
+    if commit:
+        await session.commit()
+        await session.refresh(inject)
     return inject
 
 
@@ -69,28 +73,33 @@ async def release_inject(
     inject: Inject,
     released_by: int | None,
 ) -> Inject:
-    if inject.state != InjectState.pending:
+    now = datetime.now(UTC)
+    statement = (
+        update(Inject)
+        .where(Inject.id == inject.id, Inject.state == InjectState.pending)
+        .values(state=InjectState.released, released_at=now, released_by=released_by)
+        .returning(Inject)
+        .execution_options(synchronize_session=False)
+    )
+    released = (await session.exec(statement)).scalar_one_or_none()
+    if released is None:
+        await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Inject is already '{inject.state}', cannot release",
+            detail="Inject is no longer pending and cannot be released",
         )
+    await session.commit()
 
-    # Releasing (manually or on schedule) settles any pending scheduled-release timer for
-    # this inject so it can't double-fire (#116). `released_by` is None for auto-release.
+    # Releasing (manually or on schedule) settles any pending scheduled-release timer only
+    # after the compare-and-swap has committed. The losing racer must not cancel the winner's
+    # timer or emit any side effects.
     from app.services.schedule_service import cancel_inject_schedule
 
-    cancel_inject_schedule(inject.exercise_id, inject.id)
+    cancel_inject_schedule(released.exercise_id, released.id)
 
-    inject.state = InjectState.released
-    inject.released_at = datetime.now(UTC)
-    inject.released_by = released_by
-    session.add(inject)
-    await session.commit()
-    await session.refresh(inject)
-
-    await _broadcast_inject_released(session, inject)
-    await _trigger_communications(session, inject)
-    return inject
+    await _broadcast_inject_released(session, released)
+    await _trigger_communications(session, released)
+    return released
 
 
 async def _trigger_communications(session: AsyncSession, inject: Inject) -> None:
@@ -231,6 +240,7 @@ async def seed_injects_from_scenario(
                     group_id=group_id,
                     sequence_order=sequence_order,
                     release_offset_minutes=node.release_at_minutes,
+                    commit=False,
                 )
         else:
             await create_inject(
@@ -243,4 +253,5 @@ async def seed_injects_from_scenario(
                 group_id=None,
                 sequence_order=sequence_order,
                 release_offset_minutes=node.release_at_minutes,
+                commit=False,
             )
