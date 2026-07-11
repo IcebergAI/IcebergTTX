@@ -10,12 +10,16 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
+from app.services.audit_service import APP_VERSION
 from app.services.auth_service import decode_access_token
 from app.services.oidc import service as oidc_service
 from app.services.role_preview import effective_role
 
 router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="app/templates")
+# App version as a template global so any page (base.html's rail, the settings
+# footer) can render it without threading it through every route context.
+templates.env.globals["app_version"] = APP_VERSION
 
 
 def _auth_context() -> dict:

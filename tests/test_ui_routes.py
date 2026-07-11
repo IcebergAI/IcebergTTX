@@ -32,6 +32,22 @@ async def test_authenticated_user_can_load_settings(client: AsyncClient, partici
     assert "Settings" in r.text
 
 
+async def test_beta_feedback_link_prefills_version(client: AsyncClient, participant_token: str):
+    """The beta feedback link (#118) opens the GitHub bug form with the running
+    version prefilled, and the settings footer shows the version. Available to
+    any authenticated role (participant here)."""
+    from app.services.audit_service import APP_VERSION
+
+    client.cookies.set("access_token", participant_token)
+    r = await client.get("/settings")
+    assert r.status_code == 200
+    # The bug-report form is targeted and the version query param is populated.
+    assert "issues/new?template=bug_report.yml" in r.text
+    assert f"version={APP_VERSION}" in r.text
+    # Version is also surfaced in the settings footer.
+    assert f"IcebergTTX v{APP_VERSION}" in r.text
+
+
 async def test_dark_theme_cookie_prerenders_dark_document(
     client: AsyncClient, participant_token: str
 ):
