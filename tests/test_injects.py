@@ -156,6 +156,32 @@ async def test_create_inject_attachment_too_large(
     assert after == before, "partial oversized upload should be cleaned up"
 
 
+async def test_failed_inject_persistence_compensates_attachment(
+    client: AsyncClient,
+    facilitator_token: str,
+    active_exercise: Exercise,
+    monkeypatch,
+):
+    """A database failure after upload leaves no staged attachment behind (#139)."""
+    from app.routers import injects as injects_router
+
+    async def fail_create(*_args, **_kwargs):
+        raise RuntimeError("simulated database failure")
+
+    monkeypatch.setattr(injects_router, "create_inject", fail_create)
+    storage_dir = injects_router.ATTACHMENT_ROOT / str(active_exercise.id)
+    before = set(storage_dir.glob("*")) if storage_dir.exists() else set()
+    with pytest.raises(RuntimeError, match="simulated database failure"):
+        await client.post(
+            f"/api/exercises/{active_exercise.id}/injects",
+            data={"title": "Attachment", "content": "Must compensate"},
+            files={"attachment": ("brief.txt", b"brief", "text/plain")},
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+    after = set(storage_dir.glob("*")) if storage_dir.exists() else set()
+    assert after == before
+
+
 async def test_create_inject_participant_forbidden(
     client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
