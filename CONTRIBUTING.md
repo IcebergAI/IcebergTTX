@@ -41,6 +41,7 @@ Run these locally and make sure they pass:
 
 ```bash
 uv run ruff check app/ tests/   # lint
+uv run pyright app/             # type check
 uv run pytest                   # full test suite (needs Docker running)
 ```
 

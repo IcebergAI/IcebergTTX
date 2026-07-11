@@ -1,0 +1,8 @@
+{
+  "include": ["app"],
+  "exclude": [".venv", "alembic", "static", "uploads"],
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "standard",
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": "none"
+}
