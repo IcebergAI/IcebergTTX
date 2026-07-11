@@ -121,7 +121,7 @@ async def _trigger_communications(session: AsyncSession, inject: Inject) -> None
 
     node = get_inject_node(definition, inject.scenario_node_id)
     if node and node.triggers_communications:
-        schedule_triggered_comms(inject, node.triggers_communications)
+        schedule_triggered_comms(inject, node.triggers_communications, node.id)
 
 
 async def _broadcast_inject_released(session: AsyncSession, inject: Inject) -> None:

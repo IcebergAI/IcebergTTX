@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime, Index
+from sqlalchemy import Column, DateTime, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -17,6 +17,13 @@ class CommDirection(StrEnum):
 
 
 class Communication(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint(
+            "exercise_id",
+            "trigger_key",
+            name="uq_communication_exercise_trigger_key",
+        ),
+    )
     id: int | None = Field(default=None, primary_key=True)
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
     sender_id: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
@@ -28,6 +35,8 @@ class Communication(SQLModel, table=True):
     triggered_by_inject_id: int | None = Field(
         default=None, foreign_key="inject.id", ondelete="SET NULL"
     )
+    # Durable idempotency key for node-level scenario-triggered communications (#140).
+    trigger_key: str | None = None
     visible_to_teams: list[str] | None = Field(  # None = all teams
         default=None, sa_column=Column(JSONB)
     )
