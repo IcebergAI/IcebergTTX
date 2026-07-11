@@ -93,6 +93,10 @@ ships with Docker Compose and Kubernetes manifests.
 
 ## See it
 
+One tool across the whole exercise lifecycle — **prepare** a branching scenario,
+**run** the live session, and **learn** from the after-action review. The
+[facilitator guide](facilitator-guide.md) walks it end to end.
+
 The **facilitator console** — a live exercise with a team-grouped inject tree,
 one-at-a-time release, and the participant response feed.
 
@@ -108,7 +112,14 @@ one-at-a-time release, and the participant response feed.
 
 ![Participant briefing and responses](assets/participant.png){ .shot }
 
+![After-action review timeline and debrief notes](assets/review-timeline.png){ .shot }
+
+![Generated after-action report](assets/report.png){ .shot }
+
 </div>
+
+Learn the workflow in the **[facilitator guide](facilitator-guide.md)**, or lift
+paste-ready scenario patterns from the **[cookbook](cookbook.md)**.
 
 ## Roles
 
