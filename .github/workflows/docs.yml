@@ -38,7 +38,10 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.x"
-      - run: pip install zensical
+      # Pin the version (parity with zizmor==/actionlint checksum pins in ci.yml):
+      # this job holds pages:write + id-token:write, so a yanked/compromised
+      # zensical release must not silently change the build.
+      - run: pip install zensical==0.0.50
       - run: zensical build --clean
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:

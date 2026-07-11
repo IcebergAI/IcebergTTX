@@ -249,6 +249,26 @@ async def test_register_accepts_minimum_length_password(client: AsyncClient):
     assert resp.status_code == 201
 
 
+async def test_register_rejects_password_over_bcrypt_limit(client: AsyncClient):
+    # bcrypt truncates input at 72 bytes; the policy must reject anything longer
+    # so the whole password stays significant (a mistyped tail can't authenticate).
+    resp = await client.post("/api/auth/register", json={
+        "email": "toolong@example.com",
+        "display_name": "TooLong",
+        "password": "a" * 73,
+    })
+    assert resp.status_code == 422
+
+
+async def test_register_accepts_password_at_bcrypt_limit(client: AsyncClient):
+    resp = await client.post("/api/auth/register", json={
+        "email": "seventytwo@example.com",
+        "display_name": "AtLimit",
+        "password": "a" * 72,
+    })
+    assert resp.status_code == 201
+
+
 @pytest.mark.parametrize("password", ["", "   ", "elevenchars"])
 async def test_update_me_rejects_weak_password(
     client: AsyncClient, facilitator_token: str, password: str
