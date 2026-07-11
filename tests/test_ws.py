@@ -68,10 +68,14 @@ async def test_ws_connect_invalid_token(client: AsyncClient, active_exercise: Ex
             await ws.receive_json()
 
 
-async def test_ws_query_token_is_not_accepted(client: AsyncClient, active_exercise: Exercise):
+async def test_ws_query_token_is_not_accepted(
+    client: AsyncClient,
+    facilitator_token: str,
+    active_exercise: Exercise,
+):
     with pytest.raises(WebSocketDisconnect):
         async with _aconnect_ws(
-            _ws_url(active_exercise.id, "bad.token.here"), client, headers=SAME_ORIGIN
+            _ws_url(active_exercise.id, facilitator_token), client, headers=SAME_ORIGIN
         ) as ws:
             await ws.receive_json()
 
