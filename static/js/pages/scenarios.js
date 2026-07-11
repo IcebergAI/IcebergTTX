@@ -37,6 +37,7 @@ function makeInject(id) {
     next_inject_id: null,
     options: [],
     expected_actions: [],
+    _actionKeys: [],
     free_text_response: true,
     triggers_communications: [],
   };
@@ -280,6 +281,7 @@ document.addEventListener('alpine:init', () => {
 
     normalizeInject(inj, index) {
       const id = inj?.id || `inject_${String(index + 1).padStart(2, '0')}`;
+      const expectedActions = [...(inj?.expected_actions || [])];
       return {
         _key: scenarioKey(),
         _editingId: id,
@@ -290,7 +292,8 @@ document.addEventListener('alpine:init', () => {
         sequence_order: inj?.sequence_order || index + 1,
         next_inject_id: inj?.next_inject_id || null,
         options: (inj?.options || []).map((opt, optIndex) => this.normalizeOption(opt, optIndex)),
-        expected_actions: inj?.expected_actions || [],
+        expected_actions: expectedActions,
+        _actionKeys: expectedActions.map(() => scenarioKey()),
         free_text_response: inj?.free_text_response !== false,
         triggers_communications: inj?.triggers_communications || [],
       };
@@ -495,6 +498,15 @@ document.addEventListener('alpine:init', () => {
       this.$nextTick(() => { el.value = value || ''; });
     },
 
+    // IDs must remain tied to Alpine's stable row keys, not mutable user-facing
+    // values or array positions. That preserves label associations after edits,
+    // deletions, and reordering while keeping every rendered control unique.
+    fieldId(prefix, primaryKey, secondaryKey = null) {
+      const parts = [prefix, primaryKey];
+      if (secondaryKey !== null && secondaryKey !== undefined) parts.push(secondaryKey);
+      return parts.map(part => String(part).replace(/[^a-zA-Z0-9_-]/g, '-')).join('-');
+    },
+
     ensureActiveInject() {
       if (!this.activeInjectKey && this.form.injects[0]) this.activeInjectKey = this.form.injects[0]._key;
       if (this.activePanel === 'injects' && !this.activeInject && this.form.injects[0]) {
@@ -624,7 +636,14 @@ document.addEventListener('alpine:init', () => {
 
     addExpectedAction(inj) {
       inj.expected_actions = inj.expected_actions || [];
+      inj._actionKeys = inj._actionKeys || [];
       inj.expected_actions.push('');
+      inj._actionKeys.push(scenarioKey());
+    },
+
+    removeExpectedAction(inj, index) {
+      inj.expected_actions.splice(index, 1);
+      inj._actionKeys.splice(index, 1);
     },
 
     injectTargetsTeam(inj, teamId) {
