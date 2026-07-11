@@ -72,8 +72,12 @@ document.addEventListener('alpine:init', () => {
       return !!(d.scenario_debrief_notes || d.debrief_notes);
     },
     get teamsLabel() {
-      if (!this.report || !this.report.teams.length) return '—';
-      return this.report.teams.map(t => t.label).join(', ');
+      if (!this.report) return '—';
+      const teams = this.report.teams.map(t => `${t.label} (${t.participant_count})`);
+      if (this.report.unassigned_participant_count) {
+        teams.push(`Unassigned / other (${this.report.unassigned_participant_count})`);
+      }
+      return teams.join(', ') || '—';
     },
 
     // ── Summary ──

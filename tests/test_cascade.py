@@ -98,7 +98,13 @@ async def _build_inject(session: AsyncSession, exercise: Exercise, user: User) -
             triggered_by_inject_id=inject.id,
         )
     )
-    session.add(ExerciseMember(exercise_id=exercise.id, user_id=user.id))
+    session.add(
+        ExerciseMember(
+            exercise_id=exercise.id,
+            user_id=user.id,
+            role_at_enrolment=user.role,
+        )
+    )
     await session.commit()
     return inject
 
