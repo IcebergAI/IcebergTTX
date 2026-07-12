@@ -8,6 +8,7 @@ from httpx import AsyncClient
 
 from app.config import DEFAULT_SECRET_KEY, Settings, validate_settings
 from app.models.user import User
+from app.services.auth_service import hash_password, verify_password
 
 # ── #9: SECRET_KEY startup validation ─────────────────────────────────────────
 
@@ -85,6 +86,44 @@ async def test_login_success_resets_rate_counter(client: AsyncClient, facilitato
     assert (await client.post(
         "/api/auth/login", json={"email": facilitator.email, "password": "nope"}
     )).status_code == 401
+
+
+async def test_oversized_bcrypt_password_is_counted_as_invalid_login(
+    client: AsyncClient, facilitator: User
+):
+    # 37 two-byte characters exceed bcrypt's 72-byte boundary without relying on
+    # character count. These used to raise before record_failure() and return 500.
+    oversized = "é" * 37
+    for _ in range(5):
+        response = await client.post(
+            "/api/auth/login",
+            json={"email": facilitator.email, "password": oversized},
+        )
+        assert response.status_code == 401
+        assert response.json() == {"detail": "Invalid credentials"}
+
+    locked = await client.post(
+        "/api/auth/login",
+        json={"email": facilitator.email, "password": "password1234"},
+    )
+    assert locked.status_code == 429
+
+
+async def test_oversized_password_has_uniform_unknown_account_response(client: AsyncClient):
+    response = await client.post(
+        "/api/auth/login",
+        json={"email": "unknown@example.com", "password": "x" * 73},
+    )
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid credentials"}
+
+
+def test_password_verifier_never_accepts_a_truncated_bcrypt_tail():
+    accepted_prefix = "x" * 72
+    hashed = hash_password(accepted_prefix)
+    assert verify_password(accepted_prefix, hashed) is True
+    assert verify_password(accepted_prefix + "ignored-tail", hashed) is False
+    assert verify_password("\ud800", hashed) is False
 
 
 # ── #10: Secure cookie + CSRF origin check ────────────────────────────────────

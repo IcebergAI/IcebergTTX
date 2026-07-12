@@ -1,8 +1,11 @@
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pytest
 from httpx import AsyncClient
-from httpx_ws import WebSocketDisconnect, aconnect_ws
+from httpx_ws import WebSocketDisconnect
+from httpx_ws import aconnect_ws as _aconnect_ws
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
@@ -23,13 +26,28 @@ def _cookie_headers(token: str, origin: str = "http://testserver") -> dict[str, 
 
 
 def _ws_url(exercise_id: int, token: str) -> str:
-    """URL with an explicit ?token= (the non-browser fallback path)."""
+    """Legacy test helper; the adapter below moves this value into a cookie."""
     return f"/ws/exercises/{exercise_id}?token={token}"
 
 
 def _ws_path(exercise_id: int) -> str:
     """URL with no token — the browser cookie-auth path (#68)."""
     return f"/ws/exercises/{exercise_id}"
+
+
+def aconnect_ws(url: str, client: AsyncClient, **kwargs):
+    """Keep old call sites cookie-authenticated without sending URL credentials."""
+    parsed = urlsplit(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    token = query.pop("token", None)
+    if token:
+        headers = dict(kwargs.pop("headers", {}))
+        headers = {**_cookie_headers(token), **headers}
+        kwargs["headers"] = headers
+        url = urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment)
+        )
+    return _aconnect_ws(url, client, **kwargs)
 
 
 # ── Connection ────────────────────────────────────────────────────────────────
@@ -47,6 +65,18 @@ async def test_ws_connect_valid_token(
 async def test_ws_connect_invalid_token(client: AsyncClient, active_exercise: Exercise):
     with pytest.raises(WebSocketDisconnect):
         async with aconnect_ws(_ws_url(active_exercise.id, "bad.token.here"), client) as ws:
+            await ws.receive_json()
+
+
+async def test_ws_query_token_is_not_accepted(
+    client: AsyncClient,
+    facilitator_token: str,
+    active_exercise: Exercise,
+):
+    with pytest.raises(WebSocketDisconnect):
+        async with _aconnect_ws(
+            _ws_url(active_exercise.id, facilitator_token), client, headers=SAME_ORIGIN
+        ) as ws:
             await ws.receive_json()
 
 
@@ -100,6 +130,24 @@ async def test_ws_ping_pong(
         assert msg["type"] == "pong"
         assert "timestamp" in msg
         assert "payload" in msg
+
+
+async def test_ws_heartbeat_rechecks_token_authorization(
+    client: AsyncClient,
+    facilitator: User,
+    facilitator_token: str,
+    active_exercise: Exercise,
+):
+    """A token revoked after upgrade is rejected on the next heartbeat."""
+    resolver = AsyncMock(side_effect=[facilitator, None])
+    with patch("app.routers.ws.resolve_user_from_token", resolver):
+        async with aconnect_ws(
+            _ws_url(active_exercise.id, facilitator_token), client
+        ) as ws:
+            await ws.send_json({"type": "ping"})
+            with pytest.raises(WebSocketDisconnect):
+                await ws.receive_json()
+    assert resolver.await_count == 2
 
 
 async def test_ws_broadcasts_canonical_exercise_state_change_after_commit(
@@ -353,6 +401,7 @@ async def test_ws_facilitator_preview_derives_group_from_view_team(
             if c.user_id == facilitator.id
         ]
         assert mine and all(c.group_id == "legal" for c in mine)
+        assert all(c.role == "participant" for c in mine)
 
 
 # ── Cookie-based handshake + CSWSH (#68) ────────────────────────────────────────

@@ -42,6 +42,7 @@ import app.database as app_database  # noqa: E402
 import app.services.llm_service as llm_service  # noqa: E402
 from app.database import get_session  # noqa: E402
 from app.main import app  # noqa: E402
+from app.routers.ws import get_heartbeat_session_factory  # noqa: E402
 
 # Each test runs on its own event loop (function scope), so the engine must not
 # pool connections across loops — NullPool opens a fresh asyncpg connection per
@@ -188,10 +189,24 @@ async def _override_session(session: AsyncSession, client: AsyncClient):
     async def override_get_session():
         yield session
 
+    class SharedSessionContext:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, *_args):
+            return False
+
+    def override_heartbeat_session_factory():
+        return SharedSessionContext
+
     app.dependency_overrides[get_session] = override_get_session
+    app.dependency_overrides[get_heartbeat_session_factory] = (
+        override_heartbeat_session_factory
+    )
     yield
     client.cookies.clear()
     app.dependency_overrides.pop(get_session, None)
+    app.dependency_overrides.pop(get_heartbeat_session_factory, None)
 
 
 @pytest_asyncio.fixture(name="facilitator")

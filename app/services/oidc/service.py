@@ -140,6 +140,24 @@ async def provision_oidc_user(
     if existing is not None:
         if not existing.is_active:
             raise OIDCProvisionError("account disabled")
+        # Provider-managed roles are reconciled on every authenticated return.
+        # A removed IdP group must revoke its elevation rather than leave a
+        # permanently privileged local account.
+        mapped_role = map_role(cfg, identity)
+        if existing.role != mapped_role:
+            existing.role = mapped_role
+            session.add(existing)
+            await session.commit()
+            await session.refresh(existing)
+            audit_service.emit(
+                "auth.oidc_role_reconciled",
+                actor_id=existing.id,
+                actor_email=existing.email,
+                actor_role=existing.role.value,
+                target_type="user",
+                target_id=existing.id,
+                reason=f"provider={cfg.key}",
+            )
         return existing, False
 
     # 2/3. Email collision with an existing account.
@@ -158,6 +176,11 @@ async def provision_oidc_user(
             raise OIDCProvisionError("identity conflict")
         if not identity.email_verified:
             raise OIDCProvisionError("unverified email collision")
+        # Entra email claims are mutable and therefore cannot prove ownership of
+        # a pre-existing local account. Its stable subject remains the only safe
+        # returning-identity key (handled above).
+        if cfg.key == "entra":
+            raise OIDCProvisionError("entra email linking is disabled")
         # Link: attach the provider identity to the existing local row, preserving
         # its role / is_admin.
         by_email.auth_provider = cfg.key

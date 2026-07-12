@@ -103,10 +103,16 @@ async def get_scenario(scenario_id: int, _: FacilitatorDep, session: SessionDep)
 
 @router.put("/{scenario_id}", response_model=ScenarioDetail)
 async def update(
-    scenario_id: int, body: ScenarioDefinition, _: FacilitatorDep, session: SessionDep
+    scenario_id: int, body: ScenarioDefinition, current_user: FacilitatorDep, session: SessionDep
 ):
     scenario = await _get_or_404(session, scenario_id)
-    scenario = await update_scenario(session, scenario, definition=body)
+    assert current_user.id is not None
+    scenario = await update_scenario(
+        session,
+        scenario,
+        definition=body,
+        updated_by=current_user.id,
+    )
     return _scenario_detail(scenario)
 
 

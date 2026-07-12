@@ -10,6 +10,7 @@ from sqlmodel import select
 from app.config import settings
 from app.database import engine
 from app.schemas.api import AssessmentPublic, ExecutiveSummaryPublic, SuggestedInjectPublic
+from app.services.background import spawn
 from app.services.llm.service import active_provider
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,13 @@ class SuggestedInjectOutput(BaseModel):
     title: str = Field(min_length=1, max_length=_MAX_LLM_TITLE)
     content: str = Field(min_length=1, max_length=_MAX_LLM_TEXT)
     target_teams: list[str] | None = Field(default=None, max_length=_MAX_LLM_TEAMS)
+
+
+# The application is deliberately single-replica while its real-time and rate-limit
+# state is in memory (CLAUDE.md). Keep one assessment task per response in flight so
+# automatic and manual triggers cannot duplicate provider calls within that supported
+# deployment model. The worker also checks persisted state before calling a provider.
+_assessment_inflight: set[int] = set()
 
 _ASSESSMENT_SYSTEM = (
     "You are an expert tabletop exercise facilitator. "
@@ -294,13 +302,26 @@ async def run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) -
         logger.exception("LLM pipeline failed for response %d", response_id)
 
 
-async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) -> None:
-    if active_provider() is None:
-        logger.info("LLM pipeline skipped: no AI provider configured (LLM_PROVIDER)")
-        return
+def queue_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) -> bool:
+    """Queue one assessment per response; return whether a task was created."""
+    if response_id in _assessment_inflight:
+        return False
+    _assessment_inflight.add(response_id)
+    coroutine = run_llm_pipeline(response_id, inject_id, exercise_id)
+    try:
+        task = spawn(coroutine)
+    except Exception:
+        coroutine.close()
+        _assessment_inflight.discard(response_id)
+        raise
+    task.add_done_callback(lambda _: _assessment_inflight.discard(response_id))
+    return True
 
+
+async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) -> None:
     from sqlmodel.ext.asyncio.session import AsyncSession
 
+    from app.models.assessment import ResponseAssessment
     from app.models.exercise import Exercise
     from app.models.inject import Inject
     from app.models.response import Response
@@ -312,8 +333,40 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
         response = await session.get(Response, response_id)
         inject = await session.get(Inject, inject_id)
         exercise = await session.get(Exercise, exercise_id)
-        if not (response and inject and exercise and exercise.scenario_id):
+        if not (
+            response
+            and inject
+            and exercise
+            and exercise.scenario_id
+            and exercise.llm_enabled
+        ):
             return
+        if (
+            response.exercise_id != exercise_id
+            or response.inject_id != inject_id
+            or inject.exercise_id != exercise_id
+        ):
+            return
+
+        # A completed assessment makes retries idempotent. Also repair the legacy
+        # two-commit failure mode where the assessment row exists but Response was
+        # never updated to point at it.
+        existing = (
+            await session.exec(
+                select(ResponseAssessment).where(ResponseAssessment.response_id == response_id)
+            )
+        ).first()
+        if existing is not None:
+            if response.assessment_id != existing.id:
+                response.assessment_id = existing.id
+                session.add(response)
+                await session.commit()
+            return
+
+        if active_provider() is None:
+            logger.info("LLM pipeline skipped: no AI provider configured (LLM_PROVIDER)")
+            return
+
         scenario = await session.get(Scenario, exercise.scenario_id)
         if not scenario:
             return

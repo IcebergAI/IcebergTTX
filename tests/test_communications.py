@@ -699,8 +699,10 @@ async def test_ws_receives_communication(
     client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
     async with aconnect_ws(
-        f"/ws/exercises/{active_exercise.id}?token={participant_token}"
-    , client) as ws:
+        f"/ws/exercises/{active_exercise.id}",
+        client,
+        headers={"origin": "http://testserver", "cookie": f"access_token={participant_token}"},
+    ) as ws:
         (await _inject_comm(client, facilitator_token, active_exercise.id, subject="WS Test"))
         msg = await ws.receive_json()
 
@@ -713,8 +715,10 @@ async def test_ws_visibility_filtered_broadcast(
 ):
     """Comm targeted to 'legal' should NOT arrive at the it_ops participant's WS."""
     async with aconnect_ws(
-        f"/ws/exercises/{active_exercise.id}?token={participant_token}"
-    , client) as ws:
+        f"/ws/exercises/{active_exercise.id}",
+        client,
+        headers={"origin": "http://testserver", "cookie": f"access_token={participant_token}"},
+    ) as ws:
         (await _inject_comm(
             client, facilitator_token, active_exercise.id,
             subject="Legal Only WS", visible_to_teams=["legal"]
@@ -746,8 +750,10 @@ async def test_ws_team_outbound_reaches_recipient_team(
     legal_token = create_access_token(subject=legal.email, role=legal.role.value)
 
     async with aconnect_ws(
-        f"/ws/exercises/{active_exercise.id}?token={legal_token}"
-    , client) as ws:
+        f"/ws/exercises/{active_exercise.id}",
+        client,
+        headers={"origin": "http://testserver", "cookie": f"access_token={legal_token}"},
+    ) as ws:
         (await _send(
             client,
             participant_token,

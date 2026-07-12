@@ -605,8 +605,10 @@ async def test_ws_broadcasts_response_to_facilitator(
     inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
 
     async with aconnect_ws(
-        f"/ws/exercises/{active_exercise.id}?token={facilitator_token}"
-    , client) as ws:
+        f"/ws/exercises/{active_exercise.id}",
+        client,
+        headers={"origin": "http://testserver", "cookie": f"access_token={facilitator_token}"},
+    ) as ws:
         (await _submit(client, participant_token, active_exercise.id, inject_id))
         msg = await ws.receive_json()
 

@@ -16,12 +16,12 @@ from app.schemas.api import AssessmentPublic, ResponsePublic
 from app.services.access_control import (
     exercise_group_for_user,
     require_exercise_access,
+    require_exercise_owner,
     require_inject_visible,
     require_operational_mutability,
 )
-from app.services.background import spawn
 from app.services.inject_service import get_inject_or_404
-from app.services.llm_service import _assessment_payload, run_llm_pipeline
+from app.services.llm_service import _assessment_payload, queue_llm_pipeline
 from app.services.progression_service import progression_snapshot
 from app.services.response_service import (
     broadcast_response_submitted,
@@ -138,7 +138,7 @@ async def submit(
 
     if exercise.llm_enabled:
         assert response.id is not None
-        spawn(run_llm_pipeline(response.id, body.inject_id, exercise_id))
+        queue_llm_pipeline(response.id, body.inject_id, exercise_id)
 
     participant_progression = await progression_snapshot(session, exercise_id, group_id=group_id)
     return response_payload(response, progression=participant_progression)
@@ -164,23 +164,41 @@ async def get_response(
 async def trigger_assess(
     exercise_id: int,
     response_id: int,
-    _: FacilitatorDep,
+    current_user: FacilitatorDep,
     session: SessionDep,
 ):
+    exercise = await require_exercise_owner(session, exercise_id, current_user)
+    if not exercise.llm_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="AI assessment is disabled for this exercise",
+        )
     r = await session.get(Response, response_id)
     if not r or r.exercise_id != exercise_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Response not found")
-    spawn(run_llm_pipeline(response_id, r.inject_id, exercise_id))
-    return {"detail": "Assessment queued"}
+    existing = (
+        await session.exec(
+            select(ResponseAssessment).where(ResponseAssessment.response_id == response_id)
+        )
+    ).first()
+    if existing is not None:
+        if r.assessment_id != existing.id:
+            r.assessment_id = existing.id
+            session.add(r)
+            await session.commit()
+        return {"detail": "Assessment already exists"}
+    queued = queue_llm_pipeline(response_id, r.inject_id, exercise_id)
+    return {"detail": "Assessment queued" if queued else "Assessment already queued"}
 
 
 @router.get("/{response_id}/assessment", response_model=AssessmentPublic)
 async def get_assessment(
     exercise_id: int,
     response_id: int,
-    _: FacilitatorDep,
+    current_user: FacilitatorDep,
     session: SessionDep,
 ):
+    await require_exercise_access(session, exercise_id, current_user)
     r = await session.get(Response, response_id)
     if not r or r.exercise_id != exercise_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Response not found")

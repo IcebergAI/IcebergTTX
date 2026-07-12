@@ -245,8 +245,10 @@ async def test_ws_broadcasts_inject_comment_to_facilitator(
     inject = (await _release_node(client, facilitator_token, active_exercise.id))
 
     async with aconnect_ws(
-        f"/ws/exercises/{active_exercise.id}?token={facilitator_token}"
-    , client) as ws:
+        f"/ws/exercises/{active_exercise.id}",
+        client,
+        headers={"origin": "http://testserver", "cookie": f"access_token={facilitator_token}"},
+    ) as ws:
         (await _comment(
             client,
             participant_token,
