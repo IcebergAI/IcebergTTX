@@ -96,3 +96,9 @@ login_rate_limiter = RateLimiter(
 registration_rate_limiter = RateLimiter(
     settings.registration_max_attempts, settings.registration_lockout_seconds
 )
+
+# Password-reset request throttle (#117), keyed per source IP — caps outbound reset
+# emails / token minting from one host (independent of whether the account exists).
+password_reset_rate_limiter = RateLimiter(
+    settings.password_reset_max_attempts, settings.password_reset_lockout_seconds
+)

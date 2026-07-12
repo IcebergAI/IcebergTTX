@@ -128,6 +128,25 @@ class Settings(BaseSettings):
     registration_max_attempts: int = 5
     registration_lockout_seconds: int = 3600
 
+    # Email / SMTP (#117). Feature-flagged: self-service password reset (and, later,
+    # participant invites) exist only when SMTP is configured (smtp_enabled). Raw
+    # socket — outbound mail goes DIRECT, not through the httpx proxy layer (#97),
+    # like the syslog sink. smtp_password is a SECRET (env-only, never a DB column,
+    # never logged). public_base_url builds absolute reset/invite links; when blank
+    # they are derived from the request (mirrors oidc_redirect_base_url).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""  # SECRET: env-only, never persisted or logged
+    smtp_from: str = ""  # From: address; required when smtp_host is set
+    smtp_starttls: bool = True  # STARTTLS on 587; set False + smtp_tls for implicit TLS (465)
+    smtp_tls: bool = False  # implicit TLS on connect
+    public_base_url: str = ""
+    # Password-reset request throttle (#117), per source IP. Longer window than login
+    # (it throttles email sends, not password guessing), mirroring registration.
+    password_reset_max_attempts: int = 5
+    password_reset_lockout_seconds: int = 3600
+
     # Audit logging (#23). When True, audit events are also persisted to the
     # AuditEvent table (they are always emitted to the `iceberg_ttx.audit`
     # logger regardless).
@@ -251,6 +270,11 @@ class Settings(BaseSettings):
         allowed = {"stdout", "file", "syslog", "http"}
         parts = (p.strip().lower() for p in self.siem_methods.split(","))
         return [m for m in parts if m in allowed]
+
+    @property
+    def smtp_enabled(self) -> bool:
+        """True once SMTP is configured — gates all email-dependent features (#117)."""
+        return bool(self.smtp_host and self.smtp_from)
 
     @property
     def local_auth_enabled(self) -> bool:
@@ -452,6 +476,10 @@ def validate_settings(s: Settings | None = None) -> None:
             f"{s.llm_provider!r}."
         )
     _validate_proxy_settings(s)
+    # SMTP (#117): if a host is set, a From: address is mandatory (the feature is gated
+    # on both — see smtp_enabled). Checked in dev too so misconfig surfaces early.
+    if s.smtp_host and not s.smtp_from:
+        raise RuntimeError("SMTP_HOST is set but SMTP_FROM is empty.")
     if s.dev_mode:
         return
     if s.secret_key_is_insecure:
