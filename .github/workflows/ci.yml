@@ -98,6 +98,9 @@ jobs:
           uv sync --extra dev
           uv run playwright install --with-deps chromium
 
+      - name: Build Tailwind CSS
+        run: uvx --from 'pytailwindcss==0.3.0' tailwindcss -i static/css/input.css -o static/css/output.css --minify
+
       - name: Apply migrations
         run: uv run alembic upgrade head
 
