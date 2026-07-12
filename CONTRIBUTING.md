@@ -62,5 +62,22 @@ uv run pytest                   # full test suite (needs Docker running)
 - Write a clear description of **what** changed and **why**; CI (lint, tests,
   `bandit`, `pip-audit`, workflow linting) must be green before review.
 
+## Protected-main workflow
+
+`main` is protected. A pull request must be current with `main`, pass the
+required test, workflow-lint, and CodeQL checks, have all review conversations
+resolved, and receive one approval from an independent maintainer. New commits
+dismiss earlier approvals and require approval of the latest push; the rule
+applies to administrators as well.
+
+Do not use an administrator bypass for routine work. If a production-impacting
+emergency cannot wait for the normal review path, record the reason, affected
+commit, approving maintainer, and follow-up review in the incident or release
+record. Review and reconcile the emergency change in a normal pull request as
+soon as service is stable.
+
+Repository secret scanning and push protection are enabled. Never use real
+credentials to test these controls; use GitHub's documented safe test process.
+
 By contributing, you agree that your contributions are licensed under the
 project's [Apache License 2.0](LICENSE).
