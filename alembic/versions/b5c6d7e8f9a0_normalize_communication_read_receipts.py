@@ -42,6 +42,9 @@ def upgrade() -> None:
 
     # Legacy JSONB stored user IDs but no timestamp. Preserve every valid user
     # reference and use migration time as the first timestamp we can know exactly.
+    # read_by may hold a JSON `null` scalar (not just SQL NULL), which COALESCE
+    # would pass straight through to jsonb_array_elements_text and error on, so
+    # gate on the JSON type instead.
     op.execute(
         sa.text(
             """
@@ -49,7 +52,11 @@ def upgrade() -> None:
             SELECT DISTINCT communication.id, account.id, CURRENT_TIMESTAMP
             FROM communication
             CROSS JOIN LATERAL jsonb_array_elements_text(
-                COALESCE(communication.read_by, '[]'::jsonb)
+                CASE
+                    WHEN jsonb_typeof(communication.read_by) = 'array'
+                    THEN communication.read_by
+                    ELSE '[]'::jsonb
+                END
             ) AS legacy(user_id)
             JOIN "user" AS account
               ON legacy.user_id ~ '^[0-9]+$'
