@@ -156,6 +156,61 @@ async def test_create_inject_attachment_too_large(
     assert after == before, "partial oversized upload should be cleaned up"
 
 
+async def test_failed_inject_persistence_compensates_attachment(
+    client: AsyncClient,
+    facilitator_token: str,
+    active_exercise: Exercise,
+    monkeypatch,
+):
+    """A database failure after upload leaves no staged attachment behind (#139)."""
+    from app.routers import injects as injects_router
+
+    async def fail_create(*_args, **_kwargs):
+        raise RuntimeError("simulated database failure")
+
+    monkeypatch.setattr(injects_router, "create_inject", fail_create)
+    storage_dir = injects_router.ATTACHMENT_ROOT / str(active_exercise.id)
+    before = set(storage_dir.glob("*")) if storage_dir.exists() else set()
+    with pytest.raises(RuntimeError, match="simulated database failure"):
+        await client.post(
+            f"/api/exercises/{active_exercise.id}/injects",
+            data={"title": "Attachment", "content": "Must compensate"},
+            files={"attachment": ("brief.txt", b"brief", "text/plain")},
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+    after = set(storage_dir.glob("*")) if storage_dir.exists() else set()
+    assert after == before
+
+
+async def test_draft_exercise_deletion_removes_attachment_files_after_commit(
+    client: AsyncClient,
+    facilitator_token: str,
+    draft_exercise: Exercise,
+    tmp_path,
+    monkeypatch,
+):
+    """Exercise cascades clean storage only after the row deletion succeeds (#139)."""
+    from app.routers import injects as injects_router
+
+    monkeypatch.setattr(injects_router, "ATTACHMENT_ROOT", tmp_path)
+    headers = {"Authorization": f"Bearer {facilitator_token}"}
+    created = await client.post(
+        f"/api/exercises/{draft_exercise.id}/injects",
+        data={"title": "Attachment", "content": "Delete with exercise"},
+        files={"attachment": ("brief.txt", b"brief", "text/plain")},
+        headers=headers,
+    )
+    assert created.status_code == 201
+    stored_files = list(tmp_path.rglob("*"))
+    assert any(path.is_file() for path in stored_files)
+
+    deleted = await client.delete(
+        f"/api/exercises/{draft_exercise.id}", headers=headers
+    )
+    assert deleted.status_code == 204
+    assert not any(path.is_file() for path in tmp_path.rglob("*"))
+
+
 async def test_create_inject_participant_forbidden(
     client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):

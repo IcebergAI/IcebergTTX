@@ -224,8 +224,24 @@ async def delete_exercise(exercise_id: int, current_user: FacilitatorDep, sessio
             status_code=status.HTTP_409_CONFLICT,
             detail="Only draft exercises can be deleted",
         )
+    attachment_paths = list(
+        (
+            await session.exec(
+                select(Inject.attachment_path).where(
+                    Inject.exercise_id == exercise_id,
+                    col(Inject.attachment_path).is_not(None),
+                )
+            )
+        ).all()
+    )
     await session.delete(ex)
     await session.commit()
+    # The database cascade is authoritative. Files are removed only after it
+    # commits, so a failed transaction cannot leave live rows with broken links.
+    from app.routers.injects import _delete_attachment_path
+
+    for attachment_path in attachment_paths:
+        _delete_attachment_path(attachment_path)
     audit_service.emit(
         "exercise.delete",
         actor=current_user,

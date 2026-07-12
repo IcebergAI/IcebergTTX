@@ -175,6 +175,21 @@ kubectl exec -n iceberg-ttx deploy/iceberg-ttx-app -- \
 
 > **Note**: The app must run as a single replica (`replicas: 1`) until the in-memory WebSocket manager is replaced with a distributed backend (e.g. Redis pub/sub). The manifests enforce this with `strategy: Recreate`.
 
+## Attachment reconciliation
+
+Inject attachments live on disk while their metadata lives in PostgreSQL. After an
+unexpected storage or database failure, inspect the two stores with the read-only
+reconciliation command:
+
+```bash
+uv run python -m app.reconcile_attachments
+```
+
+It reports database rows whose files are missing and unreferenced files beneath
+`uploads/inject_attachments`. To remove only the reported, root-confined orphan
+files, rerun with `--apply`; that action is audit logged. Do not use `--apply`
+until the dry-run output has been reviewed.
+
 ## Backup & restore
 
 All persistent state lives in two places: the **PostgreSQL database** (users,
