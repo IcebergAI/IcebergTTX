@@ -57,3 +57,13 @@ def test_postgres_creates_pgdata_below_the_fs_group_owned_volume() -> None:
 
     assert env["PGDATA"]["value"] == "/var/lib/postgresql/data"
     assert mounts["postgres-data"]["mountPath"] == "/var/lib/postgresql"
+
+
+def test_static_init_containers_do_not_preserve_root_owned_metadata() -> None:
+    for path in ("k8s/app/deployment.yaml", "k8s/caddy/deployment.yaml"):
+        deployment = _documents(path)[0]
+        init = deployment["spec"]["template"]["spec"]["initContainers"][0]
+        command = init["command"][-1]
+
+        assert "cp -rL" in command
+        assert "cp -a" not in command
