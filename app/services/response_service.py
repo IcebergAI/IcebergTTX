@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -87,7 +89,14 @@ async def submit_response(
         selected_option=selected_option,
     )
     session.add(response)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Response already submitted for this inject",
+        ) from exc
     await session.refresh(response)
 
     next_ids = await _compute_next_inject_ids(session, exercise_id, inject_id, selected_option)

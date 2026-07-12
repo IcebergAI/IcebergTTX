@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime
+from sqlalchemy import DateTime, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -12,6 +12,14 @@ if TYPE_CHECKING:
 
 
 class Response(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint(
+            "exercise_id",
+            "inject_id",
+            "user_id",
+            name="uq_response_exercise_inject_user",
+        ),
+    )
     id: int | None = Field(default=None, primary_key=True)
     inject_id: int = Field(foreign_key="inject.id", ondelete="CASCADE")
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")

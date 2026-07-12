@@ -48,7 +48,18 @@ async def approve(
     current_user: FacilitatorDep,
     session: SessionDep,
 ):
-    s = await _get_or_404(session, exercise_id, suggested_id)
+    s = (
+        await session.exec(
+            select(SuggestedInject)
+            .where(SuggestedInject.id == suggested_id)
+            .where(SuggestedInject.exercise_id == exercise_id)
+            .with_for_update()
+        )
+    ).one_or_none()
+    if s is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Suggested inject not found"
+        )
     if s.status != SuggestedInjectStatus.pending_review:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -71,13 +82,18 @@ async def approve(
         target_teams=target_teams,
         group_id=group_id,
         sequence_order=next_order,
+        commit=False,
     )
 
     s.status = SuggestedInjectStatus.approved
     s.reviewed_by = current_user.id
     s.reviewed_at = datetime.now(UTC)
     session.add(s)
-    await session.commit()
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
     await session.refresh(inject)
 
     return {

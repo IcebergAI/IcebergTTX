@@ -48,11 +48,16 @@ async def create_exercise(
         current_node_id=definition.start_inject_id,
     )
     session.add(exercise)
-    await session.commit()
-    await session.refresh(exercise)
+    await session.flush()
     assert exercise.id is not None
 
-    await seed_injects_from_scenario(session, exercise.id, scenario)
+    try:
+        await seed_injects_from_scenario(session, exercise.id, scenario)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    await session.refresh(exercise)
     return exercise
 
 
