@@ -11,6 +11,7 @@ from app.models.inject import Inject
 from app.models.suggested_inject import SuggestedInject, SuggestedInjectStatus
 from app.models.user import User, UserRole
 from app.schemas.api import SuggestedInjectPublic
+from app.services.access_control import require_exercise_owner, require_operational_mutability
 from app.services.inject_service import create_inject
 from app.services.llm_service import _suggested_payload
 
@@ -48,6 +49,8 @@ async def approve(
     current_user: FacilitatorDep,
     session: SessionDep,
 ):
+    exercise = await require_exercise_owner(session, exercise_id, current_user)
+    require_operational_mutability(exercise)
     s = (
         await session.exec(
             select(SuggestedInject)
@@ -119,6 +122,8 @@ async def reject(
     current_user: FacilitatorDep,
     session: SessionDep,
 ):
+    exercise = await require_exercise_owner(session, exercise_id, current_user)
+    require_operational_mutability(exercise)
     s = await _get_or_404(session, exercise_id, suggested_id)
     if s.status != SuggestedInjectStatus.pending_review:
         raise HTTPException(

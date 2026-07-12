@@ -10,7 +10,11 @@ from app.models.communication import CommDirection, Communication
 from app.models.exercise import ExerciseState
 from app.models.user import User, UserRole
 from app.schemas.api import CommunicationPublic
-from app.services.access_control import exercise_group_for_user, require_exercise_access
+from app.services.access_control import (
+    exercise_group_for_user,
+    require_exercise_access,
+    require_operational_mutability,
+)
 from app.services.communication_service import (
     all_team_ids_for_exercise,
     broadcast_communication,
@@ -116,6 +120,7 @@ async def send_comm(
     session: SessionDep,
 ):
     exercise = await require_exercise_access(session, exercise_id, current_user)
+    require_operational_mutability(exercise)
     if current_user.role != UserRole.participant:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -167,6 +172,7 @@ async def inject_comm(
     facilitators may seed simulated inbound comms during draft/paused setup.
     """
     exercise = await require_exercise_access(session, exercise_id, current_user)
+    require_operational_mutability(exercise)
     visible_to_teams = (
         await validate_team_ids(session, exercise, body.visible_to_teams, field="visible_to_teams")
         or await all_team_ids_for_exercise(session, exercise_id)
