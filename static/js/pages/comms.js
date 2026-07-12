@@ -41,6 +41,11 @@ document.addEventListener('alpine:init', () => {
       return this.selected ? this.padId(this.selected.id, 3) : '';
     },
 
+    get commCountLabel() {
+      const n = this.filteredComms.length;
+      return n === 1 ? '1 message' : n + ' messages';
+    },
+
     async init() {
       const me = await apiFetch('/auth/me');
       if (me && me.ok) {

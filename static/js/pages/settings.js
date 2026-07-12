@@ -17,6 +17,32 @@ document.addEventListener('alpine:init', () => {
     samples: [],
     loadingSamples: true,
     sampleMessage: '',
+    // Client-only: which sub-nav section is showing. Nothing persists it — a
+    // reload lands you back on Account, which is where the password gate lives.
+    activeSection: 'account',
+
+    sections: [
+      { id: 'account', label: 'Account' },
+      { id: 'appearance', label: 'Appearance' },
+      { id: 'role', label: 'Role preview' },
+      { id: 'samples', label: 'Sample data' },
+    ],
+
+    // Role preview and sample data are facilitator-only, so the sub-nav has to
+    // hide them too — not just the panes.
+    get visibleSections() {
+      return this.canSwitch
+        ? this.sections
+        : this.sections.filter(s => s.id === 'account' || s.id === 'appearance');
+    },
+
+    setSection(id) {
+      // The temp-password gate (#66) must not be navigable away from.
+      if (this.mustChangePassword) return;
+      this.activeSection = id;
+    },
+
+    isSection(id) { return this.activeSection === id; },
 
     get canSwitch() { return !!this.me?.can_switch_roles; },
     // Admin set a temporary password (#66) — the user is held on this page until
@@ -107,14 +133,10 @@ document.addEventListener('alpine:init', () => {
       applyTheme(this.theme);
     },
 
-    setCookie(name, value) {
-      document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
-    },
-
     setPreviewRole(role) {
       this.viewRole = role;
       localStorage.setItem('dt_view_role', role);
-      this.setCookie('dt_view_role', role);
+      DT.setPreferenceCookie('dt_view_role', role);
       this.setPreviewTeam();
       window.location.reload();
     },
@@ -123,7 +145,7 @@ document.addEventListener('alpine:init', () => {
       const team = (this.viewTeam || 'it_ops').trim();
       this.viewTeam = team;
       localStorage.setItem('dt_view_team', team);
-      this.setCookie('dt_view_team', team);
+      DT.setPreferenceCookie('dt_view_team', team);
     },
 
     teamLabel(team) {

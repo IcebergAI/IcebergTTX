@@ -2,81 +2,7 @@
 {% block title %}Communications — IcebergTTX{% endblock %}
 
 {% block content %}
-<style>
-  .comm-filter-control {
-    height: 34px;
-    background: var(--paper-soft);
-    color: var(--ink-soft);
-    border-radius: 6px;
-    box-shadow: inset 0 0 0 1px var(--rule-2);
-    font-size: 13px;
-    outline: none;
-    padding: 0 10px;
-  }
-
-  .comm-filter-control::placeholder {
-    color: var(--muted);
-  }
-
-  .comm-filter-control:focus {
-    box-shadow: inset 0 0 0 1px var(--accent-d), 0 0 0 2px rgba(191, 124, 22, .18);
-  }
-
-  .comm-direction-filter {
-    flex: 0 0 104px;
-    font-size: 12px;
-  }
-
-  .comm-list-row {
-    position: relative;
-    transition: background .12s ease, box-shadow .12s ease, color .12s ease;
-  }
-
-  .comm-list-row:hover {
-    background: rgba(191, 124, 22, .07);
-  }
-
-  .comm-list-row-selected {
-    background: rgba(191, 124, 22, .14);
-    box-shadow: inset 3px 0 0 var(--accent-d), inset 0 0 0 1px rgba(191, 124, 22, .22);
-  }
-
-  .comm-list-row-selected:hover {
-    background: rgba(191, 124, 22, .18);
-  }
-
-  .comm-list-row-selected .comm-row-meta,
-  .comm-list-row-selected .comm-row-time {
-    color: var(--accent-d) !important;
-  }
-
-  .comm-list-row-selected .comm-row-subject {
-    color: var(--ink) !important;
-  }
-
-  .comm-list-row-selected .comm-row-preview {
-    color: var(--ink-soft) !important;
-  }
-
-  html[data-theme="dark"] .comm-filter-control:focus {
-    box-shadow: inset 0 0 0 1px var(--accent-d), 0 0 0 2px rgba(245, 175, 74, .18);
-  }
-
-  html[data-theme="dark"] .comm-list-row:hover {
-    background: rgba(245, 175, 74, .08);
-  }
-
-  html[data-theme="dark"] .comm-list-row-selected {
-    background: rgba(245, 175, 74, .16);
-    box-shadow: inset 3px 0 0 var(--accent-d), inset 0 0 0 1px rgba(245, 175, 74, .26);
-  }
-
-  html[data-theme="dark"] .comm-list-row-selected:hover {
-    background: rgba(245, 175, 74, .2);
-  }
-</style>
-
-<div x-data="commsInbox({{ exercise_id }})" class="workspace">
+<div x-data="commsInbox({{ exercise_id }})" class="workspace workspace--fill">
 
   <div class="page-head">
     <div>
@@ -85,70 +11,82 @@
     </div>
     <div class="flex items-center gap-2">
       <span class="flex items-center gap-1.5 smallcaps"
-            :class="wsConnected ? 'text-faint' : 'text-red-400'">
+            :class="wsConnected ? 'text-ok' : 'text-crit'">
+        <span class="dot" :class="wsConnected ? 'dot-ok' : 'dot-crit'" aria-hidden="true"></span>
         <span x-text="wsConnected ? 'Live' : 'Disconnected'"></span>
       </span>
       <template x-if="!isF">
         <button @click="openSend()"
-                class="btn btn-ghost h-8 px-3 text-[13px]">+ Send message</button>
+                class="btn btn-primary px-4 text-[13px]">+ Send message</button>
       </template>
       <template x-if="isF">
         <button @click="openInjectInbound()"
-                class="btn btn-ghost h-8 px-3 text-[13px]">Inject inbound</button>
+                class="btn btn-primary px-4 text-[13px]">Inject inbound</button>
       </template>
     </div>
   </div>
 
-  <!-- Two-pane layout -->
-  <div class="grid surface overflow-hidden"
-       style="grid-template-columns: 340px 1fr; height: calc(100vh - 180px);">
+  <!-- Two-pane layout. Fills the leftover viewport via .workspace--fill rather
+       than the old `height: calc(100vh - 180px)`, which guessed at the chrome
+       above it and broke whenever that chrome changed. -->
+  <div class="grid surface overflow-hidden flex-1 min-h-0"
+       style="grid-template-columns: 352px 1fr;">
 
     <!-- Message list -->
-    <div class="border-r rule overflow-y-auto">
-      <div class="px-4 pt-3 pb-2 flex items-center gap-2 border-b rule">
+    <div class="border-r rule flex flex-col min-h-0">
+      <div class="px-4 pt-3 pb-2 flex items-center gap-2 border-b rule shrink-0">
         <input x-model="commSearch"
                class="comm-filter-control flex-1 min-w-0"
+               aria-label="Filter messages"
                placeholder="Filter messages…" />
-        <select x-model="directionFilter"
-                aria-label="Filter by direction"
-                class="comm-filter-control comm-direction-filter">
-          <option value="all">All</option>
-          <option value="inbound">Inbound</option>
-          <option value="outbound">Outbound</option>
-        </select>
-        <span class="smallcaps text-faint" x-text="filteredComms.length"></span>
+        <div class="seg" role="group" aria-label="Filter by direction">
+          <button type="button" class="seg-btn px-2.5"
+                  :class="directionFilter === 'all' && 'is-active'"
+                  :aria-pressed="directionFilter === 'all'"
+                  @click="directionFilter = 'all'">All</button>
+          <button type="button" class="seg-btn px-2.5"
+                  :class="directionFilter === 'inbound' && 'is-active'"
+                  :aria-pressed="directionFilter === 'inbound'"
+                  @click="directionFilter = 'inbound'">In</button>
+          <button type="button" class="seg-btn px-2.5"
+                  :class="directionFilter === 'outbound' && 'is-active'"
+                  :aria-pressed="directionFilter === 'outbound'"
+                  @click="directionFilter = 'outbound'">Out</button>
+        </div>
       </div>
 
+      <!-- A bare "2" told you nothing; say what it counts. -->
+      <div class="px-4 py-1.5 smallcaps text-faint shrink-0" x-text="commCountLabel"></div>
+
+      <div class="flex-1 min-h-0 overflow-y-auto">
       <div x-show="filteredComms.length === 0"
            class="px-4 py-8 text-center smallcaps text-faint">No messages.</div>
 
+      <!-- Colours come from classes, not inline `style`: the selected-row rules
+           have to be able to override them, and inline styles would win. -->
       <template x-for="c in filteredComms" :key="c.id">
         <div @click="open(c)"
              class="comm-list-row px-4 py-3 border-b rule cursor-pointer"
              :class="selected && selected.id === c.id ? 'comm-list-row-selected' : ''">
           <div class="flex items-center gap-2 mb-1">
             <span class="dot shrink-0"
-                  :style="c.direction === 'inbound' ? 'background: var(--accent-d)' : 'background:#5b86b8'"></span>
-            <span class="comm-row-meta smallcaps truncate"
-                  :style="c.direction === 'inbound' ? 'color: var(--ink-soft)' : 'color: var(--muted)'"
-                  x-text="commListMeta(c)"></span>
-            <span class="comm-row-time mono text-[10.5px] text-faint ml-auto shrink-0"
-                  style="color: var(--muted);"
+                  :class="c.direction === 'inbound' ? 'dot-inbound' : 'dot-outbound'"
+                  aria-hidden="true"></span>
+            <span class="comm-row-meta smallcaps truncate" x-text="commListMeta(c)"></span>
+            <span class="comm-row-time mono text-[10.5px] ml-auto shrink-0"
                   x-text="fmtAgo(c.sent_at)"></span>
           </div>
           <div class="comm-row-subject text-[13.5px] truncate"
-               :class="c.is_read ? 'font-normal' : 'font-medium'"
-               :style="c.is_read ? 'color: var(--ink-soft)' : 'color: var(--ink)'"
+               :class="c.is_read ? 'is-read' : 'font-medium'"
                x-text="c.subject"></div>
-          <div class="comm-row-preview text-[12px] truncate mt-0.5"
-               style="color: var(--muted);"
-               x-text="c.body"></div>
+          <div class="comm-row-preview text-[12px] truncate mt-0.5" x-text="c.body"></div>
           <template x-if="c.triggered_by_inject_id">
             <div class="mono text-[10.5px] text-faint mt-1"
                  x-text="'triggered by inject #' + c.triggered_by_inject_id"></div>
           </template>
         </div>
       </template>
+      </div>
     </div>
 
     <!-- Reader pane -->
