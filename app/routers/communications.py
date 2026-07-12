@@ -25,6 +25,7 @@ from app.services.communication_service import (
     list_communications,
     mark_read,
     sender_team_for_comm,
+    unread_count,
 )
 from app.services.exercise_service import validate_team_ids
 
@@ -80,16 +81,18 @@ async def _comm_visible_to_user(session: AsyncSession, comm: Communication, user
     return group_id in comm.visible_to_teams
 
 
+async def _viewer_team(session: AsyncSession, exercise_id: int, user: User) -> str | None:
+    """The team whose visibility rules apply to this viewer. None for facilitators."""
+    if user.role != UserRole.participant:
+        return None
+    return await exercise_group_for_user(session, exercise_id, user) or user.team
+
+
 @router.get("", response_model=list[CommunicationPublic])
 async def list_comms(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
     assert current_user.id is not None
     await require_exercise_access(session, exercise_id, current_user)
-    team = None
-    if current_user.role == UserRole.participant:
-        team = (
-            await exercise_group_for_user(session, exercise_id, current_user)
-            or current_user.team
-        )
+    team = await _viewer_team(session, exercise_id, current_user)
     comms = await list_communications(
         session,
         exercise_id,
@@ -189,6 +192,27 @@ async def inject_comm(
     )
     await broadcast_communication(comm)
     return await comm_payload(comm, session)
+
+
+class UnreadCount(BaseModel):
+    unread: int
+
+
+# Must stay ahead of GET /{comm_id}: FastAPI matches routes in declaration order,
+# so a later literal path would be swallowed as a comm_id and 422 on parse.
+@router.get("/unread-count", response_model=UnreadCount)
+async def get_unread_count(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
+    assert current_user.id is not None
+    await require_exercise_access(session, exercise_id, current_user)
+    team = await _viewer_team(session, exercise_id, current_user)
+    count = await unread_count(
+        session,
+        exercise_id,
+        user_id=current_user.id,
+        user_team=team,
+        participant_view=current_user.role == UserRole.participant,
+    )
+    return UnreadCount(unread=count)
 
 
 @router.get("/{comm_id}", response_model=CommunicationPublic)

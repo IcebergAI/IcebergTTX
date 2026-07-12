@@ -72,7 +72,11 @@ document.addEventListener('alpine:init', () => {
             `/exercises/${exerciseId}/communications/${c.id}/read`,
             { method: 'PUT' },
           );
-          if (marked && marked.ok) updated = await marked.json();
+          if (marked && marked.ok) {
+            updated = await marked.json();
+            // One fewer unread — tell the rail badge.
+            document.dispatchEvent(new CustomEvent('dt:comms-changed'));
+          }
         }
         this.upsertComm(updated, { preserveOrder: true });
         this.selected = updated;
@@ -196,6 +200,7 @@ document.addEventListener('alpine:init', () => {
         onMessage: (msg) => {
           if (msg.type === 'communication_received') {
             this.upsertComm(msg.payload);
+            document.dispatchEvent(new CustomEvent('dt:comms-changed'));
           }
         },
       });

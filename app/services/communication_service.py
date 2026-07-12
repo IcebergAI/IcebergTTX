@@ -134,6 +134,32 @@ async def list_communications(
     return visible
 
 
+async def unread_count(
+    session: AsyncSession,
+    exercise_id: int,
+    user_id: int,
+    user_team: str | None = None,
+    participant_view: bool = False,
+) -> int:
+    """Count the comms this viewer can see but has not yet opened.
+
+    Deliberately layered on list_communications() rather than a bespoke COUNT, so
+    the badge can never disagree with the inbox it summarises — a count that
+    applied looser visibility rules would leak the existence of messages the
+    viewer is not allowed to read.
+    """
+    comms = await list_communications(
+        session,
+        exercise_id,
+        user_id=user_id,
+        user_team=user_team,
+        participant_view=participant_view,
+    )
+    comm_ids = [c.id for c in comms if c.id is not None]
+    read_times = await communication_read_times(session, comm_ids, user_id)
+    return sum(1 for comm_id in comm_ids if comm_id not in read_times)
+
+
 async def sender_team_for_comm(session: AsyncSession | None, comm: Communication) -> str | None:
     if comm.sender_team:
         return comm.sender_team
