@@ -767,7 +767,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 @media (max-width: 760px) {
   .btn, button, [role="button"], [role="tab"],
   .rail-link, .rail-live-main, .rail-live-opt, .rail-logout, summary,
-  .seg-btn,
+  .seg-btn, .settings-nav-btn, .settings-input, .comm-filter-control,
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select, textarea {
     min-width: 44px;
