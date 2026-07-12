@@ -28,6 +28,8 @@ def _auth_context() -> dict:
     return {
         "local_auth": settings.local_auth_enabled,
         "registration_enabled": settings.registration_enabled,
+        # Gates the "Forgot password?" link + the reset pages (#117).
+        "smtp_enabled": settings.smtp_enabled,
         "oidc_providers": [(p.key, p.display_name) for p in oidc_service.registered_providers()],
     }
 
@@ -137,6 +139,26 @@ def register_page(request: Request, user: UserContext):
     if not settings.local_auth_enabled or not settings.registration_enabled:
         return RedirectResponse("/login")
     return templates.TemplateResponse(request, "auth/register.html", _auth_context())
+
+
+@router.get("/forgot-password", response_class=HTMLResponse)
+def forgot_password_page(request: Request, user: UserContext):
+    if user:
+        return RedirectResponse("/dashboard")
+    # Self-service reset needs both local auth and a configured mailer (#117);
+    # redirect to /login when either is off so there's no dead form.
+    if not settings.local_auth_enabled or not settings.smtp_enabled:
+        return RedirectResponse("/login")
+    return templates.TemplateResponse(request, "auth/forgot_password.html", _auth_context())
+
+
+@router.get("/reset-password", response_class=HTMLResponse)
+def reset_password_page(request: Request, user: UserContext):
+    if not settings.local_auth_enabled or not settings.smtp_enabled:
+        return RedirectResponse("/login")
+    # The token is read from the query string by the Alpine component (not injected
+    # into the template) so it never lands in server-rendered HTML.
+    return templates.TemplateResponse(request, "auth/reset_password.html", _auth_context())
 
 
 @router.get("/dashboard", response_class=HTMLResponse)

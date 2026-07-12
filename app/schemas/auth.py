@@ -81,6 +81,18 @@ class AdminResetPasswordRequest(BaseModel):
     must_change_password: bool = True
 
 
+class PasswordResetRequest(EmailMixin):
+    """Self-service reset request (#117). Only the email — the response is always the
+    same 200 regardless of whether the account exists (no enumeration)."""
+
+
+class PasswordResetComplete(BaseModel):
+    """Complete a self-service reset with the emailed token and a new password (#117)."""
+
+    token: str
+    password: Password
+
+
 class LoginRequest(EmailMixin):
     password: str
 

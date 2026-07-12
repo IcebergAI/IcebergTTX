@@ -83,6 +83,17 @@ services:
       PROXY_NO_PROXY: ${PROXY_NO_PROXY:-localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,::1}
       PROXY_USERNAME: ${PROXY_USERNAME:-}
       PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+      # Email / SMTP (#117). Feature-flagged on SMTP_HOST+SMTP_FROM; enables self-
+      # service password reset. SMTP_PASSWORD is a secret. Raw socket → goes direct,
+      # not via the outbound proxy. PUBLIC_BASE_URL builds absolute reset links.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_TLS: ${SMTP_TLS:-false}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       # OIDC / SSO (#25). AUTH_MODE=local|oidc|both. Client secrets are secrets —
       # passed through from the .env, never logged or persisted.
       AUTH_MODE: ${AUTH_MODE:-both}

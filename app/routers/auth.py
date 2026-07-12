@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -9,19 +9,31 @@ from app.config import settings
 from app.database import get_session
 from app.dependencies import get_current_actual_user, get_current_user
 from app.middleware import client_ip
-from app.models.user import User, UserRole
+from app.models.auth_token import AuthTokenPurpose
+from app.models.user import LOCAL_AUTH_PROVIDER, User, UserRole
 from app.schemas.auth import (
     LoginRequest,
+    PasswordResetComplete,
+    PasswordResetRequest,
     RegisterRequest,
     TokenResponse,
     UpdateMeRequest,
     UserResponse,
 )
-from app.services import audit_service
+from app.services import audit_service, mail_service, token_service
 from app.services.auth_service import create_access_token, hash_password, verify_password
-from app.services.rate_limit import login_rate_limiter, registration_rate_limiter
+from app.services.background import spawn
+from app.services.rate_limit import (
+    login_rate_limiter,
+    password_reset_rate_limiter,
+    registration_rate_limiter,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Reset links are short-lived — long enough to receive the email and act, short
+# enough to bound exposure of a leaked link (#117).
+RESET_TOKEN_TTL = timedelta(hours=1)
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
@@ -62,6 +74,22 @@ def _require_registration_enabled() -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Self-registration is disabled.",
         )
+
+
+def _require_smtp() -> None:
+    """Guard the email-dependent endpoints when SMTP is not configured (#117).
+
+    Returns 404 (not 403): with no mailer the feature does not exist, so the routes
+    read as absent rather than forbidden. UI entry points are hidden in parallel.
+    """
+    if not settings.smtp_enabled:
+        audit_service.emit(
+            "auth.email_feature",
+            result="deny",
+            reason="smtp not configured",
+            severity="warning",
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -180,6 +208,123 @@ async def login(
         actor_role=user.role.value,
     )
     return TokenResponse(access_token=token)
+
+
+@router.post("/password-reset/request")
+async def password_reset_request(
+    body: PasswordResetRequest,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """Start a self-service password reset (#117).
+
+    Always returns the same 200 regardless of whether the account exists — no
+    enumeration. Email sending is fired off the response path (spawn) so there is no
+    timing tell. Only local-auth accounts get a reset link; SSO accounts get a
+    "sign in via SSO" notice; unknown emails get nothing.
+    """
+    _require_smtp()
+    ip = client_ip(request) or "unknown"
+    if password_reset_rate_limiter.is_limited(ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many reset requests. Try again later.",
+            headers={"Retry-After": str(password_reset_rate_limiter.retry_after(ip))},
+        )
+    password_reset_rate_limiter.record_failure(ip)
+
+    user = (await session.exec(select(User).where(User.email == body.email))).first()
+    if user is not None and user.auth_provider == LOCAL_AUTH_PROVIDER:
+        raw = await token_service.create(
+            session,
+            purpose=AuthTokenPurpose.password_reset,
+            email=user.email,
+            user_id=user.id,
+            ttl=RESET_TOKEN_TTL,
+        )
+        link = mail_service.build_link(request, "/reset-password", raw)
+        spawn(
+            mail_service.send(
+                user.email,
+                "Reset your IcebergTTX password",
+                "We received a request to reset your IcebergTTX password.\n\n"
+                f"Use this link within the next hour to choose a new one:\n{link}\n\n"
+                "If you didn't request this, you can ignore this email — your "
+                "password will not change.",
+            )
+        )
+    elif user is not None:
+        # SSO account — no local password to reset.
+        spawn(
+            mail_service.send(
+                user.email,
+                "IcebergTTX password reset",
+                "You (or someone) requested a password reset for your IcebergTTX "
+                "account, but it signs in via single sign-on (SSO) and has no "
+                "password to reset. Use your organisation's SSO to sign in.",
+            )
+        )
+    # Never log the token; record only the attempt + the email that was requested.
+    audit_service.emit(
+        "auth.password_reset_request",
+        actor_email=body.email,
+        target_type="user",
+        target_id=user.id if user else None,
+        reason="reset email sent" if user else "no matching account",
+    )
+    return {"status": "ok"}
+
+
+@router.post("/password-reset/complete", response_model=TokenResponse)
+async def password_reset_complete(
+    body: PasswordResetComplete,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """Finish a reset with the emailed token + a new password (#117).
+
+    On success: set the new password, revoke all existing sessions (token_valid_after,
+    #14), clear any must_change_password flag, and log the caller in via a fresh cookie.
+    """
+    _require_smtp()
+    token = await token_service.consume(
+        session, raw=body.token, purpose=AuthTokenPurpose.password_reset
+    )
+    user = await session.get(User, token.user_id) if token and token.user_id else None
+    if user is None or user.auth_provider != LOCAL_AUTH_PROVIDER:
+        audit_service.emit(
+            "auth.password_reset_complete",
+            result="fail",
+            reason="invalid or expired token",
+            severity="warning",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset link."
+        )
+
+    user.hashed_password = hash_password(body.password)
+    # Revoke previously-issued tokens (#14); whole-second truncation so the fresh
+    # login token below (iat is second-precision) is not itself rejected.
+    user.token_valid_after = datetime.now(UTC).replace(microsecond=0)
+    user.must_change_password = False
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+
+    new_token = create_access_token(
+        subject=user.email, role=user.role.value, is_admin=user.is_admin
+    )
+    _set_session_cookie(response, new_token)
+    audit_service.emit(
+        "auth.password_reset_complete",
+        actor_id=user.id,
+        actor_email=user.email,
+        actor_role=user.role.value,
+        target_type="user",
+        target_id=user.id,
+        severity="warning",
+    )
+    return TokenResponse(access_token=new_token)
 
 
 @router.post("/logout")

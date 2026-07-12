@@ -20,6 +20,7 @@ from app.models import (  # noqa: F401
     assessment,
     audit,
     audit_settings,
+    auth_token,
     communication,
     exercise,
     inject,

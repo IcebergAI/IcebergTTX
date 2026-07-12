@@ -40,6 +40,10 @@ dependencies = [
     "authlib>=1.6",
     "httpx>=0.27",
     "itsdangerous>=2.0",
+    # Email (#117). Async SMTP client for outbound mail (password reset, invites).
+    # Feature-flagged: only used when SMTP_* is configured. Raw socket — goes direct,
+    # not through the httpx outbound-proxy layer (#97).
+    "aiosmtplib>=3.0",
 ]
 
 [project.optional-dependencies]

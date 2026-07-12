@@ -57,6 +57,12 @@
       </div>
     {% endif %}
 
+    {% if local_auth and smtp_enabled %}
+    <p class="mt-4 text-[13px] text-center text-muted">
+      <a href="/forgot-password" class="text-ink-soft hover:underline">Forgot password?</a>
+    </p>
+    {% endif %}
+
     {% if local_auth and registration_enabled %}
     <p class="mt-5 text-[13px] text-center text-muted">
       No account?
