@@ -106,7 +106,7 @@ jobs:
           uv run uvicorn app.main:app --host 127.0.0.1 --port 8765 > /tmp/iceberg-ui.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-          for attempt in {1..30}; do
+          for _ in {1..30}; do
             if curl --fail --silent http://127.0.0.1:8765/login > /dev/null; then
               break
             fi

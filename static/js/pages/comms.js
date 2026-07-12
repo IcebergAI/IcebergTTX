@@ -120,6 +120,16 @@ document.addEventListener('alpine:init', () => {
       this.focusDialog('composeFrom');
     },
 
+    closeCompose() {
+      this.showCompose = false;
+      this.restoreDialogFocus();
+    },
+
+    closeSend() {
+      this.showSend = false;
+      this.restoreDialogFocus();
+    },
+
     replySubject(subject) {
       const trimmed = (subject || '').trim();
       if (!trimmed) return '';

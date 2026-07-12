@@ -255,7 +255,7 @@
   <!-- Participant send modal (inside x-data scope) -->
   <div x-show="showSend" x-cloak
        class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-       @keydown.escape.window="showSend = false; restoreDialogFocus()">
+       @keydown.escape.window="closeSend()">
     <div x-ref="sendDialog" role="dialog" aria-modal="true" aria-labelledby="send-message-title"
          tabindex="-1" @keydown.tab="trapDialog($event, 'sendDialog')"
          class="paper ring-rule rounded-xl w-full max-w-lg p-6 shadow-xl" @click.stop>
@@ -306,7 +306,7 @@
       <div class="flex gap-3 mt-5">
         <button @click="sendComm()"
                 class="btn btn-primary h-9 px-5 text-[13px]">Send</button>
-        <button @click="showSend = false; restoreDialogFocus()"
+        <button @click="closeSend()"
                 class="btn btn-ghost h-9 px-4 text-[13px]">Cancel</button>
       </div>
     </div>
@@ -315,7 +315,7 @@
   <!-- Facilitator inject modal (inside x-data scope) -->
   <div x-show="showCompose" x-cloak
        class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-       @keydown.escape.window="showCompose = false; restoreDialogFocus()">
+       @keydown.escape.window="closeCompose()">
     <div x-ref="composeDialog" role="dialog" aria-modal="true" aria-labelledby="inject-message-title"
          tabindex="-1" @keydown.tab="trapDialog($event, 'composeDialog')"
          class="paper ring-rule rounded-xl w-full max-w-lg p-6 shadow-xl" @click.stop>
@@ -364,7 +364,7 @@
       <div class="flex gap-3 mt-5">
         <button @click="injectComm()"
                 class="btn btn-primary h-9 px-5 text-[13px]">Send</button>
-        <button @click="showCompose = false; restoreDialogFocus()"
+        <button @click="closeCompose()"
                 class="btn btn-ghost h-9 px-4 text-[13px]">Cancel</button>
       </div>
     </div>
