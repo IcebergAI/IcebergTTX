@@ -76,3 +76,17 @@ def test_shared_secondary_text_tokens_meet_wcag_aa() -> None:
             _oklch(background_block, background),
         )
         assert ratio >= 4.5, f"{foreground} on {background} is only {ratio:.2f}:1"
+
+
+def test_team_scent_pills_meet_wcag_aa() -> None:
+    """Each team pill's label must stay legible on its own tint, in both themes."""
+    for block_name in (":root", 'html[data-theme="dark"]'):
+        block = _block(block_name)
+        for team in ("itops", "legal", "exec", "comms"):
+            ratio = _contrast(
+                _oklch(block, f"--team-{team}-ink"),
+                _oklch(block, f"--team-{team}-bg"),
+            )
+            assert ratio >= 4.5, (
+                f"--team-{team}-ink on --team-{team}-bg is only {ratio:.2f}:1 in {block_name}"
+            )
