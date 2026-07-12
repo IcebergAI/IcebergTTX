@@ -449,7 +449,7 @@ async def test_entra_verified_email_does_not_link_local_account(session):
         await oidc_service.provision_oidc_user(
             session, cfg=cfg, identity=_identity(subject="entra-sub", email=local.email)
         )
-    assert exc.value.reason == "entra email linking is disabled"
+    assert exc.value.reason == "account linking required"
 
 
 async def test_unverified_email_collision_denied(session):
