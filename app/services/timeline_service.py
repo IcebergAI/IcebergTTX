@@ -58,6 +58,7 @@ async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
         )
     ).all()
     for i in injects:
+        assert i.id is not None
         assert i.released_at is not None  # guaranteed by the WHERE clause
         events.append(
             _event(
@@ -103,15 +104,17 @@ async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
     ).all()
     quality_by_response: dict[int, str | None] = {}
     if responses:
+        response_ids = [r.id for r in responses if r.id is not None]
         assessments = (
             await session.exec(
                 select(ResponseAssessment).where(
-                    col(ResponseAssessment.response_id).in_([r.id for r in responses])
+                    col(ResponseAssessment.response_id).in_(response_ids)
                 )
             )
         ).all()
         quality_by_response = {a.response_id: a.decision_quality for a in assessments}
     for r in responses:
+        assert r.id is not None
         events.append(
             _event(
                 r.submitted_at,
@@ -132,6 +135,7 @@ async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
         await session.exec(select(Communication).where(Communication.exercise_id == exercise_id))
     ).all()
     for c in comms:
+        assert c.id is not None
         events.append(
             _event(
                 c.sent_at,
@@ -153,6 +157,7 @@ async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
         await session.exec(select(InjectComment).where(InjectComment.exercise_id == exercise_id))
     ).all()
     for cm in comments:
+        assert cm.id is not None
         events.append(
             _event(
                 cm.created_at,

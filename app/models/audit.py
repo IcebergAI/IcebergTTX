@@ -1,3 +1,5 @@
+# pyright: reportArgumentType=false
+# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import UTC, datetime
 
 from sqlalchemy import DateTime

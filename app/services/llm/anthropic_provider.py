@@ -10,6 +10,9 @@ The ``anthropic`` SDK is a core dependency; ``anthropic[bedrock]`` (boto3) is th
 optional ``llm-bedrock`` extra, imported lazily so a non-Bedrock deployment never
 needs it.
 """
+# pyright: reportPrivateImportUsage=false, reportCallIssue=false, reportArgumentType=false
+# The optional Bedrock class and documented message payload shape are selected at
+# runtime, but are not fully represented by the installed Anthropic SDK stubs.
 
 from __future__ import annotations
 

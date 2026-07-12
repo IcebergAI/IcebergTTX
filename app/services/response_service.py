@@ -7,7 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.inject import Inject, InjectState
 from app.models.response import Response
-from app.schemas.api import ResponsePublic
+from app.schemas.api import ExerciseProgressionPublic, ResponsePublic
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.access_control import inject_matches_group
 from app.services.scenario_service import (
@@ -214,7 +214,9 @@ def response_payload(
             if next_injects is not None
             else None
         ),
-        progression=progression,
+        progression=(
+            ExerciseProgressionPublic.model_validate(progression) if progression else None
+        ),
     )
     return model.model_dump(mode="json")
 

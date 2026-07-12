@@ -64,11 +64,11 @@ def export_definition(scenario: Scenario) -> ScenarioDefinition:
     self-invalidates whenever the column is reassigned (``update_scenario``) or
     reloaded from the DB (``session.refresh``) — those produce a new string object.
     """
-    cached = scenario.__dict__.get(_PARSED_DEFINITION_ATTR)
+    cached = getattr(scenario, _PARSED_DEFINITION_ATTR, None)
     if cached is not None and cached[0] is scenario.definition:
         return cached[1]
     parsed = ScenarioDefinition.model_validate_json(scenario.definition)
-    scenario.__dict__[_PARSED_DEFINITION_ATTR] = (scenario.definition, parsed)
+    object.__setattr__(scenario, _PARSED_DEFINITION_ATTR, (scenario.definition, parsed))
     return parsed
 
 

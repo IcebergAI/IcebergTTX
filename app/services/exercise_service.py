@@ -177,6 +177,8 @@ async def broadcast_exercise_state(exercise: Exercise) -> None:
     from app.schemas.api import ExercisePublic
     from app.services.ws_manager import manager
 
+    assert exercise.id is not None
+
     await manager.broadcast_to_exercise(
         exercise.id,
         {

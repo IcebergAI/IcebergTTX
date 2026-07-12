@@ -40,6 +40,9 @@ jobs:
       - name: Lint
         run: uv run ruff check app/ tests/
 
+      - name: Type check
+        run: uv run pyright app/
+
       - name: Security scan (bandit)
         run: uv run bandit -c pyproject.toml -r app/
 
