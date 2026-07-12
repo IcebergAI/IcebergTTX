@@ -20,6 +20,7 @@ from app.schemas.api import InjectPublic
 from app.services import audit_service
 from app.services.access_control import (
     require_exercise_access,
+    require_exercise_owner,
     require_inject_visible,
     require_operational_mutability,
 )
@@ -263,7 +264,7 @@ async def get_inject(
 async def delete_inject(
     exercise_id: int, inject_id: int, current_user: FacilitatorDep, session: SessionDep
 ):
-    exercise = await require_exercise_access(session, exercise_id, current_user)
+    exercise = await require_exercise_owner(session, exercise_id, current_user)
     require_operational_mutability(exercise)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
     await session.delete(inject)

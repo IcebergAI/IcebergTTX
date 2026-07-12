@@ -1,9 +1,11 @@
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+import app.database as app_database
 from app.database import get_session
 from app.dependencies import resolve_user_from_token
 from app.middleware import origin_allowed
@@ -20,24 +22,31 @@ router = APIRouter()
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+def get_heartbeat_session_factory() -> Callable[[], AsyncSession]:
+    """Return short-lived sessions without pinning one for the socket lifetime."""
+    return lambda: AsyncSession(app_database.engine)
+
+
+HeartbeatSessionFactoryDep = Annotated[
+    Callable[[], AsyncSession], Depends(get_heartbeat_session_factory)
+]
+
+
 @router.websocket("/ws/exercises/{exercise_id}")
 async def exercise_ws(
     ws: WebSocket,
     exercise_id: int,
     session: SessionDep,
-    token: Annotated[str | None, Query()] = None,
+    heartbeat_session_factory: HeartbeatSessionFactoryDep,
     view_role: Annotated[str | None, Query()] = None,
     view_team: Annotated[str | None, Query()] = None,
 ):
     # Auth source (#68): browsers can't set headers on a WS upgrade, so they rely
     # on the httpOnly `access_token` cookie the browser already sends — keeping the
-    # JWT out of the URL (and out of proxy access logs). An explicit `?token=` is a
-    # fallback for non-browser clients. The cookie path is ambient, so it gets a
-    # CSWSH Origin check (mirroring CSRFOriginMiddleware); the explicit-token path,
-    # like a Bearer header, is exempt.
-    if token:
-        auth_token = token
-    elif cookie_token := ws.cookies.get("access_token"):
+    # JWTs are never accepted in URLs: query strings are routinely retained by
+    # reverse-proxy access logs. Browser upgrades use the httpOnly cookie and the
+    # ambient-cookie origin check mirrors normal HTTP CSRF protection.
+    if cookie_token := ws.cookies.get("access_token"):
         if not origin_allowed(ws.headers.get("origin"), ws.headers.get("host")):
             await ws.close(code=4003)
             return
@@ -81,6 +90,42 @@ async def exercise_ws(
         while True:
             data = await ws.receive_json()
             if data.get("type") == "ping":
+                # Revalidate against a short-lived DB session. A socket can remain
+                # connected for hours, while membership, role, or token validity can
+                # change at any time.
+                async with heartbeat_session_factory() as heartbeat_session:
+                    current = await resolve_user_from_token(
+                        auth_token,
+                        heartbeat_session,
+                        view_role,
+                        view_team,
+                    )
+                    if current is None:
+                        await ws.close(code=4003)
+                        break
+                    try:
+                        await require_exercise_access(heartbeat_session, exercise_id, current)
+                    except Exception:
+                        await ws.close(code=4003)
+                        break
+                    current_member = await exercise_member_for_user(
+                        heartbeat_session, exercise_id, user_id
+                    )
+                    current_group = current_member.group_id if current_member else None
+                    if current.role == UserRole.participant:
+                        if is_actual_facilitator(current):
+                            current_group = current_group or current.team
+                        else:
+                            if current_member is None:
+                                await ws.close(code=4003)
+                                break
+                            current_group = current_member.group_id or current.team
+                    manager.refresh_authorization(
+                        ws,
+                        exercise_id,
+                        role=current.role.value,
+                        group_id=current_group,
+                    )
                 manager.ping(ws, exercise_id)
                 await ws.send_json(
                     {

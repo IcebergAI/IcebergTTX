@@ -140,6 +140,26 @@ async def test_links_verified_email_to_local_account(session, audit_events):
     assert any(a == "auth.oidc_link" for a, _ in audit_events)
 
 
+async def test_entra_verified_email_does_not_link_local_account(session):
+    local = User(
+        email="entra-link@sso.test",
+        display_name="Local",
+        hashed_password="hashed",
+        role=UserRole.facilitator,
+    )
+    session.add(local)
+    await session.commit()
+    from dataclasses import replace
+
+    cfg = replace(_cfg(), key="entra")
+
+    with pytest.raises(oidc_service.OIDCProvisionError) as exc:
+        await oidc_service.provision_oidc_user(
+            session, cfg=cfg, identity=_identity(subject="entra-sub", email=local.email)
+        )
+    assert exc.value.reason == "entra email linking is disabled"
+
+
 async def test_unverified_email_collision_denied(session):
     session.add(
         User(
@@ -239,6 +259,25 @@ async def test_returning_user_is_not_duplicated(session):
         )
     ).one()
     assert count == 1
+
+
+async def test_returning_identity_loses_role_when_group_removed(session):
+    cfg = _cfg(role_map={"ttx-facilitators": "facilitator"})
+    user, _ = await oidc_service.provision_oidc_user(
+        session,
+        cfg=cfg,
+        identity=_identity(subject="reconcile-sub", groups=["ttx-facilitators"]),
+    )
+    assert user.role == UserRole.facilitator
+
+    returned, created = await oidc_service.provision_oidc_user(
+        session,
+        cfg=cfg,
+        identity=_identity(subject="reconcile-sub", groups=[]),
+    )
+    assert created is False
+    assert returned.id == user.id
+    assert returned.role == UserRole.participant
 
 
 # --------------------------------------------------------------------------- #

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
@@ -289,17 +290,73 @@ async def test_assess_response_handles_invalid_json(
 # ── REST endpoint tests ───────────────────────────────────────────────────────
 
 async def test_trigger_assess_endpoint(
-    client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+    session: AsyncSession,
 ):
-    inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
+    inject_id = await _first_released_inject_id(client, facilitator_token, active_exercise.id)
     resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
+    active_exercise.llm_enabled = True
+    session.add(active_exercise)
+    await session.commit()
 
-    with patch("app.routers.responses.run_llm_pipeline", new_callable=AsyncMock):
+    with patch("app.routers.responses.queue_llm_pipeline", return_value=True) as queue:
         r = await client.post(
             f"/api/exercises/{active_exercise.id}/responses/{resp['id']}/assess",
             headers={"Authorization": f"Bearer {facilitator_token}"},
         )
     assert r.status_code == 202
+    assert r.json() == {"detail": "Assessment queued"}
+    queue.assert_called_once_with(resp["id"], inject_id, active_exercise.id)
+
+
+async def test_trigger_assess_rejects_exercise_ai_opt_out(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+):
+    inject_id = await _first_released_inject_id(client, facilitator_token, active_exercise.id)
+    resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
+
+    with patch("app.routers.responses.queue_llm_pipeline") as queue:
+        denied = await client.post(
+            f"/api/exercises/{active_exercise.id}/responses/{resp['id']}/assess",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+    assert denied.status_code == 409
+    assert denied.json() == {"detail": "AI assessment is disabled for this exercise"}
+    queue.assert_not_called()
+
+
+async def test_trigger_assess_is_idempotent_while_task_is_inflight(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+    session: AsyncSession,
+):
+    inject_id = await _first_released_inject_id(client, facilitator_token, active_exercise.id)
+    resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
+    active_exercise.llm_enabled = True
+    session.add(active_exercise)
+    await session.commit()
+
+    with patch("app.routers.responses.queue_llm_pipeline", side_effect=[True, False]) as queue:
+        first = await client.post(
+            f"/api/exercises/{active_exercise.id}/responses/{resp['id']}/assess",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+        second = await client.post(
+            f"/api/exercises/{active_exercise.id}/responses/{resp['id']}/assess",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+    assert first.status_code == second.status_code == 202
+    assert first.json() == {"detail": "Assessment queued"}
+    assert second.json() == {"detail": "Assessment already queued"}
+    assert queue.call_count == 2
 
 
 async def test_trigger_assess_participant_forbidden(
@@ -365,6 +422,18 @@ async def test_get_assessment_returns_data(
     data = r.json()
     assert data["decision_quality"] == "good"
     assert data["assessment_text"] == "Solid response."
+
+    active_exercise.llm_enabled = True
+    session.add(active_exercise)
+    await session.commit()
+    with patch("app.routers.responses.queue_llm_pipeline") as queue:
+        duplicate = await client.post(
+            f"/api/exercises/{active_exercise.id}/responses/{resp_data['id']}/assess",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+    assert duplicate.status_code == 202
+    assert duplicate.json() == {"detail": "Assessment already exists"}
+    queue.assert_not_called()
 
 
 # ── Suggested injects CRUD ────────────────────────────────────────────────────
@@ -504,6 +573,72 @@ async def test_reject_suggested_inject(
     assert r.json()["status"] == "rejected"
 
 
+async def test_other_facilitator_denied_assessment_and_suggestion_routes(
+    client: AsyncClient,
+    facilitator_token: str,
+    second_facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+    session: AsyncSession,
+):
+    from app.models.suggested_inject import SuggestedInjectStatus
+
+    inject_id = await _first_released_inject_id(client, facilitator_token, active_exercise.id)
+    response = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
+    suggested = await _make_suggested(
+        session, active_exercise.id, response["id"], "Protected suggestion"
+    )
+    active_exercise.llm_enabled = True
+    session.add(active_exercise)
+    await session.commit()
+    attacker_headers = {"Authorization": f"Bearer {second_facilitator_token}"}
+
+    with patch("app.routers.responses.queue_llm_pipeline") as queue:
+        assess = await client.post(
+            f"/api/exercises/{active_exercise.id}/responses/{response['id']}/assess",
+            headers=attacker_headers,
+        )
+    assessment = await client.get(
+        f"/api/exercises/{active_exercise.id}/responses/{response['id']}/assessment",
+        headers=attacker_headers,
+    )
+    listed = await client.get(
+        f"/api/exercises/{active_exercise.id}/suggested-injects",
+        headers=attacker_headers,
+    )
+    approved = await client.post(
+        f"/api/exercises/{active_exercise.id}/suggested-injects/{suggested.id}/approve",
+        headers=attacker_headers,
+    )
+    rejected = await client.post(
+        f"/api/exercises/{active_exercise.id}/suggested-injects/{suggested.id}/reject",
+        headers=attacker_headers,
+    )
+
+    assert {assess.status_code, assessment.status_code, listed.status_code} == {403}
+    assert approved.status_code == rejected.status_code == 403
+    queue.assert_not_called()
+    await session.refresh(suggested)
+    assert suggested.status == SuggestedInjectStatus.pending_review
+
+
+def test_queue_llm_pipeline_deduplicates_inflight_response():
+    from app.services import llm_service
+
+    llm_service._assessment_inflight.clear()
+    task = MagicMock()
+    with patch("app.services.llm_service.spawn", return_value=task) as spawn:
+        assert llm_service.queue_llm_pipeline(101, 202, 303) is True
+        assert llm_service.queue_llm_pipeline(101, 202, 303) is False
+
+    spawn.assert_called_once()
+    coroutine = spawn.call_args.args[0]
+    coroutine.close()
+    done_callback = task.add_done_callback.call_args.args[0]
+    done_callback(task)
+    assert 101 not in llm_service._assessment_inflight
+
+
 @pytest.mark.asyncio
 async def test_run_llm_pipeline_broadcasts_to_facilitator(
     session: AsyncSession, facilitator: User, sample_scenario, active_exercise: Exercise
@@ -514,6 +649,10 @@ async def test_run_llm_pipeline_broadcasts_to_facilitator(
     from app.models.inject import Inject, InjectState
     from app.models.response import Response
     from app.services.llm_service import run_llm_pipeline
+
+    active_exercise.llm_enabled = True
+    session.add(active_exercise)
+    await session.commit()
 
     inject = Inject(
         exercise_id=active_exercise.id,
@@ -561,3 +700,93 @@ async def test_run_llm_pipeline_broadcasts_to_facilitator(
     types = [c["type"] for c in broadcast_calls]
     assert "assessment_ready" in types
     assert "inject_suggested" in types
+
+
+@pytest.mark.asyncio
+async def test_run_llm_pipeline_respects_exercise_ai_opt_out(
+    session: AsyncSession, facilitator: User, active_exercise: Exercise
+):
+    from unittest.mock import patch as _patch
+
+    from app.models.inject import Inject
+    from app.models.response import Response
+    from app.services.llm_service import run_llm_pipeline
+
+    inject = (
+        await session.exec(select(Inject).where(Inject.exercise_id == active_exercise.id))
+    ).first()
+    response = Response(
+        inject_id=inject.id,
+        exercise_id=active_exercise.id,
+        user_id=facilitator.id,
+        content="This must not leave the deployment.",
+    )
+    session.add(response)
+    await session.commit()
+    await session.refresh(response)
+    provider = _fake_provider(_assessment_json())
+    test_engine = await session.connection()
+
+    with (
+        _patch("app.services.llm_service.active_provider", return_value=provider),
+        _patch("app.services.llm_service.engine", test_engine),
+        _patch("app.services.ws_manager.manager") as manager,
+    ):
+        await run_llm_pipeline(response.id, inject.id, active_exercise.id)
+
+    provider.complete.assert_not_awaited()
+    manager.send_to_facilitators.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_llm_pipeline_rejects_mismatched_response_inject_relationship(
+    session: AsyncSession, facilitator: User, active_exercise: Exercise
+):
+    from unittest.mock import patch as _patch
+
+    from app.models.inject import Inject, InjectState
+    from app.models.response import Response
+    from app.services.llm_service import run_llm_pipeline
+
+    active_exercise.llm_enabled = True
+    session.add(active_exercise)
+    first = Inject(
+        exercise_id=active_exercise.id,
+        title="First",
+        content="First",
+        sequence_order=90,
+        state=InjectState.released,
+    )
+    second = Inject(
+        exercise_id=active_exercise.id,
+        title="Second",
+        content="Second",
+        sequence_order=91,
+        state=InjectState.released,
+    )
+    session.add(first)
+    session.add(second)
+    await session.commit()
+    await session.refresh(first)
+    await session.refresh(second)
+    response = Response(
+        inject_id=first.id,
+        exercise_id=active_exercise.id,
+        user_id=facilitator.id,
+        content="Bound to the first inject.",
+    )
+    session.add(response)
+    await session.commit()
+    await session.refresh(response)
+    provider = _fake_provider(_assessment_json())
+    test_engine = await session.connection()
+
+    with (
+        _patch("app.services.llm_service.active_provider", return_value=provider),
+        _patch("app.services.llm_service.engine", test_engine),
+        _patch("app.services.ws_manager.manager") as manager,
+    ):
+        await run_llm_pipeline(response.id, second.id, active_exercise.id)
+
+    provider.complete.assert_not_awaited()
+    manager.send_to_facilitators.assert_not_called()

@@ -905,6 +905,27 @@ async def test_other_facilitator_denied_mutations(
     assert (await client.get(f"/api/exercises/{eid}/export.csv", headers=h)).status_code == 403
 
 
+async def test_other_facilitator_cannot_delete_inject(
+    client: AsyncClient,
+    facilitator_token: str,
+    second_facilitator_token: str,
+    draft_exercise,
+):
+    eid = draft_exercise.id
+    owner_headers = _bearer(facilitator_token)
+    injects = (await client.get(f"/api/exercises/{eid}/injects", headers=owner_headers)).json()
+    inject_id = injects[0]["id"]
+
+    denied = await client.delete(
+        f"/api/exercises/{eid}/injects/{inject_id}",
+        headers=_bearer(second_facilitator_token),
+    )
+    assert denied.status_code == 403
+    assert (
+        await client.get(f"/api/exercises/{eid}/injects/{inject_id}", headers=owner_headers)
+    ).status_code == 200
+
+
 async def test_owner_facilitator_still_allowed(
     client: AsyncClient, facilitator_token: str, draft_exercise
 ):

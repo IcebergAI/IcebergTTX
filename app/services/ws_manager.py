@@ -49,6 +49,16 @@ class ConnectionManager:
                 c.last_ping = datetime.now(UTC)
                 return
 
+    def refresh_authorization(
+        self, ws: WebSocket, exercise_id: int, *, role: str, group_id: str | None
+    ) -> None:
+        """Replace the connection's authorization snapshot after a heartbeat check."""
+        for connection in self._rooms.get(exercise_id, []):
+            if connection.ws is ws:
+                connection.role = role
+                connection.group_id = group_id
+                return
+
     def _matching(
         self, exercise_id: int, predicate: Callable[[Connection], bool]
     ) -> list[Connection]:
