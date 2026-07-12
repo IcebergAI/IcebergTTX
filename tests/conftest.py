@@ -76,6 +76,22 @@ def seed_playwright_users():
                       "role": role, **({"team": team} if team else {})},
                 timeout=2.0,
             )
+
+        async def promote_facilitator() -> None:
+            from sqlmodel import select
+
+            async with AsyncSession(engine) as ui_session:
+                facilitator = (
+                    await ui_session.exec(
+                        select(User).where(User.email == "facilitator@deep.test")
+                    )
+                ).one()
+                facilitator.role = UserRole.facilitator
+                facilitator.is_admin = True
+                ui_session.add(facilitator)
+                await ui_session.commit()
+
+        asyncio.run(promote_facilitator())
     except Exception:
         pass
 
@@ -156,7 +172,14 @@ async def client_fixture():
         pass
 
 
-@pytest_asyncio.fixture(autouse=True)
+@pytest.fixture(autouse=True)
+def _use_app_session_override(request: pytest.FixtureRequest):
+    """Keep synchronous Playwright tests outside pytest-asyncio's event loop."""
+    if request.node.path.name != "test_ui.py":
+        request.getfixturevalue("_override_session")
+
+
+@pytest_asyncio.fixture
 async def _override_session(session: AsyncSession, client: AsyncClient):
     # The client is session-scoped (one cookie jar); reset it so auth/role-preview
     # cookies don't leak between tests.
