@@ -12,7 +12,7 @@ function getToken() {
 }
 
 function isAuthPage() {
-  return ['/login', '/register', '/forgot-password', '/reset-password'].includes(window.location.pathname);
+  return ['/login', '/register', '/forgot-password', '/reset-password', '/accept-invite'].includes(window.location.pathname);
 }
 
 function clearAuthState() {

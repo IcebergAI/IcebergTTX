@@ -93,6 +93,23 @@ class PasswordResetComplete(BaseModel):
     password: Password
 
 
+class InviteRequest(EmailMixin):
+    """Admin invites a participant by email (#117). Optionally pre-binds a team and
+    an exercise the invitee is auto-enrolled in on accept. Role is always participant."""
+
+    team: str | None = None
+    exercise_id: int | None = None
+
+
+class InviteAccept(BaseModel):
+    """Redeem an invite: the emailed token authorises the account; the email is taken
+    from the token (never the client), so this works with open registration disabled."""
+
+    token: str
+    display_name: str
+    password: Password
+
+
 class LoginRequest(EmailMixin):
     password: str
 

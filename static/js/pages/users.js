@@ -14,9 +14,20 @@ document.addEventListener('alpine:init', () => {
     resetError: '',
     resetting: false,
     message: '',
+    // Invite dialog state (#117).
+    inviteOpen: false,
+    inviteEmail: '',
+    inviteTeam: '',
+    inviteExerciseId: '',
+    inviteError: '',
+    inviteSent: false,
+    inviting: false,
+    exercises: [],
 
     async init() {
       await this.loadUsers();
+      const er = await apiFetch('/exercises');
+      if (er && er.ok) this.exercises = await readJson(er, []);
     },
 
     async loadUsers() {
@@ -29,6 +40,39 @@ document.addEventListener('alpine:init', () => {
         this.loadError = 'Could not load users.';
       }
       this.loading = false;
+    },
+
+    openInvite() {
+      this.inviteOpen = true;
+      this.inviteEmail = '';
+      this.inviteTeam = '';
+      this.inviteExerciseId = '';
+      this.inviteError = '';
+      this.inviteSent = false;
+    },
+
+    closeInvite() {
+      this.inviteOpen = false;
+    },
+
+    async submitInvite() {
+      this.inviteError = '';
+      this.inviting = true;
+      const body = { email: this.inviteEmail };
+      if (this.inviteTeam) body.team = this.inviteTeam;
+      if (this.inviteExerciseId) body.exercise_id = parseInt(this.inviteExerciseId, 10);
+      const resp = await apiFetch('/users/invite', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      this.inviting = false;
+      if (resp && resp.ok) {
+        this.inviteSent = true;
+      } else {
+        const data = await readJson(resp, null);
+        const detail = data && data.detail;
+        this.inviteError = (typeof detail === 'string' ? detail : null) || 'Could not send invite.';
+      }
     },
 
     openReset(user) {

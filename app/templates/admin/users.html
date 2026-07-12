@@ -4,13 +4,18 @@
 {% block content %}
 <div x-data="adminUsers()" class="workspace max-w-[1040px]">
 
-  <div class="page-head">
+  <div class="page-head flex items-start justify-between gap-4">
     <div>
       <h1 class="page-title">Users</h1>
       <p class="text-[13.5px] text-muted mt-1">
         Review accounts and reset a user's password. A reset revokes their existing sessions.
       </p>
     </div>
+    {% if smtp_enabled %}
+    <button @click="openInvite()" class="btn btn-primary h-9 px-4 text-[13px] shrink-0">
+      Invite participant
+    </button>
+    {% endif %}
   </div>
 
   <p class="text-[12.5px] text-muted mb-3" x-show="message" x-cloak x-text="message"></p>
@@ -64,6 +69,62 @@
       <p class="p-5 text-[13px] text-muted" x-show="users.length === 0">No users found.</p>
     </div>
   </section>
+
+  {% if smtp_enabled %}
+  <!-- Invite participant modal (#117) -->
+  <div x-show="inviteOpen" x-cloak
+       class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+       @keydown.escape.window="closeInvite()">
+    <div class="paper ring-rule rounded-xl w-full max-w-md p-6 shadow-xl" @click.stop>
+      <h2 class="text-[18px] font-semibold mb-1">Invite participant</h2>
+      <p class="text-[13px] text-muted mb-4">
+        Email a single-use registration link. Works even while open self-registration is off.
+      </p>
+
+      <div x-show="inviteError" x-cloak
+           class="mb-4 rounded-md px-3 py-2.5 text-[13px]"
+           style="background:#fee2e2; color:#b91c1c;"
+           x-text="inviteError"></div>
+      <div x-show="inviteSent" x-cloak
+           class="mb-4 rounded-md px-3 py-2.5 text-[13px]"
+           style="background:#dcfce7; color:#166534;"
+           x-text="'Invitation sent.'"></div>
+
+      <div class="space-y-3" x-show="!inviteSent">
+        <div>
+          <label class="block smallcaps text-muted mb-1">Email</label>
+          <input type="email" x-model="inviteEmail" autocomplete="off"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface" />
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1">Team (optional)</label>
+          <input type="text" x-model="inviteTeam" autocomplete="off"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
+                 placeholder="e.g. it_ops" />
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1">Enrol in exercise (optional)</label>
+          <select x-model="inviteExerciseId"
+                  class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface">
+            <option value="">— None —</option>
+            <template x-for="ex in exercises" :key="ex.id">
+              <option :value="ex.id" x-text="ex.title"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex gap-3 mt-5">
+        <button x-show="!inviteSent" @click="submitInvite()" :disabled="inviting"
+                class="btn btn-primary h-9 px-5 text-[13px] disabled:opacity-50">
+          <span x-text="inviting ? 'Sending…' : 'Send invite'"></span>
+        </button>
+        <button @click="closeInvite()" class="btn btn-ghost h-9 px-4 text-[13px]"
+                x-text="inviteSent ? 'Close' : 'Cancel'"></button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- Reset password modal -->
   <div x-show="resetTarget" x-cloak

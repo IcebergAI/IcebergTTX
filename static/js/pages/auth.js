@@ -77,6 +77,37 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
+  Alpine.data('acceptInviteForm', () => ({
+    display_name: '', password: '', loading: false, error: '', noToken: false,
+    token() {
+      return new URLSearchParams(window.location.search).get('token') || '';
+    },
+    init() {
+      this.noToken = !this.token();
+    },
+    async submit() {
+      this.loading = true; this.error = '';
+      const resp = await fetch('/api/auth/invite/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: this.token(),
+          display_name: this.display_name,
+          password: this.password,
+        }),
+      });
+      this.loading = false;
+      if (resp.ok) {
+        const data = await resp.json();
+        localStorage.setItem('dt_token', data.access_token);
+        window.location.href = '/dashboard';
+      } else {
+        const data = await resp.json();
+        this.error = formatApiError(data.detail) || 'Could not accept invitation.';
+      }
+    },
+  }));
+
   Alpine.data('registerForm', () => ({
     email: '', display_name: '', password: '', team: '',
     loading: false, error: '',

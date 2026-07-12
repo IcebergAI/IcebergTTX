@@ -161,6 +161,14 @@ def reset_password_page(request: Request, user: UserContext):
     return templates.TemplateResponse(request, "auth/reset_password.html", _auth_context())
 
 
+@router.get("/accept-invite", response_class=HTMLResponse)
+def accept_invite_page(request: Request, user: UserContext):
+    if not settings.local_auth_enabled or not settings.smtp_enabled:
+        return RedirectResponse("/login")
+    # Token rides in the query string, read by the Alpine component (#117).
+    return templates.TemplateResponse(request, "auth/accept_invite.html", _auth_context())
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, user: LoggedInUser):
     return templates.TemplateResponse(request, "dashboard.html", {"user": user})
@@ -256,7 +264,10 @@ def settings_page(request: Request, user: LoggedInUser):
 
 @router.get("/admin/users", response_class=HTMLResponse)
 def admin_users_page(request: Request, user: AdminUser):
-    return templates.TemplateResponse(request, "admin/users.html", {"user": user})
+    # smtp_enabled gates the "Invite participant" affordance (#117).
+    return templates.TemplateResponse(
+        request, "admin/users.html", {"user": user, "smtp_enabled": settings.smtp_enabled}
+    )
 
 
 @router.get("/admin/audit", response_class=HTMLResponse)
