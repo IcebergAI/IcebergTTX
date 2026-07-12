@@ -6,7 +6,7 @@ from sqlmodel import Field, SQLModel
 
 
 class AuthTokenPurpose(StrEnum):
-    password_reset = "password_reset"
+    password_reset = "password_reset"  # nosec B105 - enum value, not a credential
     invite = "invite"
 
 
