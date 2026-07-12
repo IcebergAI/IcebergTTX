@@ -5,8 +5,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from sqlalchemy import col
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import engine
