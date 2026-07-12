@@ -199,6 +199,48 @@ async def test_suggest_inject_stores_suggestion(
 
 
 @pytest.mark.asyncio
+async def test_suggest_inject_rejects_unknown_provider_target_teams(
+    session: AsyncSession, facilitator: User, sample_scenario, active_exercise: Exercise
+):
+    from app.models.inject import Inject, InjectState
+    from app.models.response import Response
+    from app.models.scenario import Scenario
+    from app.services.llm_service import suggest_inject
+    from app.services.scenario_service import export_definition
+
+    inject = Inject(
+        exercise_id=active_exercise.id,
+        scenario_node_id="inject_01",
+        title="Test",
+        content="What do you do?",
+        sequence_order=1,
+        state=InjectState.released,
+    )
+    session.add(inject)
+    await session.commit()
+    await session.refresh(inject)
+    response = Response(
+        inject_id=inject.id,
+        exercise_id=active_exercise.id,
+        user_id=facilitator.id,
+        content="We isolated immediately.",
+    )
+    session.add(response)
+    await session.commit()
+    await session.refresh(response)
+    scenario = await session.get(Scenario, active_exercise.scenario_id)
+    definition = export_definition(scenario)
+
+    with patch(
+        "app.services.llm_service.active_provider",
+        return_value=_fake_provider(
+            '{"title":"Unsafe","content":"x","target_teams":["unknown"]}'
+        ),
+    ), pytest.raises(ValueError, match="not in this scenario"):
+        await suggest_inject(session, response, inject, active_exercise, definition)
+
+
+@pytest.mark.asyncio
 async def test_assess_response_handles_invalid_json(
     session: AsyncSession, facilitator: User, sample_scenario, active_exercise: Exercise
 ):

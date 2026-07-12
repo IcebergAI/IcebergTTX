@@ -101,6 +101,24 @@ def _parse_json(text: str, fallback: dict) -> dict:
         return fallback
 
 
+def _validated_suggested_target_teams(value: object, definition) -> list[str] | None:
+    """Validate untrusted provider audiences against the scenario's team catalog."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(isinstance(team, str) for team in value):
+        raise ValueError("LLM target_teams must be a list of team id strings or null")
+    teams = [team.strip() for team in value]
+    if any(not team for team in teams):
+        raise ValueError("LLM target_teams must not contain blank team ids")
+    if len(teams) != len(set(teams)):
+        raise ValueError("LLM target_teams must not contain duplicate team ids")
+    allowed = {team.id for team in definition.participant_teams}
+    unknown = sorted(set(teams) - allowed)
+    if unknown:
+        raise ValueError(f"LLM target_teams are not in this scenario: {', '.join(unknown)}")
+    return teams or None
+
+
 async def _assess_response_result(session, response, inject, definition):
     """Return the assessment plus whether this invocation created it."""
     from app.models.assessment import ResponseAssessment
@@ -229,17 +247,7 @@ async def _suggest_inject_result(session, response, inject, exercise, definition
             title="Follow-up inject",
             content=(text.strip() or "Provider returned invalid suggestion")[:_MAX_LLM_TEXT],
         )
-    allowed_teams = {team.id for team in definition.participant_teams}
-    target_teams = output.target_teams
-    if target_teams is not None:
-        target_teams = [team.strip() for team in target_teams]
-        if (
-            any(not team for team in target_teams)
-            or len(target_teams) != len(set(target_teams))
-            or not set(target_teams).issubset(allowed_teams)
-        ):
-            logger.warning("LLM suggestion had invalid target teams; using all-team audience")
-            target_teams = None
+    target_teams = _validated_suggested_target_teams(output.target_teams, definition)
     suggested = SuggestedInject(
         exercise_id=exercise.id,
         triggered_by_response_id=response_id,

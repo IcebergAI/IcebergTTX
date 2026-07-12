@@ -214,6 +214,27 @@ async def validate_group_id(
     return normalized
 
 
+async def validate_team_ids(
+    session: AsyncSession, exercise: Exercise, team_ids: list[str] | None, *, field: str
+) -> list[str] | None:
+    """Normalize and validate a non-empty, duplicate-free scenario team audience."""
+    if team_ids is None:
+        return None
+    normalized = [team_id.strip() for team_id in team_ids]
+    if any(not team_id for team_id in normalized):
+        raise HTTPException(status_code=422, detail=f"{field} must not contain blank team ids")
+    if len(normalized) != len(set(normalized)):
+        raise HTTPException(status_code=422, detail=f"{field} must not contain duplicate team ids")
+    allowed = await scenario_group_ids(session, exercise)
+    unknown = sorted(set(normalized) - allowed)
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{field} contains team ids not defined in this scenario: {', '.join(unknown)}",
+        )
+    return normalized or None
+
+
 async def default_group_for_user(
     session: AsyncSession, exercise: Exercise, user: User
 ) -> str | None:

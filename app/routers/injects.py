@@ -22,7 +22,7 @@ from app.services.access_control import (
     require_exercise_access,
     require_inject_visible,
 )
-from app.services.exercise_service import validate_group_id
+from app.services.exercise_service import validate_group_id, validate_team_ids
 from app.services.inject_service import (
     AttachmentMeta,
     broadcast_inject_updated,
@@ -209,9 +209,12 @@ async def create(
             detail=str(exc),
         ) from exc
     exercise = await require_exercise_access(session, exercise_id, current_user)
+    target_teams = await validate_team_ids(
+        session, exercise, body.target_teams, field="target_teams"
+    )
     group_id = await validate_group_id(session, exercise, body.group_id)
-    if group_id is None and body.target_teams and len(body.target_teams) == 1:
-        group_id = await validate_group_id(session, exercise, body.target_teams[0])
+    if group_id is None and target_teams and len(target_teams) == 1:
+        group_id = target_teams[0]
     attachment_meta = await _save_attachment(attachment, exercise_id)
     inject = await create_inject(
         session,
@@ -219,7 +222,7 @@ async def create(
         title=body.title,
         content=body.content,
         scenario_node_id=body.scenario_node_id,
-        target_teams=body.target_teams,
+        target_teams=target_teams,
         group_id=group_id,
         sequence_order=body.sequence_order,
         attachment=attachment_meta,
