@@ -329,6 +329,7 @@ document.addEventListener('alpine:init', () => {
     selectedId: null,
     scenarioCount: null,
     currentPath: window.location.pathname,
+    mobileNavOpen: false,
 
     async init() {
       document.addEventListener('dt:soft-navigated', (event) => {
@@ -469,6 +470,47 @@ document.addEventListener('alpine:init', () => {
 
     isActive(path) {
       return this.currentPath === path || this.currentPath.startsWith(path + '/');
+    },
+
+    toggleMobileNav() {
+      this.mobileNavOpen = !this.mobileNavOpen;
+      if (this.mobileNavOpen) {
+        document.querySelector('[data-app-content]')?.setAttribute('inert', '');
+        document.documentElement.classList.add('dialog-open');
+        this.$nextTick(() => this.$refs.mobileNavClose?.focus());
+      } else {
+        this.restoreMobileNavContext();
+      }
+    },
+
+    closeMobileNav() {
+      if (!this.mobileNavOpen) return;
+      this.mobileNavOpen = false;
+      this.restoreMobileNavContext();
+    },
+
+    restoreMobileNavContext() {
+      document.querySelector('[data-app-content]')?.removeAttribute('inert');
+      document.documentElement.classList.remove('dialog-open');
+      this.$nextTick(() => this.$refs.mobileNavToggle?.focus());
+    },
+
+    trapMobileNav(event) {
+      const nav = document.getElementById('primary-navigation');
+      if (!nav || !this.mobileNavOpen) return;
+      const controls = [...nav.querySelectorAll(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )].filter(node => node.getClientRects().length);
+      if (!controls.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     },
 
     async logout() {

@@ -49,8 +49,37 @@
 
   <div class="app" x-data="sidebarNav()" x-init="init()">
 
+    <!-- Compact phone shell. The full navigation remains available in the drawer
+         instead of consuming the first viewport above the current task. -->
+    <header class="mobile-shell" x-show="!!user" x-cloak data-testid="mobile-shell">
+      <a href="/dashboard" class="mobile-shell__brand" aria-label="IcebergTTX home">
+        <img src="/static/img/icebergai-mark.svg" width="28" height="28" alt="" />
+        <span>IcebergTTX</span>
+      </a>
+      <div class="mobile-shell__route" x-text="crumbLabel"></div>
+      <button type="button" class="mobile-shell__menu" x-ref="mobileNavToggle"
+              @click="toggleMobileNav()" :aria-expanded="mobileNavOpen"
+              aria-controls="primary-navigation" aria-label="Open navigation">
+        <span aria-hidden="true">Menu</span>
+      </button>
+    </header>
+
+    <div class="mobile-nav-backdrop" x-show="mobileNavOpen" x-cloak
+         @click="closeMobileNav()" aria-hidden="true"></div>
+
     <!-- Command-center rail — hidden on auth pages (user is null) -->
-    <aside class="rail" x-show="!!user" x-cloak>
+    <aside id="primary-navigation" class="rail" x-show="!!user" x-cloak
+           :class="{ 'is-mobile-open': mobileNavOpen }"
+           :role="mobileNavOpen && 'dialog'" :aria-modal="mobileNavOpen"
+           aria-labelledby="mobile-navigation-title"
+           @keydown.tab="trapMobileNav($event)"
+           @keydown.escape.window="closeMobileNav()">
+
+      <div class="mobile-nav-head">
+        <span id="mobile-navigation-title" class="smallcaps">Navigation</span>
+        <button type="button" class="mobile-nav-close" x-ref="mobileNavClose"
+                @click="closeMobileNav()" aria-label="Close navigation">Close</button>
+      </div>
 
       <!-- Brand -->
       <a href="/dashboard" class="rail-brand">
@@ -62,7 +91,7 @@
       </a>
 
       <!-- Navigation -->
-      <nav class="rail-nav">
+      <nav class="rail-nav" @click="closeMobileNav()">
         <div class="rail-group">
           <div class="rail-group-label">Main</div>
           <a href="/dashboard" class="rail-link" :class="isActive('/dashboard') && 'is-active'">
@@ -153,7 +182,7 @@
     </aside>
 
     <!-- Workspace column -->
-    <div class="flex-1 min-w-0 flex flex-col">
+    <div class="flex-1 min-w-0 flex flex-col" data-app-content>
       <header class="topbar" x-show="!!user" x-cloak>
         <div class="topbar-crumb">
           <span class="crumb-root">IcebergTTX</span>

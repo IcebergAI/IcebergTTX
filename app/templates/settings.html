@@ -24,7 +24,7 @@
       <div class="section-title mb-4">
         <h2 class="smallcaps text-muted">Profile</h2>
       </div>
-      <div class="grid gap-3" style="grid-template-columns: minmax(180px, 1fr) 140px; align-items: end;">
+      <div class="settings-profile grid gap-3" style="grid-template-columns: minmax(180px, 1fr) 140px; align-items: end;">
         <div>
           <label for="settings-display-name" class="block smallcaps text-muted mb-1">Display name</label>
           <input id="settings-display-name" type="text" x-model="displayName"
@@ -124,14 +124,14 @@
       </template>
       <div class="divide-y rule">
         <template x-for="sample in samples" :key="sample.id">
-          <div class="py-4 first:pt-0 last:pb-0 flex items-start gap-4">
+          <div class="settings-sample-row py-4 first:pt-0 last:pb-0 flex items-start gap-4">
             <div class="min-w-0 flex-1">
               <h3 class="text-[14px] font-medium" x-text="sample.title"></h3>
               <p class="text-[13px] text-muted mt-1" x-text="sample.description"></p>
               <div class="mono text-[11.5px] text-faint mt-2"
                    x-text="sample.inject_count + ' injects · ' + sample.team_count + ' teams'"></div>
             </div>
-            <div class="flex shrink-0 gap-2">
+            <div class="settings-sample-actions flex shrink-0 gap-2">
               <button @click="loadSample(sample)"
                       class="btn btn-ghost h-8 px-3 text-[12.5px]">Load scenario</button>
               <button @click="createDemo(sample)"
