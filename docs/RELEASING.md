@@ -42,6 +42,21 @@ Before the very first real tag, validate the pipeline with a throwaway pre-relea
 (e.g. `v0.0.0-test`) or a `workflow_dispatch` run with **dry_run** unchecked, then delete
 the test tag, its Release, and the GHCR version.
 
+## Security advisory releases
+
+When a release contains fixes tracked in draft repository security advisories:
+
+1. Cut and verify the patched release before public disclosure; users must have a real
+   artifact to upgrade to.
+2. Set each advisory's affected range and `patched_versions` to the released version.
+3. Finalize severity, CVSS vector, CWE metadata, credits, and release references.
+4. Publish only after the GitHub Release, image, signature, SBOM, and provenance verify.
+5. Confirm publication removed the GitHub-managed temporary private fork and that the
+   advisory links to the patched release.
+
+Do not close a legitimate draft merely to remove its workspace. GitHub automatically
+deletes the temporary private fork when the advisory is published.
+
 ## Emergency releases
 
 The protected-main rules apply to administrators. Do not bypass them for ordinary

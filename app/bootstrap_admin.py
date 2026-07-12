@@ -60,7 +60,9 @@ async def upsert_admin(
     if not EMAIL_RE.match(email):
         raise ValueError(f"Not a valid email address: {email!r}")
 
-    existing = (await session.exec(select(User).where(User.email == email))).first()
+    existing = (
+        await session.exec(select(User).where(User.email == email).with_for_update())
+    ).first()
 
     if existing is None:
         if not password:
@@ -79,6 +81,9 @@ async def upsert_admin(
     else:
         user = existing
         user.role = role
+        # This CLI is the explicit operator override path. A later OIDC login
+        # must not replace the assigned role from provider group claims.
+        user.role_managed_by_idp = False
         user.is_admin = is_admin
         user.is_active = True
         if display_name:

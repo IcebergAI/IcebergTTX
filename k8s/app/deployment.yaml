@@ -41,7 +41,9 @@ spec:
         # image so Caddy (which has its own copy) can serve them directly.
         - name: copy-static
           image: ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.1  # pin by digest (…@sha256:) in prod
-          command: ["/bin/sh", "-c", "cp -a /app/static_src/. /app/static/"]
+          # Do not preserve source timestamps/ownership: the destination
+          # emptyDir is fsGroup-writable but root-owned on several runtimes.
+          command: ["/bin/sh", "-c", "cp -rL /app/static_src/. /app/static/"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

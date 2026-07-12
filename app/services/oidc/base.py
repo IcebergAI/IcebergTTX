@@ -22,6 +22,7 @@ class OIDCIdentity:
     email_verified: bool
     display_name: str
     groups: list[str] = field(default_factory=list)
+    tenant_id: str | None = None
 
 
 class OIDCAdapter(Protocol):
@@ -34,7 +35,7 @@ class OIDCAdapter(Protocol):
 
         ``role_claim`` is the configured claim carrying the user's groups/roles
         ("" ⇒ no groups extracted). Raises ValueError if the required identity
-        claims (sub/email) are missing.
+        claims (sub/email, plus tenant provenance where required) are missing.
         """
         ...
 

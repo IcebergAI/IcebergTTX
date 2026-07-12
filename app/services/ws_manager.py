@@ -43,6 +43,26 @@ class ConnectionManager:
         conns = self._rooms.get(exercise_id, [])
         self._rooms[exercise_id] = [c for c in conns if c.ws is not ws]
 
+    async def close_user_connections(self, user_id: int, code: int = 4003) -> None:
+        """Close every live socket for a user after authorization changes.
+
+        Remove the connections from all room indexes before sending close frames,
+        so concurrent broadcasters cannot continue treating a downgraded user's
+        cached WebSocket role as authoritative.
+        """
+        targets: dict[int, Connection] = {}
+        for exercise_id, conns in self._rooms.items():
+            for connection in conns:
+                if connection.user_id == user_id:
+                    targets[id(connection.ws)] = connection
+            self._rooms[exercise_id] = [c for c in conns if c.user_id != user_id]
+
+        for connection in targets.values():
+            try:
+                await connection.ws.close(code=code)
+            except Exception:  # nosec B110 - best-effort close of a dead socket
+                pass
+
     def ping(self, ws: WebSocket, exercise_id: int) -> None:
         for c in self._rooms.get(exercise_id, []):
             if c.ws is ws:

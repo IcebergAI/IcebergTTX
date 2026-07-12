@@ -16,17 +16,20 @@ os.environ.setdefault("OIDC_AUTHENTIK_CLIENT_SECRET", "test-secret")
 
 # Spin up a real Postgres before importing the app so that the module-level
 # async engine (app.database.engine, bound at import from DATABASE_URL) and the
-# test session both target the same database. The container is reused for the
-# whole test session and stopped at exit.
-from testcontainers.postgres import PostgresContainer  # noqa: E402
+# test session both target the same database. Import and construct testcontainers
+# only when no external database was supplied; its constructor initializes the
+# Docker client, which made the documented no-Docker override unusable.
+_database_override = os.environ.get("DATABASE_URL_OVERRIDE_FOR_TESTS")
+if not _database_override:
+    from testcontainers.postgres import PostgresContainer  # noqa: E402
 
-_POSTGRES = PostgresContainer("postgres:17", driver="asyncpg")
-if not os.environ.get("DATABASE_URL_OVERRIDE_FOR_TESTS"):
+    _POSTGRES = PostgresContainer("postgres:17", driver="asyncpg")
     _POSTGRES.start()
     atexit.register(_POSTGRES.stop)
     os.environ["DATABASE_URL"] = _POSTGRES.get_connection_url()
 else:
-    os.environ["DATABASE_URL"] = os.environ["DATABASE_URL_OVERRIDE_FOR_TESTS"]
+    _POSTGRES = None
+    os.environ["DATABASE_URL"] = _database_override
 
 import asyncio  # noqa: E402
 

@@ -27,8 +27,8 @@ class User(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True)
     display_name: str
-    # Nullable: OIDC-provisioned accounts have no local password (#25). A local
-    # account that later links an OIDC identity keeps its hash.
+    # Nullable: OIDC-provisioned accounts have no local password (#25); local
+    # accounts retain a hash and are never auto-linked from mutable IdP email.
     hashed_password: str | None = Field(default=None)
     role: UserRole = Field(default=UserRole.participant)
     team: str | None = None
@@ -45,14 +45,21 @@ class User(SQLModel, table=True):
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )
     # Token revocation cutoff (#14): tokens issued (iat) before this instant are
-    # rejected in get_current_user. Bumped on password change to invalidate all
-    # previously-issued tokens ("change password to kick out an attacker").
+    # rejected in get_current_user. Bumped on password or IdP-managed role change
+    # to invalidate sessions minted under the previous authorization state.
     token_valid_after: datetime | None = Field(
         default=None, sa_type=DateTime(timezone=True)
     )
     # External-identity provenance (#25). auth_provider is "local" for
     # email+password accounts, or an OIDC provider key ("entra"/"authentik") once
-    # a provider identity is linked/provisioned. subject is the IdP's stable `sub`
-    # claim (NULL for local-only accounts); the pair is unique (see __table_args__).
+    # a provider identity is provisioned. subject is the IdP's stable `sub` claim
+    # (NULL for local-only accounts); the pair is unique (see __table_args__).
+    # Entra also records its immutable tenant (`tid`) and requires it to remain
+    # stable on returning logins.
     auth_provider: str = Field(default=LOCAL_AUTH_PROVIDER, index=True)
     subject: str | None = Field(default=None)
+    auth_tenant: str | None = Field(default=None)
+    # True only when `role` follows the provider's configured group→role map.
+    # Local/admin provisioning paths set this false so an IdP login never
+    # overwrites an explicit operator-managed role.
+    role_managed_by_idp: bool = Field(default=False)

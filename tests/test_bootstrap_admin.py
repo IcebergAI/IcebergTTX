@@ -70,6 +70,30 @@ async def test_promotes_existing_user_without_touching_password(session: AsyncSe
     assert user.token_valid_after is None
 
 
+async def test_promoting_oidc_user_creates_explicit_local_role_override(
+    session: AsyncSession,
+):
+    existing = User(
+        email="oidc@example.com",
+        display_name="OIDC User",
+        hashed_password=None,
+        role=UserRole.participant,
+        auth_provider="authentik",
+        subject="oidc-sub",
+        role_managed_by_idp=True,
+    )
+    session.add(existing)
+    await session.commit()
+
+    user, created = await upsert_admin(
+        session, email=existing.email, display_name=None, password=None
+    )
+    assert created is False
+    assert user.role == UserRole.facilitator
+    assert user.is_admin is True
+    assert user.role_managed_by_idp is False
+
+
 async def test_reset_password_revokes_tokens(session: AsyncSession):
     existing = User(
         email="p@example.com",

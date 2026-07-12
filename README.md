@@ -16,9 +16,10 @@ disruptions through facilitated, scenario-driven tabletop exercises. A
 **participants** in real time; participants record decisions and free-text
 responses that drive the scenario down different branches, while **observers**
 follow along read-only. The platform simulates incident communications (regulators,
-press, executives) and can use the Claude API to assess participant decisions and
-suggest follow-up injects. It is API-first (FastAPI) with a server-rendered UI, and
-ships with Docker Compose and Kubernetes deployment manifests.
+press, executives) and can call out to an LLM provider of your choice to assess
+participant decisions and suggest follow-up injects. It is API-first (FastAPI) with
+a server-rendered UI, and ships with Docker Compose and Kubernetes deployment
+manifests.
 
 ## Features
 
@@ -27,7 +28,7 @@ ships with Docker Compose and Kubernetes deployment manifests.
 - **Participant responses** — branch decisions require an explicit choice; injects can require that choice alone or choice plus free-text reasoning
 - **Team comment threads** — participants discuss released injects in group-scoped comment threads
 - **Simulated communications** — two-pane inbox/outbox for regulatory, press, and executive comms
-- **LLM assessment** — Claude evaluates participant decisions and suggests follow-up injects
+- **LLM assessment** — a pluggable AI backend (Anthropic, Bedrock, OpenAI, Ollama, or Gemini) evaluates participant decisions and suggests follow-up injects
 - **Role-based access** — facilitator, participant, and observer roles (self-registration always creates a participant; elevation is out-of-band)
 - **Role preview** — facilitators can view the app as a participant or observer without changing accounts
 - **Security hardening** — enforced SECRET_KEY at startup, Secure cookie + CSRF origin checks, login rate limiting, and structured audit logging with off-host SIEM forwarding (syslog / HTTP / file)
@@ -334,17 +335,28 @@ role/authorization check is unchanged.
   are disabled), or `both` (default). Enabled providers each render a "Sign in
   with …" button on the login page; multiple providers can run concurrently.
 - **Provisioning** — first-time SSO users are just-in-time created as
-  **participant** (the IdP can never self-assign a privileged role). A returning
-  identity is matched on its stable `sub`; a *verified* email that matches an
-  existing local account links the two (preserving that account's role). A disabled
-  account (`is_active=false`) is refused regardless of the IdP.
+  **participant** by default; only an operator-configured group→role allowlist can
+  elevate them. A returning identity is matched only on its stable provider +
+  `sub` (and Entra `tid`). Email
+  and `preferred_username` are mutable contact/display attributes and **never**
+  auto-link an existing account; any collision is refused pending an explicit
+  operator-approved linking workflow. A disabled account (`is_active=false`) is
+  refused regardless of the IdP.
 - **Role mapping (optional, off by default)** — set `OIDC_<PROVIDER>_ROLE_CLAIM`
   and `OIDC_<PROVIDER>_ROLE_MAP` (`group=role,…`) to elevate members of specific
-  IdP groups. Unmapped users stay participants.
+  IdP groups. JIT roles are marked IdP-managed and synchronized on every login, so
+  removing a mapped group downgrades the user; a missing/overage claim fails closed
+  to participant. Role transitions revoke older sessions and close the user's live
+  exercise sockets after the database commit. Roles assigned through the operator
+  bootstrap are explicit local overrides and global administrators are preserved.
+  During upgrade, the migration classifies existing passwordless, non-admin SSO
+  accounts as IdP-managed (the legacy JIT shape). If an operator previously made
+  an out-of-band non-admin override, rerun `bootstrap_admin` for that account before
+  its next SSO login to mark the role explicitly local.
 - **Secrets** — client secrets are read only from the environment
   (`OIDC_*_CLIENT_SECRET`); they are never stored in the database or logged. SSO
-  login/link/JIT-provision events are audited (`auth.oidc_login`, `auth.oidc_link`,
-  `auth.jit_provision`) without tokens or codes.
+  login/JIT-provision/role-sync events are audited (`auth.oidc_login`,
+  `auth.jit_provision`, `auth.oidc_role_sync`) without tokens or codes.
 
 Set `OIDC_REDIRECT_BASE_URL` to the app's public `https://` origin (no trailing
 slash) so the callback URL matches what you register with the IdP.

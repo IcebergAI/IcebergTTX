@@ -9,13 +9,15 @@ mints, keyed on the user's email.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from authlib.integrations.starlette_client import OAuth
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import OIDCProviderConfig, settings
-from app.models.user import LOCAL_AUTH_PROVIDER, User, UserRole
-from app.services import audit_service, proxy
+from app.models.user import User, UserRole
+from app.services import audit_service, proxy, ws_manager
 from app.services.oidc import auth0 as _auth0  # noqa: F401 - registers adapter
 from app.services.oidc import authentik as _authentik  # noqa: F401 - registers adapter
 from app.services.oidc import entra as _entra  # noqa: F401 - registers adapter
@@ -117,96 +119,113 @@ def map_role(cfg: OIDCProviderConfig, identity: OIDCIdentity) -> UserRole:
     return UserRole.participant
 
 
+async def _sync_returning_user(
+    session: AsyncSession,
+    *,
+    cfg: OIDCProviderConfig,
+    identity: OIDCIdentity,
+    user: User,
+) -> None:
+    """Validate immutable identity scope and synchronize an IdP-managed role."""
+    dirty = False
+    if user.auth_tenant is not None and user.auth_tenant != identity.tenant_id:
+        raise OIDCProvisionError("identity conflict")
+    if user.auth_tenant is None and identity.tenant_id is not None:
+        # Lazy provenance backfill for an identity created before auth_tenant was
+        # added. The provider/subject match was already validated by Authlib.
+        user.auth_tenant = identity.tenant_id
+        dirty = True
+    elif user.auth_tenant is not None and identity.tenant_id is None:
+        raise OIDCProvisionError("identity conflict")
+
+    previous_role = user.role
+    if user.role_managed_by_idp and not user.is_admin:
+        mapped_role = map_role(cfg, identity)
+        if mapped_role != user.role:
+            user.role = mapped_role
+            # Invalidate sessions minted with the previous authorization state.
+            # The callback issues the returning user a fresh token after this
+            # transaction commits.
+            user.token_valid_after = datetime.now(UTC).replace(microsecond=0)
+            dirty = True
+
+    if dirty:
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+    if user.role != previous_role:
+        audit_service.emit(
+            "auth.oidc_role_sync",
+            actor_id=user.id,
+            actor_email=user.email,
+            actor_role=user.role.value,
+            target_type="user",
+            target_id=user.id,
+            reason=(
+                f"provider={cfg.key} from={previous_role.value} to={user.role.value}"
+            ),
+            severity="warning",
+        )
+        # The role and revocation cutoff are durable before any established
+        # socket is acted on. Otherwise a disconnected client could race a stale
+        # HTTP session against an uncommitted downgrade.
+        if user.id is not None:
+            await ws_manager.manager.close_user_connections(user.id)
+
+
 async def provision_oidc_user(
     session: AsyncSession, *, cfg: OIDCProviderConfig, identity: OIDCIdentity
 ) -> tuple[User, bool]:
     """Resolve or create the local User for a validated OIDC identity.
 
-    Returns ``(user, created)``. Raises OIDCProvisionError for denials (disabled
-    account, or an unverified email colliding with a local account).
+    Returns ``(user, created)``. Raises OIDCProvisionError for disabled accounts,
+    identity conflicts, and email collisions that require an explicit link flow.
 
     Match order:
-      1. (auth_provider, subject) — a returning OIDC user.
-      2. verified email → link the identity onto the existing local row.
-      3. unverified email colliding with a local account → deny.
-      4. otherwise JIT-create a participant.
+      1. (auth_provider, stable subject) — returning OIDC user; validate tenant
+         provenance and synchronize an IdP-managed role.
+      2. any email collision → deny; mutable human-readable claims never link.
+      3. otherwise JIT-create an identity bound to the stable provider subject.
     """
     # 1. Returning OIDC identity.
     existing = (
         await session.exec(
-            select(User).where(User.auth_provider == cfg.key, User.subject == identity.subject)
+            select(User)
+            .where(User.auth_provider == cfg.key, User.subject == identity.subject)
+            .with_for_update()
         )
     ).first()
     if existing is not None:
         if not existing.is_active:
             raise OIDCProvisionError("account disabled")
-        # Provider-managed roles are reconciled on every authenticated return.
-        # A removed IdP group must revoke its elevation rather than leave a
-        # permanently privileged local account.
-        mapped_role = map_role(cfg, identity)
-        if existing.role != mapped_role:
-            existing.role = mapped_role
-            session.add(existing)
-            await session.commit()
-            await session.refresh(existing)
-            audit_service.emit(
-                "auth.oidc_role_reconciled",
-                actor_id=existing.id,
-                actor_email=existing.email,
-                actor_role=existing.role.value,
-                target_type="user",
-                target_id=existing.id,
-                reason=f"provider={cfg.key}",
-            )
+        await _sync_returning_user(
+            session, cfg=cfg, identity=identity, user=existing
+        )
         return existing, False
 
-    # 2/3. Email collision with an existing account.
+    # 2. Email is a mutable display/contact attribute, never an identity key.
+    normalized_email = identity.email.strip().lower()
     by_email = (
-        await session.exec(select(User).where(User.email == identity.email))
+        await session.exec(select(User).where(User.email == normalized_email))
     ).first()
     if by_email is not None:
         if not by_email.is_active:
             raise OIDCProvisionError("account disabled")
-        # Only ever auto-link an *unlinked local* account. If this email already
-        # belongs to a different external identity (step 1 didn't match it, so the
-        # (provider, subject) differs), refuse — otherwise a second IdP, or the same
-        # IdP with a changed `sub`, could take over the account by asserting the same
-        # email (cross-provider account takeover).
-        if by_email.subject is not None or by_email.auth_provider != LOCAL_AUTH_PROVIDER:
-            raise OIDCProvisionError("identity conflict")
-        if not identity.email_verified:
-            raise OIDCProvisionError("unverified email collision")
-        # Entra email claims are mutable and therefore cannot prove ownership of
-        # a pre-existing local account. Its stable subject remains the only safe
-        # returning-identity key (handled above).
-        if cfg.key == "entra":
-            raise OIDCProvisionError("entra email linking is disabled")
-        # Link: attach the provider identity to the existing local row, preserving
-        # its role / is_admin.
-        by_email.auth_provider = cfg.key
-        by_email.subject = identity.subject
-        session.add(by_email)
-        await session.commit()
-        await session.refresh(by_email)
-        audit_service.emit(
-            "auth.oidc_link",
-            actor_id=by_email.id,
-            actor_email=by_email.email,
-            actor_role=by_email.role.value,
-            target_type="user",
-            target_id=by_email.id,
-            reason=f"provider={cfg.key}",
-        )
-        return by_email, False
+        raise OIDCProvisionError("account linking required")
 
-    # 4. JIT create.
+    # 3. JIT create. The stable provider subject authenticates this account; an
+    # unverified email may be retained as contact/display data but cannot claim an
+    # existing row because every collision above is denied.
     user = User(
-        email=identity.email,
-        display_name=identity.display_name or identity.email,
+        email=normalized_email,
+        display_name=identity.display_name or normalized_email,
         hashed_password=None,
         role=map_role(cfg, identity),
         auth_provider=cfg.key,
         subject=identity.subject,
+        auth_tenant=identity.tenant_id,
+        role_managed_by_idp=True,
     )
     session.add(user)
     await session.commit()

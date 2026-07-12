@@ -104,6 +104,53 @@ jobs:
       - name: Build Tailwind CSS
         run: uvx --from 'pytailwindcss==0.3.0' tailwindcss -i static/css/input.css -o static/css/output.css --minify
 
+      - name: Replay legacy read-receipt migration
+        env:
+          PGPASSWORD: postgres
+          MIGRATION_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/iceberg_migration
+        run: |
+          createdb -h 127.0.0.1 -U postgres iceberg_migration
+          DATABASE_URL="$MIGRATION_DATABASE_URL" uv run alembic upgrade 9c4f2a7d1e30
+          psql -h 127.0.0.1 -U postgres -d iceberg_migration -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO "user" (
+            email, display_name, hashed_password, role, team, is_active,
+            is_admin, must_change_password, created_at, auth_provider, subject
+          ) VALUES (
+            'migration@example.test', 'Migration User', NULL, 'participant', NULL,
+            TRUE, FALSE, FALSE, CURRENT_TIMESTAMP, 'local', NULL
+          );
+          INSERT INTO scenario (
+            title, description, version, tags, definition, created_by,
+            created_at, updated_at
+          ) VALUES (
+            'Migration scenario', NULL, '1', '[]'::jsonb, '{}',
+            (SELECT id FROM "user" WHERE email = 'migration@example.test'),
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          );
+          INSERT INTO exercise (
+            scenario_id, title, state, current_node_id, llm_enabled,
+            started_at, ended_at, created_by, created_at
+          ) VALUES (
+            (SELECT id FROM scenario WHERE title = 'Migration scenario'),
+            'Migration exercise', 'draft', NULL, FALSE, NULL, NULL,
+            (SELECT id FROM "user" WHERE email = 'migration@example.test'),
+            CURRENT_TIMESTAMP
+          );
+          INSERT INTO communication (
+            exercise_id, sender_id, sender_team, direction, external_entity,
+            subject, body, triggered_by_inject_id, visible_to_teams, sent_at, read_by
+          ) VALUES (
+            (SELECT id FROM exercise WHERE title = 'Migration exercise'),
+            NULL, NULL, 'inbound', NULL, 'Legacy null', 'Body', NULL, NULL,
+            CURRENT_TIMESTAMP, 'null'::jsonb
+          );
+          SQL
+          DATABASE_URL="$MIGRATION_DATABASE_URL" uv run alembic upgrade head
+          test "$(psql -h 127.0.0.1 -U postgres -d iceberg_migration -Atc \
+            "SELECT count(*) FROM communicationread")" = "0"
+          test "$(psql -h 127.0.0.1 -U postgres -d iceberg_migration -Atc \
+            "SELECT count(*) FROM pg_attribute WHERE attrelid='communication'::regclass AND attname='read_by' AND NOT attisdropped")" = "0"
+
       - name: Apply migrations
         run: uv run alembic upgrade head
 

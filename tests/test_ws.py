@@ -11,6 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.exercise import Exercise
 from app.models.user import User, UserRole
 from app.services.auth_service import create_access_token, hash_password
+from app.services.ws_manager import ConnectionManager
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,24 @@ def aconnect_ws(url: str, client: AsyncClient, **kwargs):
 
 
 # ── Connection ────────────────────────────────────────────────────────────────
+
+
+async def test_close_user_connections_removes_and_closes_only_target_user():
+    manager = ConnectionManager()
+    target_one = AsyncMock()
+    target_two = AsyncMock()
+    unrelated = AsyncMock()
+    await manager.connect(target_one, 1, user_id=42, role="facilitator", group_id=None)
+    await manager.connect(target_two, 2, user_id=42, role="facilitator", group_id=None)
+    await manager.connect(unrelated, 1, user_id=7, role="participant", group_id="it_ops")
+
+    await manager.close_user_connections(42)
+
+    target_one.close.assert_awaited_once_with(code=4003)
+    target_two.close.assert_awaited_once_with(code=4003)
+    unrelated.close.assert_not_awaited()
+    assert all(c.user_id != 42 for room in manager._rooms.values() for c in room)
+    assert any(c.user_id == 7 for room in manager._rooms.values() for c in room)
 
 async def test_ws_connect_valid_token(
     client: AsyncClient, facilitator_token: str, active_exercise: Exercise
