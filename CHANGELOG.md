@@ -7,6 +7,41 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (see the
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-07-12
+
+Second beta release focused on after-action reporting, operational hardening,
+mobile usability, email workflows, and security remediation.
+
+### Added
+- **After-action review** — durable exercise timelines, facilitator debrief notes,
+  generated reports, attendance snapshots, and participant/group-aware reporting.
+- **Exercise pacing** — pause-aware clocks and optional scheduled inject release.
+- **Email workflows** — SMTP-backed password reset and participant invitations.
+- **Scenario progression** — group-specific cursors and durable inject progress.
+
+### Changed
+- **Mobile and accessibility** — compact navigation, responsive facilitator console,
+  larger touch targets, labelled controls, keyboard-safe modals, and WCAG contrast.
+- **Concurrency and history** — atomic lifecycle transitions, idempotent responses,
+  triggered communications, LLM results, and recoverable attachment cleanup.
+- **OIDC identity policy** — stable tenant/subject binding and explicit role
+  provenance preserve operator overrides while revoking removed IdP elevation.
+- **Tooling** — Pyright in CI, CodeQL v4, unified local development command, and a
+  working external-Postgres test path that does not initialize Docker.
+
+### Fixed
+- Reconciled the Alembic migration graph and hardened the legacy communication
+  read-receipt backfill against JSON `null` values.
+- Restored Uvicorn startup diagnostics after in-process Alembic configuration.
+- Corrected published image tags, Kubernetes backup execution, completed-exercise
+  history, report counts, response requirements, and multi-team delivery behavior.
+- Consolidated security fixes across authorization boundaries, OIDC, WebSockets,
+  CSV exports, AI opt-out enforcement, audit delivery, and scenario isolation.
+
+### Security
+- This is the patched release for the repository advisories affecting beta.1.
+  Full vulnerability details are available in the published GitHub advisories.
+
 ## [0.1.0-beta.1]
 
 First public (beta) release. The `0.x` line is pre-stable — interfaces may change
@@ -40,5 +75,6 @@ before `1.0.0`.
   Reproducible builds via `uv.lock`; images ship an SBOM, SLSA build-provenance
   attestation, and a cosign signature.
 
-[Unreleased]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.1...HEAD
+[Unreleased]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.2...HEAD
+[0.1.0-beta.2]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/IcebergAI/IcebergTTX/releases/tag/v0.1.0-beta.1

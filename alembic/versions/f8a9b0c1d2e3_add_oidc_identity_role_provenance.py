@@ -1,7 +1,7 @@
 """add OIDC tenant and role provenance
 
 Revision ID: f8a9b0c1d2e3
-Revises: e7f8a9b0c1d2
+Revises: a2b3c4d5e6f7
 Create Date: 2026-07-11 00:00:00.000000
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'f8a9b0c1d2e3'
-down_revision: str | None = 'e7f8a9b0c1d2'
+down_revision: str | None = 'a2b3c4d5e6f7'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
