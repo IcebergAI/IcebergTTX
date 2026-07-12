@@ -61,7 +61,7 @@ def _api_url(path: str) -> str:
 def api_post(page: Page, path: str, body: dict | None = None) -> dict:
     r = page.request.post(
         _api_url(path),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "Origin": BASE},
         data=json.dumps(body or {}),
     )
     return r

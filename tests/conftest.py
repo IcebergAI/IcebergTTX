@@ -76,6 +76,22 @@ def seed_playwright_users():
                       "role": role, **({"team": team} if team else {})},
                 timeout=2.0,
             )
+
+        async def promote_facilitator() -> None:
+            from sqlmodel import select
+
+            async with AsyncSession(engine) as ui_session:
+                facilitator = (
+                    await ui_session.exec(
+                        select(User).where(User.email == "facilitator@deep.test")
+                    )
+                ).one()
+                facilitator.role = UserRole.facilitator
+                facilitator.is_admin = True
+                ui_session.add(facilitator)
+                await ui_session.commit()
+
+        asyncio.run(promote_facilitator())
     except Exception:
         pass
 
