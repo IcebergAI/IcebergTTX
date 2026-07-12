@@ -361,7 +361,6 @@ document.addEventListener('alpine:init', () => {
     newAttachment: null,
     showAddInject: false,
     showAddMember: false,
-    showExport: false,
     showOpsPanel: false,
     mobilePane: 'injects',
     isMobileConsole: false,
@@ -376,6 +375,7 @@ document.addEventListener('alpine:init', () => {
     _nowMs: 0,              // ticked every 1s so the pause-aware clock/countdowns re-render (#116)
     clockInterval: null,
     scheduleDraft: {},      // per-inject offset-minutes input model
+    scheduleOpen: {},       // per-inject id → is the Schedule reveal expanded
 
     // Shell getters — the CSP build cannot evaluate `?.` in directives.
     get exState() { return this.exercise ? this.exercise.state : ''; },
@@ -421,6 +421,28 @@ document.addEventListener('alpine:init', () => {
       return [...this.comments]
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         .slice(0, 12);
+    },
+
+    // "Pull not push" (see CLAUDE.md): responses resolve which injects are valid
+    // next steps, but the facilitator still chooses. These are the ones the
+    // scenario is pointing at right now — surfaced on the row so the next move
+    // is obvious without reading every response card.
+    get recommendedInjectIds() {
+      const ids = new Set();
+      for (const resp of this.responses) {
+        // _next_injects, not _next_inject_ids — the latter holds *scenario node*
+        // ids ('containment'), which never match an inject row id.
+        for (const next of (resp._next_injects || [])) ids.add(next.id);
+      }
+      return ids;
+    },
+
+    isRecommended(inj) {
+      return inj.state === 'pending' && this.recommendedInjectIds.has(inj.id);
+    },
+
+    toggleSchedule(inj) {
+      this.scheduleOpen = { ...this.scheduleOpen, [inj.id]: !this.scheduleOpen[inj.id] };
     },
 
     get injectSections() {
@@ -698,7 +720,7 @@ document.addEventListener('alpine:init', () => {
               ...msg.payload,
               state: msg.payload.new_state || msg.payload.state,
             };
-            this._startElapsed();
+            this._startClock();
             document.dispatchEvent(new CustomEvent('dt:exercises-changed'));
           }
           if (msg.type === 'assessment_ready') {

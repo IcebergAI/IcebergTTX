@@ -419,6 +419,28 @@ code, .code { font-family: var(--fs-mono); font-size: 0.86em; background: var(--
 
 .dot { width: 7px; height: 7px; border-radius: 999px; display: inline-block; flex-shrink: 0; }
 
+/* Segmented control — a recessed track with a raised active segment. Replaces the
+   bare "/"-separated text links that read as prose rather than as a control. */
+.seg {
+  display: inline-flex; gap: 2px; padding: 3px; flex: none;
+  background: var(--surface-2); border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+/* 40px on BOTH axes, not the handoff's 34px: a class selector beats the global
+   button floor on specificity, and the touch-target test checks width as well as
+   height — a short label like "All" renders under 40px wide without this. */
+.seg-btn {
+  min-width: 40px; min-height: 40px; padding: 0 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--radius-sm); background: transparent;
+  color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600;
+  white-space: nowrap; cursor: pointer;
+  transition: background .13s, color .13s, box-shadow .13s;
+}
+.seg-btn:hover { color: var(--ink); }
+.seg-btn.is-active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.seg-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+
 @keyframes livePulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
   50%       { box-shadow: 0 0 0 6px oklch(0.66 0.118 226 / 0); }
@@ -439,6 +461,9 @@ code, .code { font-family: var(--fs-mono); font-size: 0.86em; background: var(--
 .dot-info { background: var(--c-ok); }
 .dot-warn { background: var(--c-warn); }
 .dot-crit { background: var(--c-crit); }
+.dot-ok { background: var(--c-ok); }
+.text-ok { color: var(--c-ok); }
+.text-crit { color: var(--c-crit); }
 .pill-fail { background: color-mix(in oklch, var(--c-warn) 14%, var(--surface)); color: var(--c-warn); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--c-warn) 30%, var(--line-strong)); }
 .pill-deny { background: color-mix(in oklch, var(--c-crit) 14%, var(--surface)); color: var(--c-crit); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--c-crit) 30%, var(--line-strong)); }
 
@@ -487,7 +512,19 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
   box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px var(--accent-glow);
   background: var(--accent-soft);
 }
+/* A pending inject the scenario is pointing at: a hairline, not a fill — it must
+   read as "next", clearly below a released inject in the visual hierarchy. */
+.node.is-recommended { box-shadow: inset 0 0 0 1.5px var(--accent-line); }
 .node.done { opacity: 0.65; }
+
+/* Team-tinted section heading. Pairs with .pill.team-* — same scent, different
+   surface, so a team reads the same in a list header and on a pill. */
+.team-label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.team-label-swatch { width: 6px; height: 6px; border-radius: 2px; background: currentColor; flex: none; }
+.team-label.team-itops { color: var(--team-itops-ink); }
+.team-label.team-legal { color: var(--team-legal-ink); }
+.team-label.team-exec  { color: var(--team-exec-ink); }
+.team-label.team-comms { color: var(--team-comms-ink); }
 
 /* Participant briefing card */
 .briefing {
@@ -518,6 +555,19 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
 .fac-console__body,
 .fac-console__pane { min-width: 0; }
 .fac-console__mobile-nav { display: none; }
+
+/* Ops pane: three labelled sections rather than one mixed scroll, so
+   "who's in the room" and "what do I do with the session" don't run together. */
+/* Schedule toggle reads as pressed while its reveal is open. */
+.btn.is-open { background: var(--accent-soft); color: var(--accent-deep); box-shadow: inset 0 0 0 1px var(--accent-line); }
+
+.fac-console__ops-section { padding: 16px; border-bottom: 1px solid var(--line); }
+.fac-console__ops-section:last-child { border-bottom: 0; }
+.fac-console__ops-label {
+  font-family: var(--fs-mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 9px;
+}
 
 @media (max-width: 1120px) {
   .fac-console__ticker {
@@ -612,10 +662,14 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 ::placeholder { color: var(--faint); }
 
 /* Phone layouts use a 44px hit area.  The visual treatment remains compact,
-   but the tappable box and keyboard focus ring have enough room to breathe. */
+   but the tappable box and keyboard focus ring have enough room to breathe.
+   Any control class that sets its own min-width/min-height must be listed here
+   as well: a class selector outranks the bare `button` element selector, so it
+   would otherwise silently keep its 40px desktop floor on a phone. */
 @media (max-width: 760px) {
   .btn, button, [role="button"], [role="tab"],
   .rail-link, .rail-live-main, .rail-live-opt, .rail-logout, summary,
+  .seg-btn,
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select, textarea {
     min-width: 44px;

@@ -1,47 +1,58 @@
 {% extends "base.html" %}
 {% block title %}Facilitate — IcebergTTX{% endblock %}
 
+{#- The console is full-bleed and carries its own command bar, so the global crumb
+    band would only cost it 52px of the viewport you run the exercise in. -#}
+{% block topbar %}{% endblock %}
+
 {% block content %}
 <div x-data="facilitatorConsole({{ exercise_id }})"
      class="fac-console flex flex-col"
      data-testid="facilitator-console">
 
-  <!-- Ticker bar -->
-  <div class="fac-console__ticker h-12 flex items-center gap-4 border-b px-5 shrink-0 rule"
-       style="background: var(--paper);">
+  <!-- Command bar. Was a global breadcrumb bar stacked on a ticker; now one row
+       carrying the exercise's status on the left and its controls on the right. -->
+  <div class="fac-console__ticker flex items-center gap-3 border-b px-5 shrink-0 rule"
+       style="background: var(--surface); min-height: 56px;">
 
-    <div class="fac-console__identity flex items-center gap-2 min-w-0">
-      <span class="text-[13.5px] font-medium truncate" x-text="exTitle"></span>
-      <span class="mono text-[11.5px] text-faint" x-text="exId"></span>
+    <div class="fac-console__identity flex items-center gap-2.5 min-w-0">
+      <span class="text-[15px] font-bold tracking-tight truncate" x-text="exTitle"></span>
+      <span class="mono text-[11px] text-faint" x-text="exId"></span>
     </div>
 
-    <span class="pill mono" x-text="exState || 'loading'"></span>
-    <span x-show="exState !== 'draft'" class="mono text-[12px] text-muted"
+    <span class="pill mono uppercase" :class="stateBadgeClass(exState)">
+      <span x-show="exState === 'active'" class="live-dot" style="width: 6px; height: 6px;" aria-hidden="true"></span>
+      <span x-text="exState || 'loading'"></span>
+    </span>
+    <span x-show="exState !== 'draft'" class="mono text-[12px] text-muted whitespace-nowrap"
           :title="exState === 'paused' ? 'Elapsed (paused)' : 'Elapsed exercise time'"
-          x-text="elapsedStr"></span>
+          x-text="elapsedStr + ' elapsed'"></span>
 
     <div class="fac-console__actions ml-auto flex items-center gap-2">
-      <span class="fac-console__connection smallcaps" :class="wsConnected ? 'text-faint' : 'text-red-400'"
-            x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
+      <span class="fac-console__connection smallcaps flex items-center gap-1.5"
+            :class="wsConnected ? 'text-ok' : 'text-crit'">
+        <span class="dot" :class="wsConnected ? 'dot-ok' : 'dot-crit'" aria-hidden="true"></span>
+        <span x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
+      </span>
       <div class="fac-console__action-divider w-px h-5 border-l rule-2 mx-1"></div>
       <button @click="showOpsPanel = !showOpsPanel"
-              class="fac-console__ops-toggle btn h-7 px-3 text-[12.5px]"
+              class="fac-console__ops-toggle btn px-3 text-[12.5px]"
               :class="showOpsPanel ? 'btn-primary' : 'btn-ghost'"
               :aria-pressed="showOpsPanel"
               :title="showOpsPanel ? 'Hide ops panel' : 'Show ops panel (review, participants, export)'">
         <span>Ops panel</span>
       </button>
       <a :href="commsHref"
-         class="fac-console__comms btn btn-ghost h-7 px-3 text-[12.5px]">Communications</a>
+         class="fac-console__comms btn btn-ghost px-3 text-[12.5px]">Communications</a>
       <button x-show="exState === 'draft'" @click="transition('start')"
-              class="btn btn-accent h-7 px-3 text-[12.5px]">Start</button>
+              class="btn btn-primary px-3 text-[12.5px]">Start</button>
       <button x-show="exState === 'active'" @click="transition('pause')"
-              class="btn btn-ghost h-7 px-3 text-[12.5px]">Pause</button>
+              class="btn btn-ghost px-3 text-[12.5px]">Pause</button>
       <button x-show="exState === 'paused'" @click="transition('resume')"
-              class="btn btn-accent h-7 px-3 text-[12.5px]">Resume</button>
+              class="btn btn-primary px-3 text-[12.5px]">Resume</button>
       <button x-show="exState === 'active' || exState === 'paused'"
               @click="transition('complete')"
-              class="btn btn-ghost h-7 px-3 text-[12.5px]">Complete</button>
+              class="btn btn-primary px-3 text-[12.5px]">Complete</button>
     </div>
   </div>
 
@@ -97,7 +108,7 @@
   <!-- Console body -->
   <div class="fac-console__body grid flex-1 min-h-0"
        data-testid="facilitator-console-body"
-       :style="showOpsPanel ? 'grid-template-columns: minmax(300px, 320px) minmax(340px, 1fr) minmax(240px, 260px);' : 'grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);'">
+       :style="showOpsPanel ? 'grid-template-columns: minmax(300px, 330px) minmax(340px, 1fr) minmax(240px, 264px);' : 'grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);'">
 
     <!-- LEFT: inject tree + ad-hoc form -->
     <div id="fac-pane-injects"
@@ -119,14 +130,17 @@
         <template x-for="section in injectSections" :key="section.id || 'shared'">
           <div>
             <div class="flex items-center gap-2 px-1 mb-1.5">
-              <div class="smallcaps text-muted" x-text="section.label"></div>
+              <div class="team-label smallcaps" :class="teamColor(section.id)">
+                <span class="team-label-swatch" aria-hidden="true"></span>
+                <span x-text="section.label"></span>
+              </div>
               <span class="ml-auto mono text-[10.5px] text-faint"
                     x-text="section.injects.length + ' queued'"></span>
             </div>
             <div class="space-y-1.5">
               <template x-for="inj in section.injects" :key="inj.id">
                 <div class="node py-2.5"
-                     :class="{'current': inj.state === 'released', 'done': inj.state === 'resolved'}">
+                     :class="{'current': inj.state === 'released', 'done': inj.state === 'resolved', 'is-recommended': isRecommended(inj)}">
                   <div class="flex items-center gap-2">
                     <span class="dot shrink-0"
                           :style="inj.state === 'released' ? 'background: var(--accent);' : (inj.state === 'resolved' ? 'background:#8a877f;' : 'background: transparent; box-shadow: inset 0 0 0 1px var(--rule-2);')"></span>
@@ -156,27 +170,47 @@
                               class="pill mono ring-1 ring-inset text-[10px] bg-surface-2 text-ink-soft ring-line"
                               :title="'Auto-releases at ' + inj.release_offset_minutes + ' min'"
                               x-text="'⏱ ' + countdownLabel(inj)"></span>
+                        <span x-show="isRecommended(inj)"
+                              class="smallcaps text-accent-ink">Recommended next</span>
                       </div>
                     </div>
-                    <div x-show="inj.state === 'pending'" class="flex flex-col items-end gap-1 shrink-0">
+                    <div x-show="inj.state === 'pending'" class="flex items-center gap-1.5 shrink-0">
+                      <!-- Icon-only: the row is 330px and the title has to win. -->
+                      <button @click="toggleSchedule(inj)"
+                              class="btn btn-ghost px-0"
+                              :class="scheduleOpen[inj.id] && 'is-open'"
+                              :aria-expanded="!!scheduleOpen[inj.id]"
+                              aria-label="Schedule an automatic release"
+                              title="Schedule an automatic release">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="1.75" stroke-linecap="round" aria-hidden="true">
+                          <circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 1.75" />
+                        </svg>
+                      </button>
                       <button @click="releaseInject(inj)"
-                              class="btn btn-primary h-6 px-2.5 text-[11.5px]">
+                              class="btn px-2.5 text-[11.5px]"
+                              :class="isRecommended(inj) ? 'btn-primary' : 'btn-ghost'">
                         Release
                       </button>
-                      <div class="flex items-center gap-1">
-                        <input type="number" min="0" step="1"
-                               x-model="scheduleDraft[inj.id]"
-                               :placeholder="schedulePlaceholder(inj)"
-                               class="w-14 rounded-md ring-rule px-1.5 py-0.5 text-[11px] mono bg-surface"
-                               title="Auto-release offset in minutes from exercise start" />
-                        <button @click="saveSchedule(inj)"
-                                class="btn btn-ghost h-6 px-2 text-[11px]"
-                                title="Set scheduled release">Set</button>
-                        <button x-show="isScheduled(inj)" @click="cancelSchedule(inj)"
-                                class="btn btn-ghost h-6 px-2 text-[11px] text-red-400"
-                                title="Cancel scheduled release">✕</button>
-                      </div>
                     </div>
+                  </div>
+
+                  <!-- Scheduling (#116) is a per-inject reveal, not a permanent
+                       fixture of every pending row — most releases are manual. -->
+                  <div x-show="inj.state === 'pending' && scheduleOpen[inj.id]" x-cloak
+                       class="mt-2 pt-2 border-t flex flex-wrap items-center gap-1.5"
+                       style="border-color: var(--rule);">
+                    <label class="smallcaps text-muted" :for="'sched-' + inj.id">Release at</label>
+                    <input type="number" min="0" step="1"
+                           :id="'sched-' + inj.id"
+                           x-model="scheduleDraft[inj.id]"
+                           :placeholder="schedulePlaceholder(inj)"
+                           class="w-16 h-9 rounded-md ring-rule px-2 text-[11.5px] mono bg-surface" />
+                    <span class="mono text-[10.5px] text-faint">min from start</span>
+                    <button @click="saveSchedule(inj)"
+                            class="btn btn-ghost px-2.5 text-[11.5px] ml-auto">Set</button>
+                    <button x-show="isScheduled(inj)" @click="cancelSchedule(inj)"
+                            class="btn btn-ghost px-2.5 text-[11.5px] text-crit">Clear</button>
                   </div>
 
                   <!-- Expected actions (from scenario definition) -->
@@ -254,24 +288,27 @@
          class="fac-console__pane fac-console__pane--responses overflow-y-auto"
          :class="mobilePane === 'responses' ? 'is-mobile-active' : ''"
          data-testid="facilitator-pane-responses">
-      <div class="fac-console__response-header px-6 pt-5 pb-3 flex items-baseline gap-3">
-        <h2 class="text-[18px] font-semibold tracking-tight">Responses</h2>
+      <div class="fac-console__response-header px-6 pt-5 pb-3 flex items-center gap-3">
+        <h2 class="text-[18px] font-bold tracking-tight">Responses</h2>
         <span class="mono text-[12px] text-muted"
               x-text="responses.length + ' total'"></span>
         <span class="mono text-[12px] text-faint"
               x-text="comments.length + ' comments'"></span>
-        <div class="fac-console__response-filters ml-auto flex items-center gap-2">
-          <button class="smallcaps hover:text-ink"
-                  :class="responseFilter === 'all' ? 'text-ink' : 'text-faint'"
-                  @click="responseFilter = 'all'">All</button>
-          <span class="text-faint">/</span>
-          <button class="smallcaps hover:text-ink"
-                  :class="responseFilter === 'node' ? 'text-ink' : 'text-faint'"
-                  @click="responseFilter = 'node'">Current node</button>
-          <span class="text-faint">/</span>
-          <button class="smallcaps hover:text-ink"
-                  :class="responseFilter === 'flagged' ? 'text-ink' : 'text-faint'"
-                  @click="responseFilter = 'flagged'">Flagged</button>
+        <div class="fac-console__response-filters ml-auto">
+          <div class="seg" role="group" aria-label="Filter responses">
+            <button type="button" class="seg-btn"
+                    :class="responseFilter === 'all' && 'is-active'"
+                    :aria-pressed="responseFilter === 'all'"
+                    @click="responseFilter = 'all'">All</button>
+            <button type="button" class="seg-btn"
+                    :class="responseFilter === 'node' && 'is-active'"
+                    :aria-pressed="responseFilter === 'node'"
+                    @click="responseFilter = 'node'">Current node</button>
+            <button type="button" class="seg-btn"
+                    :class="responseFilter === 'flagged' && 'is-active'"
+                    :aria-pressed="responseFilter === 'flagged'"
+                    @click="responseFilter = 'flagged'">Flagged</button>
+          </div>
         </div>
       </div>
 
@@ -394,25 +431,26 @@
         </div>
       </template>
 
-      <!-- Participants -->
-      <div class="px-4 pt-4 pb-3">
-        <div class="border-b rule pb-4 mb-4">
-          <div class="smallcaps text-muted mb-2">Progression</div>
-          <ul class="space-y-2">
-            <template x-for="cursor in progressionCursors" :key="cursor.group_id || 'shared'">
-              <li class="flex items-start justify-between gap-3 text-[12px]">
-                <span class="text-muted" x-text="progressionGroupLabel(cursor.group_id)"></span>
-                <span class="mono text-right" x-text="cursor.current_node_id || 'Complete'"></span>
-              </li>
-            </template>
-            <li x-show="progressionCursors.length === 0" class="text-[12px] text-faint">
-              No progression state.
+      <!-- Progression -->
+      <div class="fac-console__ops-section">
+        <div class="fac-console__ops-label">Progression</div>
+        <ul class="space-y-2">
+          <template x-for="cursor in progressionCursors" :key="cursor.group_id || 'shared'">
+            <li class="flex items-start justify-between gap-3 text-[12px]">
+              <span class="text-muted" x-text="progressionGroupLabel(cursor.group_id)"></span>
+              <span class="mono text-right" x-text="cursor.current_node_id || 'Complete'"></span>
             </li>
-          </ul>
-        </div>
+          </template>
+          <li x-show="progressionCursors.length === 0" class="text-[12px] text-faint">
+            No progression state.
+          </li>
+        </ul>
+      </div>
 
+      <!-- Participants -->
+      <div class="fac-console__ops-section">
         <div class="flex items-center justify-between mb-2">
-          <div class="smallcaps text-muted">Participants</div>
+          <div class="fac-console__ops-label" style="margin-bottom: 0;">Participants</div>
           <span class="mono text-[11px] text-faint" x-text="members.length + ' enrolled'"></span>
         </div>
 
@@ -422,9 +460,11 @@
               <div class="smallcaps text-faint mb-1" x-text="section.label"></div>
               <ul class="space-y-1.5">
                 <template x-for="m in section.members" :key="m.user_id">
-                  <li class="flex items-center gap-2 text-[13px]">
-                    <div class="relative shrink-0">
-                      <div class="avatar-chip h-6 w-6 rounded-full grid place-items-center text-[10.5px] font-semibold">
+                  <!-- Name and team select stack: the ops pane is 264px, and side by
+                       side the select left the name about 70px to live in. -->
+                  <li class="text-[13px]">
+                    <div class="flex items-center gap-2">
+                      <div class="avatar-chip h-6 w-6 rounded-full grid place-items-center text-[10.5px] font-semibold shrink-0">
                         <template x-if="userFor(m.user_id)">
                           <span x-text="memberInitials(m.user_id)"></span>
                         </template>
@@ -432,27 +472,31 @@
                           <span x-text="'#' + m.user_id"></span>
                         </template>
                       </div>
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <template x-if="userFor(m.user_id)">
-                        <span class="truncate" x-text="userFor(m.user_id).display_name"></span>
-                      </template>
-                      <template x-if="!userFor(m.user_id)">
-                        <span class="text-muted" x-text="'User #' + m.user_id"></span>
-                      </template>
+                      <div class="min-w-0 flex-1 truncate">
+                        <template x-if="userFor(m.user_id)">
+                          <span x-text="userFor(m.user_id).display_name"></span>
+                        </template>
+                        <template x-if="!userFor(m.user_id)">
+                          <span class="text-muted" x-text="'User #' + m.user_id"></span>
+                        </template>
+                      </div>
+                      <!-- Bare, not .btn: the global rule still gives it a 40px hit
+                           area, but a ghost-button border around a single glyph
+                           shouts louder than the row it sits on. -->
+                      <button @click="removeMember(m.user_id)"
+                              class="text-[13px] text-faint hover:text-crit shrink-0"
+                              :aria-label="'Remove ' + userDisplayName(m.user_id)">✕</button>
                     </div>
                     <select :value="m.group_id || ''"
                             :aria-label="memberGroupLabel(m.user_id)"
                             x-effect="syncSelectValue($el, m.group_id)"
                             @change="changeMemberGroup(m, $event.target.value)"
-                            class="w-24 rounded-md ring-rule px-1.5 py-1 text-[11px] bg-surface shrink-0">
+                            class="mt-1 ml-8 w-[calc(100%-2rem)] h-9 rounded-md ring-rule px-1.5 text-[11px] bg-surface">
                       <option value="">None</option>
                       <template x-for="group in groupDefs" :key="group.id">
                         <option :value="group.id" x-text="group.label || group.id"></option>
                       </template>
                     </select>
-                    <button @click="removeMember(m.user_id)"
-                            class="text-[11px] text-faint hover:text-red-500 shrink-0">✕</button>
                   </li>
                 </template>
               </ul>
@@ -462,14 +506,15 @@
         </ul>
 
         <!-- Member search -->
-        <div class="border-t rule pt-3">
+        <div>
           <button @click="showAddMember = !showAddMember"
-                  class="btn btn-ghost h-7 px-3 text-[12px] w-full justify-center">
+                  class="btn btn-ghost px-3 text-[12px] w-full justify-center">
             <span x-text="showAddMember ? 'Hide add participant' : '+ Add participant'"></span>
           </button>
           <div x-show="showAddMember" class="mt-2">
             <input type="text" x-model="memberSearch" placeholder="Name or email…"
-                   class="w-full rounded-md ring-rule px-2 py-1 text-[12px] bg-surface" />
+                   aria-label="Search users to add"
+                   class="w-full h-9 rounded-md ring-rule px-2 text-[12px] bg-surface" />
             <div x-show="memberSearch.length > 0"
                  class="mt-1 border rule rounded-md paper overflow-hidden max-h-40 overflow-y-auto">
               <template x-for="u in filteredUsers" :key="u.id">
@@ -479,7 +524,7 @@
                     <span class="ml-1 text-faint text-[11px]" x-text="u.role"></span>
                   </div>
                   <button @click="addMember(u.id)"
-                          class="btn btn-primary text-[11px] h-5 px-2 shrink-0">Add</button>
+                          class="btn btn-primary text-[11px] px-2 shrink-0">Add</button>
                 </div>
               </template>
               <p x-show="filteredUsers.length === 0"
@@ -489,22 +534,14 @@
         </div>
       </div>
 
-      <!-- Review -->
-      <div class="px-4 py-3 border-t rule">
-        <a :href="reviewHref"
-           class="smallcaps text-muted hover:text-ink inline-flex items-center gap-2">
-          <span class="mono text-faint">↳</span>Review / timeline
-        </a>
-      </div>
-
-      <!-- Export -->
-      <div class="px-4 pb-5 border-t rule pt-4">
-        <button @click="showExport = !showExport"
-                class="smallcaps text-muted hover:text-ink flex items-center justify-between w-full">
-          <span>Export</span>
-          <span x-text="showExport ? '−' : '+'"></span>
-        </button>
-        <div x-show="showExport" class="flex flex-col gap-1.5 text-[13px] mt-2">
+      <!-- Session. Was a bare link plus a collapsed "Export" disclosure; the two
+           belong together as the things you do *to* the exercise as a whole. -->
+      <div class="fac-console__ops-section">
+        <div class="fac-console__ops-label">Session</div>
+        <div class="flex flex-col gap-2 text-[13px]">
+          <a :href="reviewHref" class="text-ink-soft hover:text-ink inline-flex items-center gap-2">
+            <span class="mono text-faint">↳</span>Review / timeline
+          </a>
           <a :href="exportHref" target="_blank"
              class="text-ink-soft hover:text-ink inline-flex items-center gap-2">
             <span class="mono text-faint">↓</span>Transcript (JSON)
