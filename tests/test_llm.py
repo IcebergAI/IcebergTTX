@@ -14,6 +14,22 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.exercise import Exercise
 from app.models.user import User
 
+
+def test_provider_json_boundary_rejects_non_objects_and_invalid_fields():
+    from app.services.llm_service import AssessmentOutput, SuggestedInjectOutput, _parse_json
+
+    fallback = {"assessment_text": "fallback"}
+    assert _parse_json("[]", fallback) == fallback
+    assert _parse_json("null", fallback) == fallback
+    assert _parse_json("not json", fallback) == fallback
+    with pytest.raises(ValueError):
+        AssessmentOutput.model_validate({"assessment_text": "x", "decision_quality": "invalid"})
+    with pytest.raises(ValueError):
+        SuggestedInjectOutput.model_validate(
+            {"title": "x", "content": "y", "unexpected": "field"}
+        )
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _first_released_inject_id(client: AsyncClient, token: str, exercise_id: int) -> int:
@@ -77,7 +93,7 @@ async def test_assess_response_stores_assessment(
     from app.models.inject import Inject, InjectState
     from app.models.response import Response
     from app.models.scenario import Scenario
-    from app.services.llm_service import assess_response
+    from app.services.llm_service import _assess_response_result
     from app.services.scenario_service import export_definition
 
     inject = Inject(
@@ -105,12 +121,19 @@ async def test_assess_response_stores_assessment(
     scenario = (await session.get(Scenario, active_exercise.scenario_id))
     definition = export_definition(scenario)
 
-    with patch(
-        "app.services.llm_service.active_provider",
-        return_value=_fake_provider(_assessment_json()),
-    ):
-        assessment = await assess_response(session, response, inject, definition)
+    provider = _fake_provider(_assessment_json())
+    with patch("app.services.llm_service.active_provider", return_value=provider):
+        assessment, created = await _assess_response_result(
+            session, response, inject, definition
+        )
+        replayed, replay_created = await _assess_response_result(
+            session, response, inject, definition
+        )
 
+    assert created is True
+    assert replay_created is False
+    assert replayed.id == assessment.id
+    provider.complete.assert_awaited_once()
     assert assessment.id is not None
     assert assessment.response_id == response.id
     assert assessment.decision_quality == "good"
@@ -128,7 +151,7 @@ async def test_suggest_inject_stores_suggestion(
     from app.models.inject import Inject, InjectState
     from app.models.response import Response
     from app.models.scenario import Scenario
-    from app.services.llm_service import suggest_inject
+    from app.services.llm_service import _suggest_inject_result
     from app.services.scenario_service import export_definition
 
     inject = Inject(
@@ -156,12 +179,19 @@ async def test_suggest_inject_stores_suggestion(
     scenario = (await session.get(Scenario, active_exercise.scenario_id))
     definition = export_definition(scenario)
 
-    with patch(
-        "app.services.llm_service.active_provider",
-        return_value=_fake_provider(_suggestion_json()),
-    ):
-        suggested = await suggest_inject(session, response, inject, active_exercise, definition)
+    provider = _fake_provider(_suggestion_json())
+    with patch("app.services.llm_service.active_provider", return_value=provider):
+        suggested, created = await _suggest_inject_result(
+            session, response, inject, active_exercise, definition
+        )
+        replayed, replay_created = await _suggest_inject_result(
+            session, response, inject, active_exercise, definition
+        )
 
+    assert created is True
+    assert replay_created is False
+    assert replayed.id == suggested.id
+    provider.complete.assert_awaited_once()
     assert suggested.id is not None
     assert suggested.exercise_id == active_exercise.id
     assert suggested.title == "Ransomware Note Found"
@@ -324,8 +354,25 @@ async def test_list_suggested_injects(
 ):
     inject_id = (await _first_released_inject_id(client, facilitator_token, active_exercise.id))
     resp = (await _submit(client, participant_token, active_exercise.id, inject_id)).json()
+    from app.models.response import Response
+
+    second_response = Response(
+        inject_id=inject_id,
+        exercise_id=active_exercise.id,
+        user_id=active_exercise.created_by,
+        content="Facilitator replay fixture",
+    )
+    session.add(second_response)
+    await session.commit()
+    await session.refresh(second_response)
+    assert second_response.id is not None
     (await _make_suggested(session, active_exercise.id, resp["id"], "First suggestion"))
-    (await _make_suggested(session, active_exercise.id, resp["id"], "Second suggestion"))
+    (await _make_suggested(
+        session,
+        active_exercise.id,
+        second_response.id,
+        "Second suggestion",
+    ))
 
     r = await client.get(
         f"/api/exercises/{active_exercise.id}/suggested-injects",

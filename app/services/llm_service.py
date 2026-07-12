@@ -1,7 +1,10 @@
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Literal
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from app.config import settings
@@ -10,6 +13,28 @@ from app.schemas.api import AssessmentPublic, ExecutiveSummaryPublic, SuggestedI
 from app.services.llm.service import active_provider
 
 logger = logging.getLogger(__name__)
+
+_MAX_LLM_TEXT = 12_000
+_MAX_LLM_TITLE = 300
+_MAX_LLM_TEAMS = 100
+
+
+class AssessmentOutput(BaseModel):
+    """Strict, untrusted provider response for a participant assessment."""
+
+    model_config = ConfigDict(extra="forbid")
+    assessment_text: str = Field(min_length=1, max_length=_MAX_LLM_TEXT)
+    decision_quality: Literal["good", "adequate", "poor"] | None = None
+    recommended_branch_option_id: str | None = Field(default=None, max_length=200)
+
+
+class SuggestedInjectOutput(BaseModel):
+    """Strict, untrusted provider response for a suggested inject."""
+
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=_MAX_LLM_TITLE)
+    content: str = Field(min_length=1, max_length=_MAX_LLM_TEXT)
+    target_teams: list[str] | None = Field(default=None, max_length=_MAX_LLM_TEAMS)
 
 _ASSESSMENT_SYSTEM = (
     "You are an expert tabletop exercise facilitator. "
@@ -68,19 +93,36 @@ def _build_context(inject, definition, response) -> tuple[str, str]:
 
 
 def _parse_json(text: str, fallback: dict) -> dict:
-    """Parse an LLM JSON reply; return ``fallback`` on invalid JSON."""
+    """Parse an LLM JSON object; return ``fallback`` for malformed/non-object output."""
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else fallback
     except json.JSONDecodeError:
         return fallback
 
 
-async def assess_response(session, response, inject, definition):
+async def _assess_response_result(session, response, inject, definition):
+    """Return the assessment plus whether this invocation created it."""
     from app.models.assessment import ResponseAssessment
+
+    response_id = response.id
+    assert response_id is not None
+    if response.assessment_id is not None:
+        existing = await session.get(ResponseAssessment, response.assessment_id)
+        if existing is not None:
+            return existing, False
+
+    existing = (
+        await session.exec(
+            select(ResponseAssessment).where(ResponseAssessment.response_id == response_id)
+        )
+    ).one_or_none()
+    if existing is not None:
+        return existing, False
 
     provider = active_provider()
     if provider is None:
-        return None
+        return None, False
 
     cached, selected_line = _build_context(inject, definition, response)
     user_prompt = (
@@ -98,30 +140,76 @@ async def assess_response(session, response, inject, definition):
         "recommended_branch_option_id": None,
     })
 
+    try:
+        output = AssessmentOutput.model_validate(data)
+    except ValidationError:
+        output = AssessmentOutput(
+            assessment_text=(text.strip() or "Provider returned invalid assessment")[:_MAX_LLM_TEXT]
+        )
+    option_ids = {option.id for option in node.options} if (node := next(
+        (item for item in definition.injects if item.id == inject.scenario_node_id), None
+    )) else set()
+    if output.recommended_branch_option_id not in option_ids:
+        output = output.model_copy(update={"recommended_branch_option_id": None})
+
     assessment = ResponseAssessment(
-        response_id=response.id,
+        response_id=response_id,
         llm_model=provider.llm_model_label,
-        assessment_text=data.get("assessment_text", text),
-        decision_quality=data.get("decision_quality"),
-        recommended_branch_option_id=data.get("recommended_branch_option_id"),
+        assessment_text=output.assessment_text,
+        decision_quality=output.decision_quality,
+        recommended_branch_option_id=output.recommended_branch_option_id,
     )
     session.add(assessment)
-    await session.commit()
+    try:
+        await session.flush()
+        assert assessment.id is not None
+        response.assessment_id = assessment.id
+        session.add(response)
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        existing = (
+            await session.exec(
+                select(ResponseAssessment).where(
+                    ResponseAssessment.response_id == response_id
+                )
+            )
+        ).one_or_none()
+        if existing is not None:
+            return existing, False
+        raise
+    except Exception:
+        await session.rollback()
+        raise
     await session.refresh(assessment)
 
-    response.assessment_id = assessment.id
-    session.add(response)
-    await session.commit()
+    return assessment, True
 
+
+async def assess_response(session, response, inject, definition):
+    assessment, _ = await _assess_response_result(session, response, inject, definition)
     return assessment
 
 
-async def suggest_inject(session, response, inject, exercise, definition):
+async def _suggest_inject_result(session, response, inject, exercise, definition):
+    """Return the suggestion plus whether this invocation created it."""
     from app.models.suggested_inject import SuggestedInject
+
+    response_id = response.id
+    assert response_id is not None
+    existing = (
+        await session.exec(
+            select(SuggestedInject).where(
+                SuggestedInject.triggered_by_response_id == response_id
+            )
+        )
+    ).first()
+    if existing is not None:
+        return existing, False
 
     provider = active_provider()
     if provider is None:
-        return None
+        return None, False
 
     cached, selected_line = _build_context(inject, definition, response)
     user_prompt = (
@@ -134,20 +222,59 @@ async def suggest_inject(session, response, inject, exercise, definition):
 
     text = await _call(provider, _SUGGESTION_SYSTEM, cached, user_prompt)
     data = _parse_json(text, {"title": "Follow-up inject", "content": text, "target_teams": None})
-
-    target_teams = data.get("target_teams")
+    try:
+        output = SuggestedInjectOutput.model_validate(data)
+    except ValidationError:
+        output = SuggestedInjectOutput(
+            title="Follow-up inject",
+            content=(text.strip() or "Provider returned invalid suggestion")[:_MAX_LLM_TEXT],
+        )
+    allowed_teams = {team.id for team in definition.participant_teams}
+    target_teams = output.target_teams
+    if target_teams is not None:
+        target_teams = [team.strip() for team in target_teams]
+        if (
+            any(not team for team in target_teams)
+            or len(target_teams) != len(set(target_teams))
+            or not set(target_teams).issubset(allowed_teams)
+        ):
+            logger.warning("LLM suggestion had invalid target teams; using all-team audience")
+            target_teams = None
     suggested = SuggestedInject(
         exercise_id=exercise.id,
-        triggered_by_response_id=response.id,
-        title=data.get("title", "Follow-up inject"),
-        content=data.get("content", text),
-        target_teams=target_teams or None,
+        triggered_by_response_id=response_id,
+        title=output.title,
+        content=output.content,
+        target_teams=target_teams,
         llm_model=provider.llm_model_label,
     )
     session.add(suggested)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        existing = (
+            await session.exec(
+                select(SuggestedInject).where(
+                    SuggestedInject.triggered_by_response_id == response_id
+                )
+            )
+        ).one_or_none()
+        if existing is not None:
+            return existing, False
+        raise
+    except Exception:
+        await session.rollback()
+        raise
     await session.refresh(suggested)
 
+    return suggested, True
+
+
+async def suggest_inject(session, response, inject, exercise, definition):
+    suggested, _ = await _suggest_inject_result(
+        session, response, inject, exercise, definition
+    )
     return suggested
 
 
@@ -185,34 +312,39 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
 
         definition = export_definition(scenario)
 
-        assessment = await assess_response(session, response, inject, definition)
-
-        await manager.send_to_facilitators(
-            exercise_id,
-            {
-                "type": "assessment_ready",
-                "exercise_id": exercise_id,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "payload": {
-                    "response_id": response_id,
-                    "assessment": _assessment_payload(assessment),
-                },
-            },
+        assessment, assessment_created = await _assess_response_result(
+            session, response, inject, definition
         )
 
-        node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
-        if node and node.free_text_response:
-            suggested = await suggest_inject(session, response, inject, exercise, definition)
-
+        if assessment is not None and assessment_created:
             await manager.send_to_facilitators(
                 exercise_id,
                 {
-                    "type": "inject_suggested",
+                    "type": "assessment_ready",
                     "exercise_id": exercise_id,
                     "timestamp": datetime.now(UTC).isoformat(),
-                    "payload": _suggested_payload(suggested),
+                    "payload": {
+                        "response_id": response_id,
+                        "assessment": _assessment_payload(assessment),
+                    },
                 },
             )
+
+        node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
+        if node and node.free_text_response:
+            suggested, suggested_created = await _suggest_inject_result(
+                session, response, inject, exercise, definition
+            )
+            if suggested is not None and suggested_created:
+                await manager.send_to_facilitators(
+                    exercise_id,
+                    {
+                        "type": "inject_suggested",
+                        "exercise_id": exercise_id,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "payload": _suggested_payload(suggested),
+                    },
+                )
 
 
 def _build_summary_context(report: dict) -> tuple[str, str]:

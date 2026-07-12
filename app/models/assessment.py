@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime
+from sqlalchemy import DateTime, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 
 class ResponseAssessment(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("response_id", name="uq_assessment_response"),)
     id: int | None = Field(default=None, primary_key=True)
     response_id: int = Field(foreign_key="response.id", ondelete="CASCADE")
     llm_model: str
