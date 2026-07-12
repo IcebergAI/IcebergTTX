@@ -69,7 +69,7 @@ async def test_csv_export_neutralizes_participant_response(
     formula = "\u200b  \uff1d1+1"
     submitted = await client.post(
         f"/api/exercises/{active_exercise.id}/responses",
-        json={"inject_id": pending["id"], "content": formula},
+        json={"inject_id": pending["id"], "content": formula, "selected_option": "opt_a"},
         headers=participant_headers,
     )
     assert submitted.status_code == 201

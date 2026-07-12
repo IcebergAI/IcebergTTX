@@ -149,8 +149,9 @@ async def test_entra_verified_email_does_not_link_local_account(session):
     )
     session.add(local)
     await session.commit()
-    cfg = _cfg()
-    cfg.key = "entra"
+    from dataclasses import replace
+
+    cfg = replace(_cfg(), key="entra")
 
     with pytest.raises(oidc_service.OIDCProvisionError) as exc:
         await oidc_service.provision_oidc_user(

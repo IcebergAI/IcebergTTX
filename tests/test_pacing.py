@@ -128,7 +128,8 @@ async def test_state_change_broadcast_over_ws(
     client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
     async with aconnect_ws(
-        f"/ws/exercises/{active_exercise.id}?token={facilitator_token}", client
+        f"/ws/exercises/{active_exercise.id}", client,
+        headers={"origin": "http://testserver", "cookie": f"access_token={facilitator_token}"},
     ) as ws:
         await client.post(
             f"/api/exercises/{active_exercise.id}/pause", headers=AUTH(facilitator_token)
@@ -287,7 +288,8 @@ async def test_scheduled_release_fires_and_broadcasts(
     )
 
     async with aconnect_ws(
-        f"/ws/exercises/{ex.id}?token={facilitator_token}", client
+        f"/ws/exercises/{ex.id}", client,
+        headers={"origin": "http://testserver", "cookie": f"access_token={facilitator_token}"},
     ) as ws:
         await schedule_service._release_when_due(ex.id, inject.id, 0)
         msg = await ws.receive_json()

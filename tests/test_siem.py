@@ -29,6 +29,12 @@ def _event(severity: str = "info", action: str = "auth.login") -> dict:
 
 async def _drain() -> None:
     pending = [t for t in list(background._tasks) if not t.done()]
+    pending.extend(
+        task
+        for tasks in background._limited_tasks.values()
+        for task in list(tasks)
+        if not task.done()
+    )
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
 

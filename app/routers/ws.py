@@ -1,10 +1,12 @@
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.database import engine, get_session
+import app.database as app_database
+from app.database import get_session
 from app.dependencies import resolve_user_from_token
 from app.middleware import origin_allowed
 from app.models.user import UserRole
@@ -20,11 +22,22 @@ router = APIRouter()
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+def get_heartbeat_session_factory() -> Callable[[], AsyncSession]:
+    """Return short-lived sessions without pinning one for the socket lifetime."""
+    return lambda: AsyncSession(app_database.engine)
+
+
+HeartbeatSessionFactoryDep = Annotated[
+    Callable[[], AsyncSession], Depends(get_heartbeat_session_factory)
+]
+
+
 @router.websocket("/ws/exercises/{exercise_id}")
 async def exercise_ws(
     ws: WebSocket,
     exercise_id: int,
     session: SessionDep,
+    heartbeat_session_factory: HeartbeatSessionFactoryDep,
     view_role: Annotated[str | None, Query()] = None,
     view_team: Annotated[str | None, Query()] = None,
 ):
@@ -80,7 +93,7 @@ async def exercise_ws(
                 # Revalidate against a short-lived DB session. A socket can remain
                 # connected for hours, while membership, role, or token validity can
                 # change at any time.
-                async with AsyncSession(engine) as heartbeat_session:
+                async with heartbeat_session_factory() as heartbeat_session:
                     current = await resolve_user_from_token(
                         auth_token,
                         heartbeat_session,
