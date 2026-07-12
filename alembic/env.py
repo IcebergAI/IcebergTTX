@@ -37,7 +37,11 @@ config = context.config
 config.set_main_option("sqlalchemy.url", make_async_url(settings.database_url))
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # run_migrations() runs Alembic in-process during the app lifespan, so the
+    # default disable_existing_loggers=True would silently disable uvicorn's
+    # loggers — swallowing the "Application startup failed" traceback and making
+    # a startup crash look like a hang.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = SQLModel.metadata
 
