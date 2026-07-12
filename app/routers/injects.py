@@ -21,6 +21,7 @@ from app.services import audit_service
 from app.services.access_control import (
     require_exercise_access,
     require_inject_visible,
+    require_operational_mutability,
 )
 from app.services.exercise_service import validate_group_id, validate_team_ids
 from app.services.inject_service import (
@@ -166,13 +167,25 @@ async def _save_attachment(
     )
 
 
-def _delete_attachment_file(inject: Inject) -> None:
-    if not inject.attachment_path:
+def _delete_attachment_path(attachment_path: str | None) -> None:
+    if not attachment_path:
         return
+    path = Path(attachment_path)
     try:
-        Path(inject.attachment_path).unlink(missing_ok=True)
-    except OSError:
+        root = ATTACHMENT_ROOT.resolve()
+        resolved = path.resolve()
+        if root not in resolved.parents:
+            raise ValueError("attachment path escapes storage root")
+        resolved.unlink(missing_ok=True)
+        # Keep the hierarchy tidy after successful post-commit deletion; failure is
+        # harmless and reconciliation can retry later.
+        resolved.parent.rmdir()
+    except (OSError, ValueError):
         pass
+
+
+def _delete_attachment_file(inject: Inject) -> None:
+    _delete_attachment_path(inject.attachment_path)
 
 
 @router.get("", response_model=list[InjectPublic])
@@ -209,6 +222,7 @@ async def create(
             detail=str(exc),
         ) from exc
     exercise = await require_exercise_access(session, exercise_id, current_user)
+    require_operational_mutability(exercise)
     target_teams = await validate_team_ids(
         session, exercise, body.target_teams, field="target_teams"
     )
@@ -216,17 +230,22 @@ async def create(
     if group_id is None and target_teams and len(target_teams) == 1:
         group_id = target_teams[0]
     attachment_meta = await _save_attachment(attachment, exercise_id)
-    inject = await create_inject(
-        session,
-        exercise_id=exercise_id,
-        title=body.title,
-        content=body.content,
-        scenario_node_id=body.scenario_node_id,
-        target_teams=target_teams,
-        group_id=group_id,
-        sequence_order=body.sequence_order,
-        attachment=attachment_meta,
-    )
+    try:
+        inject = await create_inject(
+            session,
+            exercise_id=exercise_id,
+            title=body.title,
+            content=body.content,
+            scenario_node_id=body.scenario_node_id,
+            target_teams=target_teams,
+            group_id=group_id,
+            sequence_order=body.sequence_order,
+            attachment=attachment_meta,
+        )
+    except Exception:
+        if attachment_meta:
+            _delete_attachment_path(attachment_meta.path)
+        raise
     return await inject_payload(session, inject)
 
 
@@ -244,10 +263,12 @@ async def get_inject(
 async def delete_inject(
     exercise_id: int, inject_id: int, current_user: FacilitatorDep, session: SessionDep
 ):
+    exercise = await require_exercise_access(session, exercise_id, current_user)
+    require_operational_mutability(exercise)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
-    _delete_attachment_file(inject)
     await session.delete(inject)
     await session.commit()
+    _delete_attachment_file(inject)
     audit_service.emit(
         "inject.delete",
         actor=current_user,
@@ -292,6 +313,7 @@ async def release(
 ):
     assert current_user.id is not None
     exercise = await require_exercise_access(session, exercise_id, current_user)
+    require_operational_mutability(exercise)
     if exercise.state != ExerciseState.active:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -332,11 +354,7 @@ async def update_schedule(
     if body.release_offset_minutes is not None and body.release_offset_minutes < 0:
         raise HTTPException(status_code=422, detail="release_offset_minutes must be >= 0")
     exercise = await require_exercise_access(session, exercise_id, current_user)
-    if exercise.state == ExerciseState.completed:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot schedule injects on a completed exercise",
-        )
+    require_operational_mutability(exercise)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
     if inject.state != InjectState.pending:
         raise HTTPException(

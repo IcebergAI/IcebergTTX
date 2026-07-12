@@ -36,6 +36,7 @@ from app.services.access_control import (
     is_admin,
     require_exercise_access,
     require_exercise_owner,
+    require_operational_mutability,
 )
 from app.services.background import spawn
 from app.services.exercise_service import (
@@ -202,7 +203,12 @@ async def update_exercise(
     session: SessionDep,
 ):
     ex = await require_exercise_owner(session, exercise_id, current_user)
-    ex.sqlmodel_update(body.model_dump(exclude_unset=True))
+    # Debrief notes are the deliberate post-exercise workflow; other operational
+    # settings remain frozen once an exercise is completed.
+    updates = body.model_dump(exclude_unset=True)
+    if ex.state == ExerciseState.completed and set(updates) - {"debrief_notes"}:
+        require_operational_mutability(ex)
+    ex.sqlmodel_update(updates)
     session.add(ex)
     await session.commit()
     await session.refresh(ex)
@@ -212,13 +218,30 @@ async def update_exercise(
 @router.delete("/{exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_exercise(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
     ex = await require_exercise_owner(session, exercise_id, current_user)
+    require_operational_mutability(ex)
     if ex.state != ExerciseState.draft:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only draft exercises can be deleted",
         )
+    attachment_paths = list(
+        (
+            await session.exec(
+                select(Inject.attachment_path).where(
+                    Inject.exercise_id == exercise_id,
+                    col(Inject.attachment_path).is_not(None),
+                )
+            )
+        ).all()
+    )
     await session.delete(ex)
     await session.commit()
+    # The database cascade is authoritative. Files are removed only after it
+    # commits, so a failed transaction cannot leave live rows with broken links.
+    from app.routers.injects import _delete_attachment_path
+
+    for attachment_path in attachment_paths:
+        _delete_attachment_path(attachment_path)
     audit_service.emit(
         "exercise.delete",
         actor=current_user,
@@ -236,6 +259,7 @@ async def _transition(
 ) -> dict:
     assert current_user.id is not None
     ex = await require_exercise_owner(session, exercise_id, current_user)
+    require_operational_mutability(ex)
     result = await transition_state_with_history(session, ex, target, actor_id=current_user.id)
     audit_service.emit(
         result.action,
@@ -324,6 +348,7 @@ async def add_member(
     exercise_id: int, body: EnrolMemberRequest, current_user: FacilitatorDep, session: SessionDep
 ):
     ex = await require_exercise_owner(session, exercise_id, current_user)
+    require_operational_mutability(ex)
     member = await enrol_member(session, exercise=ex, user_id=body.user_id, group_id=body.group_id)
     audit_service.emit(
         "member.enrol",
@@ -344,6 +369,7 @@ async def patch_member(
     session: SessionDep,
 ):
     ex = await require_exercise_owner(session, exercise_id, current_user)
+    require_operational_mutability(ex)
     member = await update_member_group(
         session, exercise=ex, user_id=user_id, group_id=body.group_id
     )
@@ -362,6 +388,7 @@ async def delete_member(
     exercise_id: int, user_id: int, current_user: FacilitatorDep, session: SessionDep
 ):
     ex = await require_exercise_owner(session, exercise_id, current_user)
+    require_operational_mutability(ex)
     await remove_member(session, exercise=ex, user_id=user_id)
     audit_service.emit(
         "member.remove",

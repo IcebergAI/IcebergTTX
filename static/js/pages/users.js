@@ -3,6 +3,7 @@
 
 document.addEventListener('alpine:init', () => {
   Alpine.data('adminUsers', () => ({
+    ...DT.dialogHelpers,
     users: [],
     loading: true,
     loadError: '',
@@ -35,10 +36,12 @@ document.addEventListener('alpine:init', () => {
       this.resetPassword = '';
       this.resetMustChange = true;
       this.resetError = '';
+      this.focusDialog('resetPassword');
     },
 
     closeReset() {
       this.resetTarget = null;
+      this.restoreDialogFocus();
     },
 
     get resetTargetLabel() {

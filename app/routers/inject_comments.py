@@ -16,6 +16,7 @@ from app.services.access_control import (
     exercise_group_for_user,
     require_exercise_access,
     require_inject_visible,
+    require_operational_mutability,
 )
 from app.services.inject_comment_service import (
     broadcast_inject_comment_created,
@@ -97,6 +98,7 @@ async def create_comment(
 ):
     assert current_user.id is not None
     exercise = await require_exercise_access(session, exercise_id, current_user)
+    require_operational_mutability(exercise)
     if current_user.role != UserRole.participant:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

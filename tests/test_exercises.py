@@ -428,6 +428,86 @@ async def test_complete_active_exercise(
     assert data["ended_at"] is not None
 
 
+async def test_completed_exercise_blocks_operations_but_keeps_after_action_workflows(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+):
+    headers = _bearer(facilitator_token)
+    completed = await client.post(f"/api/exercises/{active_exercise.id}/complete", headers=headers)
+    assert completed.status_code == 200
+
+    members = await client.get(
+        f"/api/exercises/{active_exercise.id}/members", headers=headers
+    )
+    assert members.status_code == 200
+    member_id = members.json()[0]["user_id"]
+    injects = await client.get(
+        f"/api/exercises/{active_exercise.id}/injects", headers=headers
+    )
+    assert injects.status_code == 200
+    inject_id = injects.json()[0]["id"]
+
+    # Operational changes across the exercise timeline are refused.
+    assert (
+        await client.post(
+            f"/api/exercises/{active_exercise.id}/injects",
+            json={"title": "Late", "content": "Must not alter history"},
+            headers=headers,
+        )
+    ).status_code == 409
+    assert (
+        await client.patch(
+            f"/api/exercises/{active_exercise.id}/members/{member_id}",
+            json={"group_id": "legal"},
+            headers=headers,
+        )
+    ).status_code == 409
+    assert (
+        await client.delete(
+            f"/api/exercises/{active_exercise.id}/members/{member_id}", headers=headers
+        )
+    ).status_code == 409
+    assert (
+        await client.post(
+            f"/api/exercises/{active_exercise.id}/injects/{inject_id}/release",
+            headers=headers,
+        )
+    ).status_code == 409
+    assert (
+        await client.patch(
+            f"/api/exercises/{active_exercise.id}/injects/{inject_id}/schedule",
+            json={"release_offset_minutes": 10},
+            headers=headers,
+        )
+    ).status_code == 409
+    assert (
+        await client.post(
+            f"/api/exercises/{active_exercise.id}/communications/inject",
+            json={"external_entity": "NCSC", "subject": "Late", "body": "No mutation"},
+            headers=headers,
+        )
+    ).status_code == 409
+    assert (
+        await client.post(
+            f"/api/exercises/{active_exercise.id}/responses",
+            json={"inject_id": 1, "content": "Late response"},
+            headers=_bearer(participant_token),
+        )
+    ).status_code == 409
+
+    # Debrief and evidence export are intentionally available after completion.
+    debrief = await client.put(
+        f"/api/exercises/{active_exercise.id}",
+        json={"debrief_notes": "Capture the improvement actions."},
+        headers=headers,
+    )
+    assert debrief.status_code == 200
+    export = await client.get(f"/api/exercises/{active_exercise.id}/export", headers=headers)
+    assert export.status_code == 200
+
+
 async def test_complete_paused_exercise(
     client: AsyncClient, facilitator_token: str, session: AsyncSession, active_exercise
 ):
