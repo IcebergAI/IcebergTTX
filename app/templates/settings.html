@@ -2,7 +2,7 @@
 {% block title %}Settings — IcebergTTX{% endblock %}
 
 {% block content %}
-<div x-data="settingsPage()" class="workspace max-w-[920px]">
+<div x-data="settingsPage()" class="workspace settings-page">
 
   <div class="page-head">
     <div>
@@ -11,146 +11,164 @@
     </div>
   </div>
 
-  <div class="space-y-5">
-    <section class="surface p-5 border-l-4 border-amber-400" x-show="mustChangePassword" x-cloak>
-      <h2 class="text-[14px] font-medium">Set a new password</h2>
-      <p class="text-[13px] text-muted mt-1">
-        You're signed in with a temporary password set by an administrator.
-        Choose a new password below to continue using IcebergTTX.
-      </p>
-    </section>
+  <!-- The temp-password gate (#66) sits above the sub-nav: it applies to the
+       whole page, and setSection() refuses to navigate away while it's up. -->
+  <section class="surface p-5 settings-gate mb-5" x-show="mustChangePassword" x-cloak>
+    <h2 class="text-[14px] font-medium">Set a new password</h2>
+    <p class="text-[13px] text-muted mt-1">
+      You're signed in with a temporary password set by an administrator.
+      Choose a new password below to continue using IcebergTTX.
+    </p>
+  </section>
 
-    <section class="surface p-5">
-      <div class="section-title mb-4">
-        <h2 class="smallcaps text-muted">Profile</h2>
-      </div>
-      <div class="settings-profile grid gap-3" style="grid-template-columns: minmax(180px, 1fr) 140px; align-items: end;">
-        <div>
-          <label for="settings-display-name" class="block smallcaps text-muted mb-1">Display name</label>
-          <input id="settings-display-name" type="text" x-model="displayName"
-                 aria-describedby="settings-profile-message"
-                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
-                 placeholder="Display name" />
-        </div>
-        <button @click="saveProfile()" :disabled="savingProfile"
-                class="btn btn-primary h-9 px-4 text-[13px] justify-center disabled:opacity-50">
-          <span x-text="savingProfile ? 'Saving…' : 'Save name'"></span>
-        </button>
-      </div>
-      <p id="settings-profile-message" class="text-[12.5px] text-muted mt-2"
-         role="status" aria-live="polite" aria-atomic="true" x-text="profileMessage"></p>
-    </section>
+  <div class="settings-grid">
 
-    <section class="surface p-5">
-      <div class="section-title mb-4">
-        <h2 class="smallcaps text-muted">Password</h2>
-      </div>
-      <div class="grid gap-3 max-w-md">
-        <div>
-          <label for="settings-new-password" class="block smallcaps text-muted mb-1">New password</label>
-          <input id="settings-new-password" type="password" x-model="newPassword"
-                 autocomplete="new-password"
-                 aria-describedby="settings-password-requirements settings-password-message"
-                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
-                 placeholder="At least 12 characters" />
-        </div>
-        <div>
-          <label for="settings-confirm-password" class="block smallcaps text-muted mb-1">Confirm new password</label>
-          <input id="settings-confirm-password" type="password" x-model="confirmPassword"
-                 autocomplete="new-password" aria-describedby="settings-password-message"
-                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface"
-                 placeholder="Enter the new password again" />
-        </div>
-        <button @click="changePassword()" :disabled="savingPassword"
-                class="btn btn-primary h-9 px-4 text-[13px] justify-center disabled:opacity-50">
-          <span x-text="savingPassword ? 'Saving…' : 'Change password'"></span>
-        </button>
-      </div>
-      <p id="settings-password-message" class="text-[12.5px] text-muted mt-2"
-         role="status" aria-live="polite" aria-atomic="true" x-text="passwordMessage"></p>
-      <p id="settings-password-requirements" class="text-[12.5px] text-muted mt-1">
-        Use at least 12 characters. Changing your password signs out all other sessions.
-      </p>
-    </section>
-
-    <section class="surface p-5">
-      <div class="section-title mb-4">
-        <h2 class="smallcaps text-muted">Appearance</h2>
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <template x-for="option in ['system', 'light', 'dark']" :key="option">
-          <button @click="setTheme(option)"
-                  class="btn h-8 px-3 text-[13px] capitalize"
-                  :class="theme === option ? 'btn-primary' : 'btn-ghost'"
-                  x-text="option"></button>
-        </template>
-      </div>
-      <p class="text-[12.5px] text-muted mt-3">Theme is stored in this browser only.</p>
-    </section>
-
-    <section class="surface p-5" x-show="canSwitch">
-      <div class="section-title mb-4">
-        <h2 class="smallcaps text-muted">Role preview</h2>
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <template x-for="role in ['facilitator', 'participant', 'observer']" :key="role">
-          <button @click="setPreviewRole(role)"
-                  class="btn h-8 px-3 text-[13px] capitalize"
-                  :class="viewRole === role ? 'btn-primary' : 'btn-ghost'"
-                  x-text="role"></button>
-        </template>
-      </div>
-      <div class="mt-4 max-w-xs">
-        <label for="settings-preview-team" class="block smallcaps text-muted mb-1">Preview team</label>
-        <select id="settings-preview-team" x-model="viewTeam" @change="setPreviewTeam()"
-                aria-describedby="settings-role-preview-help"
-                class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface">
-          <template x-for="team in previewTeamOptions" :key="team.id">
-            <option :value="team.id" x-text="teamLabel(team)"></option>
-          </template>
-        </select>
-      </div>
-      <p id="settings-role-preview-help" class="text-[12.5px] text-muted mt-3">
-        Preview mode changes normal navigation and API access. It does not change your account role.
-      </p>
-    </section>
-
-    <section class="surface p-5" x-show="canSwitch">
-      <div class="section-title mb-4">
-        <h2 class="smallcaps text-muted">Sample data</h2>
-      </div>
-      <template x-if="samples.length === 0 && !loadingSamples">
-        <p class="text-[13px] text-muted">No bundled samples were found.</p>
+    <!-- Sub-nav. Replaces a single long scroll of six stacked cards. -->
+    <nav class="settings-nav" aria-label="Settings sections">
+      <template x-for="section in visibleSections" :key="section.id">
+        <button type="button" class="settings-nav-btn"
+                :class="isSection(section.id) && 'is-active'"
+                :aria-current="isSection(section.id) ? 'true' : 'false'"
+                @click="setSection(section.id)"
+                x-text="section.label"></button>
       </template>
-      <div class="divide-y rule">
-        <template x-for="sample in samples" :key="sample.id">
-          <div class="settings-sample-row py-4 first:pt-0 last:pb-0 flex items-start gap-4">
-            <div class="min-w-0 flex-1">
-              <h3 class="text-[14px] font-medium" x-text="sample.title"></h3>
-              <p class="text-[13px] text-muted mt-1" x-text="sample.description"></p>
-              <div class="mono text-[11.5px] text-faint mt-2"
-                   x-text="sample.inject_count + ' injects · ' + sample.team_count + ' teams'"></div>
-            </div>
-            <div class="settings-sample-actions flex shrink-0 gap-2">
-              <button @click="loadSample(sample)"
-                      class="btn btn-ghost h-8 px-3 text-[12.5px]">Load scenario</button>
-              <button @click="createDemo(sample)"
-                      class="btn btn-primary h-8 px-3 text-[12.5px]">Demo exercise</button>
-            </div>
-          </div>
-        </template>
-      </div>
-      <p class="text-[12.5px] text-muted mt-3" role="status" aria-live="polite"
-         aria-atomic="true" x-text="sampleMessage"></p>
-    </section>
-
-    <!-- Version + beta feedback (issue #118). Version is a server-rendered
-         Jinja global; the link opens the GitHub bug form with it prefilled. -->
-    <footer class="mt-8 pt-4 border-t rule flex items-center justify-between gap-4">
-      <span class="mono text-[12px] text-faint">IcebergTTX v{{ app_version }}</span>
+      <div class="settings-nav-version mono">IcebergTTX v{{ app_version }}</div>
+      <!-- Beta feedback (issue #118): version is a server-rendered Jinja global. -->
       <a href="https://github.com/IcebergAI/IcebergTTX/issues/new?template=bug_report.yml&amp;version={{ app_version | urlencode }}"
-         class="text-[12.5px] text-muted hover:text-ink" target="_blank" rel="noopener noreferrer">Report an issue &rarr;</a>
-    </footer>
+         class="settings-nav-link" target="_blank" rel="noopener noreferrer">Report an issue &rarr;</a>
+    </nav>
+
+    <div class="min-w-0 space-y-5">
+
+      <!-- Account -->
+      <template x-if="isSection('account')">
+        <div class="space-y-5">
+          <section class="surface p-5">
+            <h2 class="settings-heading">Profile</h2>
+            <label for="settings-display-name" class="block smallcaps text-muted mb-1.5">Display name</label>
+            <div class="settings-profile grid gap-3" style="grid-template-columns: minmax(180px, 1fr) 140px;">
+              <input id="settings-display-name" type="text" x-model="displayName"
+                     aria-describedby="settings-profile-message"
+                     class="settings-input"
+                     placeholder="Display name" />
+              <button @click="saveProfile()" :disabled="savingProfile"
+                      class="btn btn-primary px-4 text-[13px] justify-center disabled:opacity-50">
+                <span x-text="savingProfile ? 'Saving…' : 'Save name'"></span>
+              </button>
+            </div>
+            <p id="settings-profile-message" class="text-[12.5px] text-muted mt-2"
+               role="status" aria-live="polite" aria-atomic="true" x-text="profileMessage"></p>
+          </section>
+
+          <section class="surface p-5">
+            <h2 class="settings-heading">Password</h2>
+            <div class="settings-password grid gap-3">
+              <div>
+                <label for="settings-new-password" class="block smallcaps text-muted mb-1.5">New password</label>
+                <input id="settings-new-password" type="password" x-model="newPassword"
+                       autocomplete="new-password"
+                       aria-describedby="settings-password-requirements settings-password-message"
+                       class="settings-input"
+                       placeholder="At least 12 characters" />
+              </div>
+              <div>
+                <label for="settings-confirm-password" class="block smallcaps text-muted mb-1.5">Confirm new password</label>
+                <input id="settings-confirm-password" type="password" x-model="confirmPassword"
+                       autocomplete="new-password" aria-describedby="settings-password-message"
+                       class="settings-input"
+                       placeholder="Enter the new password again" />
+              </div>
+            </div>
+            <button @click="changePassword()" :disabled="savingPassword"
+                    class="btn btn-primary px-4 text-[13px] justify-center disabled:opacity-50 mt-3.5">
+              <span x-text="savingPassword ? 'Saving…' : 'Change password'"></span>
+            </button>
+            <p id="settings-password-message" class="text-[12.5px] text-muted mt-2"
+               role="status" aria-live="polite" aria-atomic="true" x-text="passwordMessage"></p>
+            <p id="settings-password-requirements" class="text-[12.5px] text-muted mt-1">
+              Use at least 12 characters. Changing your password signs out all other sessions.
+            </p>
+          </section>
+        </div>
+      </template>
+
+      <!-- Appearance -->
+      <template x-if="isSection('appearance')">
+        <section class="surface p-5">
+          <h2 class="settings-heading">Appearance</h2>
+          <div class="seg" role="group" aria-label="Theme">
+            <template x-for="option in ['system', 'light', 'dark']" :key="option">
+              <button type="button" class="seg-btn capitalize"
+                      :class="theme === option && 'is-active'"
+                      :aria-pressed="theme === option"
+                      @click="setTheme(option)"
+                      x-text="option"></button>
+            </template>
+          </div>
+          <p class="text-[12.5px] text-muted mt-3">Theme is stored in this browser only.</p>
+        </section>
+      </template>
+
+      <!-- Role preview -->
+      <template x-if="isSection('role')">
+        <section class="surface p-5">
+          <h2 class="settings-heading">Role preview</h2>
+          <div class="seg" role="group" aria-label="Preview role">
+            <template x-for="role in ['facilitator', 'participant', 'observer']" :key="role">
+              <button type="button" class="seg-btn capitalize"
+                      :class="viewRole === role && 'is-active'"
+                      :aria-pressed="viewRole === role"
+                      @click="setPreviewRole(role)"
+                      x-text="role"></button>
+            </template>
+          </div>
+          <div class="mt-4 max-w-xs">
+            <label for="settings-preview-team" class="block smallcaps text-muted mb-1.5">Preview team</label>
+            <select id="settings-preview-team" x-model="viewTeam" @change="setPreviewTeam()"
+                    aria-describedby="settings-role-preview-help"
+                    class="settings-input">
+              <template x-for="team in previewTeamOptions" :key="team.id">
+                <option :value="team.id" x-text="teamLabel(team)"></option>
+              </template>
+            </select>
+          </div>
+          <p id="settings-role-preview-help" class="text-[12.5px] text-muted mt-3">
+            Preview mode changes normal navigation and API access. It does not change your account role.
+          </p>
+        </section>
+      </template>
+
+      <!-- Sample data -->
+      <template x-if="isSection('samples')">
+        <section class="surface p-5">
+          <h2 class="settings-heading">Sample data</h2>
+          <template x-if="samples.length === 0 && !loadingSamples">
+            <p class="text-[13px] text-muted">No bundled samples were found.</p>
+          </template>
+          <div class="divide-y rule">
+            <template x-for="sample in samples" :key="sample.id">
+              <div class="settings-sample-row py-4 first:pt-0 last:pb-0 flex items-start gap-4">
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-[14px] font-medium" x-text="sample.title"></h3>
+                  <p class="text-[13px] text-muted mt-1" x-text="sample.description"></p>
+                  <div class="mono text-[11.5px] text-faint mt-2"
+                       x-text="sample.inject_count + ' injects · ' + sample.team_count + ' teams'"></div>
+                </div>
+                <div class="settings-sample-actions flex shrink-0 gap-2">
+                  <button @click="loadSample(sample)"
+                          class="btn btn-ghost px-3 text-[12.5px]">Load scenario</button>
+                  <button @click="createDemo(sample)"
+                          class="btn btn-primary px-3 text-[12.5px]">Demo exercise</button>
+                </div>
+              </div>
+            </template>
+          </div>
+          <p class="text-[12.5px] text-muted mt-3" role="status" aria-live="polite"
+             aria-atomic="true" x-text="sampleMessage"></p>
+        </section>
+      </template>
+
+    </div>
   </div>
 
 </div>
