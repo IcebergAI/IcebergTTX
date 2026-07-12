@@ -381,18 +381,26 @@ document.addEventListener('alpine:init', () => {
     // The user's explicit pick, persisted across pages. Validated on read, never trusted.
     selectedId: null,
     scenarioCount: null,
+    unread: 0,
     currentPath: window.location.pathname,
     mobileNavOpen: false,
 
     async init() {
       document.addEventListener('dt:soft-navigated', (event) => {
         this.currentPath = event.detail.path;
+        this.refreshUnread();
       });
       // sidebarNav lives outside #app-main, so the soft-nav engine never re-runs init().
       // Pages that change an exercise's lifecycle announce it, and only then do we refetch
       // — navigating alone is not a lifecycle change, and the page is already fetching.
-      document.addEventListener('dt:exercises-changed', () => {
-        this.refreshExercises();
+      document.addEventListener('dt:exercises-changed', async () => {
+        await this.refreshExercises();
+        this.refreshUnread();
+      });
+      // The inbox announces every comm it receives or reads, so the rail badge
+      // stays honest without polling.
+      document.addEventListener('dt:comms-changed', () => {
+        this.refreshUnread();
       });
       if (isAuthPage()) return;
       // No localStorage-token gate: shell pages are only served to an authenticated
@@ -402,7 +410,7 @@ document.addEventListener('alpine:init', () => {
       this.selectedId = Number(getCookie('dt_current_exercise')) || null;
       const [mr] = await Promise.all([
         apiFetch('/auth/me'),
-        this.refreshExercises(),
+        this.refreshExercises().then(() => this.refreshUnread()),
       ]);
       this.user = await readJson(mr);
       // Temp-password gate (#66): an admin-reset user must set their own password
@@ -427,9 +435,24 @@ document.addEventListener('alpine:init', () => {
       this.liveExercises = exs.filter(e => e.state === 'active');
     },
 
+    // Unread comms for the exercise the rail is currently pointed at. Scoped
+    // server-side to what this viewer may actually read.
+    async refreshUnread() {
+      const id = this.currentExerciseId;
+      if (!id) {
+        this.unread = 0;
+        return;
+      }
+      const r = await apiFetch('/exercises/' + id + '/communications/unread-count');
+      if (!r || !r.ok) return;
+      const body = await readJson(r, { unread: 0 });
+      this.unread = body.unread || 0;
+    },
+
     selectExercise(id) {
       this.selectedId = id;
       setPreferenceCookie('dt_current_exercise', id);
+      this.refreshUnread();
     },
 
     get initials() {
@@ -507,18 +530,35 @@ document.addEventListener('alpine:init', () => {
         !this.currentPath.includes('/communications');
     },
 
+    get hasUnread() {
+      return this.unread > 0;
+    },
+
+    // Capped so a long-running exercise can't widen the rail.
+    get unreadLabel() {
+      return this.unread > 99 ? '99+' : String(this.unread);
+    },
+
     get crumbLabel() {
       const p = this.currentPath;
       if (p.includes('/communications')) return 'Communications';
       if (p === '/' || p.startsWith('/dashboard')) return 'Command center';
       if (p.startsWith('/scenarios')) return 'Scenarios';
       if (p.startsWith('/exercises')) return 'Exercises';
+      if (p.startsWith('/admin/users')) return 'Users';
       if (p.startsWith('/admin/audit')) return 'Audit log';
       if (p.startsWith('/admin/proxy')) return 'Outbound proxy';
       if (p.startsWith('/help')) return 'Help';
       if (p.startsWith('/settings')) return 'Settings';
       const seg = p.replace(/^\/+/, '').split('/')[0] || 'Home';
       return seg.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    },
+
+    // What the slim topbar carries instead of a static crumb: which exercise the
+    // page you're looking at actually belongs to.
+    get crumbContext() {
+      if (!this.currentExercise) return '';
+      return this.currentExerciseTitle + ' · EX-' + this.padId(this.currentExercise.id, 3);
     },
 
     isActive(path) {

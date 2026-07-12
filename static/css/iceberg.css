@@ -202,10 +202,29 @@ a:hover { color: var(--accent-deep); }
 }
 .rail-link:hover { background: var(--rail-2); color: #fff; }
 .rail-link.is-active { background: var(--rail-2); color: #fff; box-shadow: inset 2px 0 0 var(--accent); }
-.rail-link .rail-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--rail-faint); flex: none; }
-.rail-link.is-active .rail-dot { background: var(--accent); }
+.rail-link-label { flex: 1; min-width: 0; }
+.rail-icon { width: 18px; height: 18px; flex: none; color: var(--rail-faint); }
+.rail-link:hover .rail-icon, .rail-link.is-active .rail-icon { color: var(--accent); }
+
+/* Trailing meta, in three flavours: a plain count (Scenarios), a pulsing live
+   marker (Exercises), and an unread badge (Comms). */
 .rail-link-meta { margin-left: auto; font-family: var(--fs-mono); font-size: 10.5px; color: var(--rail-faint); }
 .rail-link.is-active .rail-link-meta { color: var(--accent); }
+.rail-link-live {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--accent);
+}
+.rail-link-live-dot {
+  width: 7px; height: 7px; border-radius: 999px; flex: none;
+  background: var(--accent); animation: livePulse 1.8s ease-out infinite;
+}
+.rail-link-badge {
+  margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px; background: var(--accent); color: var(--rail);
+  font-size: 9.5px; font-weight: 700;
+}
 .rail-live {
   display: block; margin: 4px 4px 0; padding: 10px;
   background: var(--rail-2); border-radius: 8px;
@@ -215,6 +234,11 @@ a:hover { color: var(--accent-deep); }
    exercise switcher (#96), which brightens its own rows. */
 .rail-live-main { display: block; }
 .rail-live-main:hover { filter: brightness(1.12); }
+.rail-live-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.rail-live-eyebrow {
+  font-family: var(--fs-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--rail-faint);
+}
 .rail-live-title { font-size: 13px; font-weight: 600; color: #fff; }
 .rail-live-sub { font-family: var(--fs-mono); font-size: 10.5px; color: var(--rail-faint); margin-top: 2px; }
 /* Switcher, shown only when more than one exercise is active (#96). Rail-scoped: the
@@ -232,6 +256,27 @@ a:hover { color: var(--accent-deep); }
 .rail-live-opt:hover { background: var(--rail); color: #fff; }
 .rail-live-opt.is-current { color: var(--accent); font-weight: 600; }
 .rail-foot { margin-top: auto; padding: 12px; border-top: 1px solid var(--rail-line); }
+
+/* Settings + Help sit here, not in the nav: they're account chrome, not work. */
+.rail-foot-actions { display: flex; gap: 6px; }
+.rail-foot-btn {
+  flex: 1; min-width: 0; min-height: 40px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border-radius: var(--radius-sm); background: transparent;
+  box-shadow: inset 0 0 0 1px var(--rail-line);
+  color: var(--rail-ink); font-size: 12px; font-weight: 600;
+  transition: background .12s, color .12s, box-shadow .12s;
+}
+.rail-foot-btn:hover { background: var(--rail-2); color: #fff; }
+.rail-foot-btn.is-active { background: var(--rail-2); color: #fff; box-shadow: inset 0 0 0 1px var(--accent); }
+.rail-foot-btn .rail-icon { width: 15px; height: 15px; }
+.rail-foot-btn:hover .rail-icon, .rail-foot-btn.is-active .rail-icon { color: var(--accent); }
+.rail-foot-link {
+  display: flex; align-items: center; min-height: 32px; margin-top: 8px; padding: 0 4px;
+  font-size: 11.5px; color: var(--rail-faint);
+}
+.rail-foot-link:hover { color: var(--rail-ink); }
+
 .rail-id { display: flex; align-items: center; gap: 10px; padding: 4px 4px 2px; }
 .rail-avatar {
   width: 32px; height: 32px; border-radius: 8px; flex: none;
@@ -263,6 +308,11 @@ a:hover { color: var(--accent-deep); }
 .crumb-root { color: var(--faint); font-weight: 600; }
 .crumb-sep { color: var(--faint); }
 .crumb-leaf { color: var(--ink); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar-context {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: 10.5px; color: var(--muted);
+}
+.topbar-context span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .auth-shell { min-height: 100vh; display: flex; flex-direction: column; align-items: center; background: var(--paper); }
 
@@ -288,6 +338,8 @@ a:hover { color: var(--accent-deep); }
   .rail-brand { padding-top: 12px; }
   .rail-nav { padding-bottom: 20px; }
   .rail-link { min-height: 44px; }
+  .rail-foot-btn { min-height: 44px; }
+  .rail-foot-link { min-height: 44px; }
   .topbar { display: none !important; }
   .workspace { padding: 20px 18px 48px; }
   .page-head { flex-direction: column; align-items: flex-start; gap: 12px; }

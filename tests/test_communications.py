@@ -766,3 +766,56 @@ async def test_ws_team_outbound_reaches_recipient_team(
     assert msg["type"] == "communication_received"
     assert msg["payload"]["subject"] == "WS legal help"
     assert msg["payload"]["visible_to_teams"] == ["legal"]
+
+
+async def test_unread_count_respects_team_visibility(
+    client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+):
+    """The badge must not count comms the viewer isn't allowed to read."""
+    await _inject_comm(
+        client, facilitator_token, active_exercise.id,
+        subject="IT Ops Only", visible_to_teams=["it_ops"],
+    )
+    await _inject_comm(
+        client, facilitator_token, active_exercise.id,
+        subject="Legal Only", visible_to_teams=["legal"],
+    )
+
+    r = await client.get(
+        f"/api/exercises/{active_exercise.id}/communications/unread-count",
+        headers={"Authorization": f"Bearer {participant_token}"},  # participant is it_ops
+    )
+    # 200 (not 422) also proves the literal path is matched ahead of GET /{comm_id}.
+    assert r.status_code == 200
+    assert r.json() == {"unread": 1}
+
+    r = await client.get(
+        f"/api/exercises/{active_exercise.id}/communications/unread-count",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert r.json() == {"unread": 2}
+
+
+async def test_unread_count_drops_once_a_comm_is_read(
+    client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
+):
+    resp = await _inject_comm(
+        client, facilitator_token, active_exercise.id,
+        subject="Advisory", visible_to_teams=["it_ops"],
+    )
+    comm_id = resp.json()["id"]
+    headers = {"Authorization": f"Bearer {participant_token}"}
+
+    r = await client.get(
+        f"/api/exercises/{active_exercise.id}/communications/unread-count", headers=headers
+    )
+    assert r.json() == {"unread": 1}
+
+    await client.put(
+        f"/api/exercises/{active_exercise.id}/communications/{comm_id}/read", headers=headers
+    )
+
+    r = await client.get(
+        f"/api/exercises/{active_exercise.id}/communications/unread-count", headers=headers
+    )
+    assert r.json() == {"unread": 0}
