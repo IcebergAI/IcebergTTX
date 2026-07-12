@@ -147,3 +147,5 @@ Write tests for critical functionality in Pytest (async — `asyncio_mode = "aut
 
 ## Maintenance
 Keep README.md, CLAUDE.md, and PLAN.md up to date. Update the Build Status summary above when phases complete. Record cross-cutting decisions (ones that constrain everyday code) here; put subsystem deep-dives in [PLAN.md](PLAN.md) § Subsystem Decisions and add a line to the index above. This file is the always-loaded instruction file — keep it under ~150 lines.
+
+**Screenshots** (`docs/*.png`, `website/docs/assets/*.png`) all show the app shell, so *any* rail/topbar change makes every one of them stale at once. Don't recapture by hand — `uv run python scripts/screenshots.py --base https://localhost --insecure` seeds its own data (a live exercise, a played-out completed one, and an untouched one for the participant view) and regenerates all 13 against a running compose stack.
