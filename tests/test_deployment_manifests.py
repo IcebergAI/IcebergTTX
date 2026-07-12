@@ -55,7 +55,7 @@ def test_postgres_creates_pgdata_below_the_fs_group_owned_volume() -> None:
     env = {item["name"]: item for item in container["env"]}
     mounts = {item["name"]: item for item in container["volumeMounts"]}
 
-    assert env["PGDATA"]["value"] == "/var/lib/postgresql/data"
+    assert env["PGDATA"]["value"] == "/var/lib/postgresql/pgdata"
     assert mounts["postgres-data"]["mountPath"] == "/var/lib/postgresql"
 
 

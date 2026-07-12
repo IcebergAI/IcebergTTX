@@ -51,9 +51,11 @@ spec:
             # root group-writable via fsGroup, then Postgres creates this child
             # directory as uid 999 and can enforce its required 0700 mode. A
             # direct PGDATA mount remains root-owned on common local-path CSI
-            # implementations and the non-root entrypoint cannot chmod it.
+            # implementations and the non-root entrypoint cannot chmod it. Do
+            # not use the image-declared /var/lib/postgresql/data volume: CRI
+            # runtimes may overlay it with anonymous pod-lifetime storage.
             - name: PGDATA
-              value: /var/lib/postgresql/data
+              value: /var/lib/postgresql/pgdata
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
