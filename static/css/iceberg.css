@@ -426,10 +426,11 @@ code, .code { font-family: var(--fs-mono); font-size: 0.86em; background: var(--
   background: var(--surface-2); border-radius: 8px;
   box-shadow: inset 0 0 0 1px var(--line);
 }
-/* 40px, not the handoff's 34px: a class selector would beat the global button
-   floor on specificity, and we're holding that floor app-wide. */
+/* 40px on BOTH axes, not the handoff's 34px: a class selector beats the global
+   button floor on specificity, and the touch-target test checks width as well as
+   height — a short label like "All" renders under 40px wide without this. */
 .seg-btn {
-  min-width: 0; min-height: 40px; padding: 0 12px;
+  min-width: 40px; min-height: 40px; padding: 0 12px;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; border-radius: var(--radius-sm); background: transparent;
   color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600;
