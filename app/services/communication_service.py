@@ -269,7 +269,7 @@ async def _delayed_comm(
                     sent_at=datetime.now(UTC),
                 )
                 .on_conflict_do_nothing(constraint="uq_communication_exercise_trigger_key")
-                .returning(Communication.id)
+                .returning(col(Communication.id))
             )
             comm_id = (await session.exec(statement)).scalar_one_or_none()
             await session.commit()

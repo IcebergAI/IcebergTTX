@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import update
+from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.inject import Inject, InjectState
@@ -84,9 +85,9 @@ async def release_inject(
     now = datetime.now(UTC)
     statement = (
         update(Inject)
-        .where(Inject.id == inject.id, Inject.state == InjectState.pending)
+        .where(col(Inject.id) == inject.id, col(Inject.state) == InjectState.pending)
         .values(state=InjectState.released, released_at=now, released_by=released_by)
-        .returning(Inject.id)
+        .returning(col(Inject.id))
         .execution_options(synchronize_session=False)
     )
     released_id = (await session.exec(statement)).scalar_one_or_none()
