@@ -16,9 +16,10 @@ disruptions through facilitated, scenario-driven tabletop exercises. A
 **participants** in real time; participants record decisions and free-text
 responses that drive the scenario down different branches, while **observers**
 follow along read-only. The platform simulates incident communications (regulators,
-press, executives) and can use the Claude API to assess participant decisions and
-suggest follow-up injects. It is API-first (FastAPI) with a server-rendered UI, and
-ships with Docker Compose and Kubernetes deployment manifests.
+press, executives) and can call out to an LLM provider of your choice to assess
+participant decisions and suggest follow-up injects. It is API-first (FastAPI) with
+a server-rendered UI, and ships with Docker Compose and Kubernetes deployment
+manifests.
 
 ## Features
 
@@ -27,7 +28,7 @@ ships with Docker Compose and Kubernetes deployment manifests.
 - **Participant responses** — branch decisions require an explicit choice; injects can require that choice alone or choice plus free-text reasoning
 - **Team comment threads** — participants discuss released injects in group-scoped comment threads
 - **Simulated communications** — two-pane inbox/outbox for regulatory, press, and executive comms
-- **LLM assessment** — Claude evaluates participant decisions and suggests follow-up injects
+- **LLM assessment** — a pluggable AI backend (Anthropic, Bedrock, OpenAI, Ollama, or Gemini) evaluates participant decisions and suggests follow-up injects
 - **Role-based access** — facilitator, participant, and observer roles (self-registration always creates a participant; elevation is out-of-band)
 - **Role preview** — facilitators can view the app as a participant or observer without changing accounts
 - **Security hardening** — enforced SECRET_KEY at startup, Secure cookie + CSRF origin checks, login rate limiting, and structured audit logging with off-host SIEM forwarding (syslog / HTTP / file)
