@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from httpx import AsyncClient
@@ -57,6 +58,120 @@ async def _inject_comm(
         json=payload,
         headers={"Authorization": f"Bearer {token}"},
     )
+
+
+async def test_node_triggered_comm_is_idempotent_across_group_injects(monkeypatch):
+    """Two physical group copies create/broadcast one logical node trigger (#140)."""
+    from app.models.inject import Inject
+    from app.services import communication_service
+
+    suffix = uuid4().hex
+    user_id = scenario_id = exercise_id = first_inject_id = second_inject_id = None
+    broadcast = AsyncMock()
+    monkeypatch.setattr(communication_service, "broadcast_communication", broadcast)
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as seed:
+            owner = User(
+                email=f"trigger-owner-{suffix}@example.test",
+                display_name="Trigger Owner",
+                hashed_password="unused",
+                role=UserRole.facilitator,
+            )
+            seed.add(owner)
+            await seed.commit()
+            user_id = owner.id
+            assert user_id is not None
+            scenario = Scenario(
+                title="Logical trigger",
+                definition=ScenarioDefinition(
+                    title="Logical trigger",
+                    participant_teams=[
+                        {"id": "it_ops", "label": "IT Ops"},
+                        {"id": "legal", "label": "Legal"},
+                    ],
+                    injects=[InjectNode(id="node", title="Node", content="x")],
+                    start_inject_id="node",
+                ).model_dump_json(),
+                created_by=user_id,
+            )
+            seed.add(scenario)
+            await seed.commit()
+            scenario_id = scenario.id
+            assert scenario_id is not None
+            exercise = Exercise(
+                scenario_id=scenario_id,
+                title="Logical trigger",
+                created_by=user_id,
+            )
+            seed.add(exercise)
+            await seed.commit()
+            exercise_id = exercise.id
+            assert exercise_id is not None
+            injects = [
+                Inject(
+                    exercise_id=exercise_id,
+                    scenario_node_id="node",
+                    title="Node",
+                    content="x",
+                    group_id=group_id,
+                    target_teams=[group_id],
+                )
+                for group_id in ("it_ops", "legal")
+            ]
+            seed.add_all(injects)
+            await seed.commit()
+            first_inject_id, second_inject_id = injects[0].id, injects[1].id
+            assert first_inject_id is not None and second_inject_id is not None
+
+        await asyncio.gather(
+            communication_service._delayed_comm(
+                exercise_id=exercise_id,
+                inject_id=first_inject_id,
+                direction="inbound",
+                external_entity="NCSC",
+                subject="One logical trigger",
+                body="Body",
+                delay=0,
+                trigger_key="node:0",
+            ),
+            communication_service._delayed_comm(
+                exercise_id=exercise_id,
+                inject_id=second_inject_id,
+                direction="inbound",
+                external_entity="NCSC",
+                subject="One logical trigger",
+                body="Body",
+                delay=0,
+                trigger_key="node:0",
+            ),
+        )
+        async with AsyncSession(engine, expire_on_commit=False) as verify:
+            comms = (
+                await verify.exec(
+                    select(Communication).where(Communication.exercise_id == exercise_id)
+                )
+            ).all()
+            assert len(comms) == 1
+            assert comms[0].trigger_key == "node:0"
+            assert comms[0].visible_to_teams is None
+        broadcast.assert_awaited_once()
+    finally:
+        async with AsyncSession(engine, expire_on_commit=False) as cleanup:
+            if exercise_id is not None:
+                exercise = await cleanup.get(Exercise, exercise_id)
+                if exercise is not None:
+                    await cleanup.delete(exercise)
+                    await cleanup.commit()
+            if scenario_id is not None:
+                scenario = await cleanup.get(Scenario, scenario_id)
+                if scenario is not None:
+                    await cleanup.delete(scenario)
+                    await cleanup.commit()
+            if user_id is not None:
+                owner = await cleanup.get(User, user_id)
+                if owner is not None:
+                    await cleanup.delete(owner)
+                    await cleanup.commit()
 
 
 # ── Send ──────────────────────────────────────────────────────────────────────

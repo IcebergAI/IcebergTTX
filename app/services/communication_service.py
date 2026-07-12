@@ -219,10 +219,11 @@ async def broadcast_communication(comm: Communication) -> None:
 def schedule_triggered_comms(
     inject: Inject,
     trigger_comms: list,  # list[TriggerComm] from scenario definition
+    logical_node_id: str,
 ) -> None:
-    """Fire asyncio tasks to create each triggered communication after its delay."""
+    """Schedule node-level all-team communications once, across group-specific injects."""
     assert inject.id is not None
-    for tc in trigger_comms:
+    for index, tc in enumerate(trigger_comms):
         spawn(
             _delayed_comm(
                 exercise_id=inject.exercise_id,
@@ -232,6 +233,7 @@ def schedule_triggered_comms(
                 subject=tc.subject,
                 body=tc.body,
                 delay=tc.delay_after_release_seconds,
+                trigger_key=f"{logical_node_id}:{index}",
             )
         )
 
@@ -245,6 +247,7 @@ async def _delayed_comm(
     subject: str,
     body: str,
     delay: int,
+    trigger_key: str,
 ) -> None:
     try:
         if delay > 0:
@@ -253,15 +256,26 @@ async def _delayed_comm(
         from app.database import engine
 
         async with AsyncSession(engine, expire_on_commit=False) as session:
-            comm = await create_communication(
-                session,
-                exercise_id=exercise_id,
-                direction=CommDirection(direction),
-                subject=subject,
-                body=body,
-                external_entity=external_entity,
-                triggered_by_inject_id=inject_id,
+            statement = (
+                pg_insert(Communication)
+                .values(
+                    exercise_id=exercise_id,
+                    direction=CommDirection(direction),
+                    subject=subject,
+                    body=body,
+                    external_entity=external_entity,
+                    triggered_by_inject_id=inject_id,
+                    trigger_key=trigger_key,
+                    sent_at=datetime.now(UTC),
+                )
+                .on_conflict_do_nothing(constraint="uq_communication_exercise_trigger_key")
+                .returning(Communication.id)
             )
-            await broadcast_communication(comm)
+            comm_id = (await session.exec(statement)).scalar_one_or_none()
+            await session.commit()
+            if comm_id is not None:
+                comm = await session.get(Communication, comm_id)
+                assert comm is not None
+                await broadcast_communication(comm)
     except Exception:
         logger.exception("Delayed comm failed for inject %d", inject_id)
