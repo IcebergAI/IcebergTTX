@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime
+from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -28,8 +28,9 @@ class AuthToken(SQLModel, table=True):
     # Invite pre-binding (unused by reset).
     team: str | None = Field(default=None)
     exercise_id: int | None = Field(default=None, foreign_key="exercise.id", ondelete="SET NULL")
-    expires_at: datetime = Field(sa_type=DateTime(timezone=True))
-    used_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+    used_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )
