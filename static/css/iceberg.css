@@ -49,6 +49,21 @@
   --rail-ink:    oklch(0.80 0.02 250);
   --rail-faint:  oklch(0.66 0.018 252);
 
+  /* Team scents — pill fill / ink / line per team, to speed scanning across
+     the grouped inject, response and recipient lists. */
+  --team-itops-bg:   oklch(0.955 0.028 226);
+  --team-itops-ink:  oklch(0.42 0.10 238);
+  --team-itops-line: oklch(0.86 0.055 226);
+  --team-legal-bg:   oklch(0.95 0.03 285);
+  --team-legal-ink:  oklch(0.45 0.13 285);
+  --team-legal-line: oklch(0.86 0.06 285);
+  --team-exec-bg:    oklch(0.96 0.03 70);
+  --team-exec-ink:   oklch(0.48 0.12 70);
+  --team-exec-line:  oklch(0.86 0.06 70);
+  --team-comms-bg:   oklch(0.95 0.03 155);
+  --team-comms-ink:  oklch(0.42 0.11 155);
+  --team-comms-line: oklch(0.84 0.07 155);
+
   --radius: 9px;
   --radius-sm: 6px;
   --radius-lg: 12px;
@@ -103,6 +118,19 @@ html[data-theme="dark"] {
   --rail-line:  oklch(0.30 0.02 256);
   --rail-ink:   oklch(0.82 0.02 250);
   --rail-faint: oklch(0.66 0.018 252);
+
+  --team-itops-bg:   oklch(0.30 0.05 232);
+  --team-itops-ink:  oklch(0.82 0.09 226);
+  --team-itops-line: oklch(0.44 0.07 230);
+  --team-legal-bg:   oklch(0.30 0.05 285);
+  --team-legal-ink:  oklch(0.82 0.08 285);
+  --team-legal-line: oklch(0.44 0.07 285);
+  --team-exec-bg:    oklch(0.31 0.05 72);
+  --team-exec-ink:   oklch(0.84 0.10 78);
+  --team-exec-line:  oklch(0.46 0.08 74);
+  --team-comms-bg:   oklch(0.30 0.05 155);
+  --team-comms-ink:  oklch(0.82 0.10 158);
+  --team-comms-line: oklch(0.44 0.08 156);
 
   --shadow:      0 1px 2px oklch(0 0 0 / 0.30), 0 1px 1px oklch(0 0 0 / 0.24);
   --shadow-lift: 0 8px 24px -10px oklch(0 0 0 / 0.55), 0 2px 6px -2px oklch(0 0 0 / 0.4);
@@ -329,6 +357,14 @@ code, .code { font-family: var(--fs-mono); font-size: 0.86em; background: var(--
   background: var(--surface); color: var(--ink-soft);
 }
 .pill.mono { font-family: var(--fs-mono); font-size: 10.5px; }
+
+/* Team-scent tints. Layered onto .pill by uiHelpers.teamColor(); a team id
+   outside these four falls back to the neutral .pill above. */
+.pill.team-itops { background: var(--team-itops-bg); color: var(--team-itops-ink); box-shadow: inset 0 0 0 1px var(--team-itops-line); }
+.pill.team-legal { background: var(--team-legal-bg); color: var(--team-legal-ink); box-shadow: inset 0 0 0 1px var(--team-legal-line); }
+.pill.team-exec  { background: var(--team-exec-bg);  color: var(--team-exec-ink);  box-shadow: inset 0 0 0 1px var(--team-exec-line); }
+.pill.team-comms { background: var(--team-comms-bg); color: var(--team-comms-ink); box-shadow: inset 0 0 0 1px var(--team-comms-line); }
+
 .dot { width: 7px; height: 7px; border-radius: 999px; display: inline-block; flex-shrink: 0; }
 
 @keyframes livePulse {

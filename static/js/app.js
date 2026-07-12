@@ -218,14 +218,16 @@ const uiHelpers = {
     const m = Math.floor(s / 60), sec = s % 60;
     return `${m}:${String(sec).padStart(2, '0')}`;
   },
+  // Tint modifier layered onto a `.pill`. Scenario-defined team ids outside
+  // these four get no tint and render as the neutral pill.
   teamColor(id) {
     const map = {
-      it_ops: 'bg-sky-100/70 text-sky-800 ring-sky-200',
-      legal:  'bg-violet-100/70 text-violet-800 ring-violet-200',
-      exec:   'bg-amber-100/70 text-amber-900 ring-amber-200',
-      comms:  'bg-emerald-100/70 text-emerald-800 ring-emerald-200',
+      it_ops: 'team-itops',
+      legal:  'team-legal',
+      exec:   'team-exec',
+      comms:  'team-comms',
     };
-    return map[id] || 'pill mono';
+    return map[id] || '';
   },
   padId(id, width = 2) {
     return String(id).padStart(width, '0');

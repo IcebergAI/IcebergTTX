@@ -188,7 +188,7 @@
                 <div class="flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5"
                      style="flex-wrap: nowrap;">
                   <template x-for="t in selected.visible_to_teams" :key="t">
-                    <span class="pill mono ring-1 ring-inset text-[10px]"
+                    <span class="pill mono text-[10px]"
                           style="white-space: nowrap;"
                           :class="teamColor(t)" x-text="teamDisplay(t)"></span>
                   </template>
@@ -200,7 +200,7 @@
                 <div class="smallcaps text-muted shrink-0"
                      style="width: 42px;">From</div>
                 <div class="min-w-0">
-                  <span class="pill mono ring-1 ring-inset text-[10px]"
+                  <span class="pill mono text-[10px]"
                         :class="teamColor(selected.sender_team)"
                         x-text="teamDisplay(selected.sender_team)"></span>
                 </div>
@@ -213,7 +213,7 @@
                 <div class="flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5"
                      style="flex-wrap: nowrap;">
                   <template x-for="t in selected.visible_to_teams" :key="t">
-                    <span class="pill mono ring-1 ring-inset text-[10px]"
+                    <span class="pill mono text-[10px]"
                           style="white-space: nowrap;"
                           :class="teamColor(t)" x-text="teamDisplay(t)"></span>
                   </template>

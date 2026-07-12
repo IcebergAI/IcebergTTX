@@ -135,8 +135,8 @@
                         <span class="text-[13px] font-medium truncate" x-text="inj.title"></span>
                       </div>
                       <div class="flex flex-wrap items-center gap-1.5 mt-1">
-                        <span class="pill mono ring-1 ring-inset text-[10px]"
-                              :class="inj.group_id ? teamColor(inj.group_id) : 'bg-surface-2 text-ink-soft ring-line'"
+                        <span class="pill mono text-[10px]"
+                              :class="teamColor(inj.group_id)"
                               x-text="groupLabel(inj.group_id)"></span>
                         <template x-if="inj.attachment">
                           <a :href="inj.attachment.url"
@@ -291,7 +291,7 @@
                   <span class="mono text-[10.5px] text-muted"
                         x-text="responseInjectLabel(comment) + ' · ' + fmtAgo(comment.created_at)"></span>
                   <span class="pill mono ml-auto"
-                        :class="comment.group_id ? teamColor(comment.group_id) : 'bg-surface-2 text-ink-soft ring-line'"
+                        :class="teamColor(comment.group_id)"
                         x-text="groupLabel(comment.group_id)"></span>
                 </div>
                 <p class="text-[13px] text-ink-soft whitespace-pre-wrap"
@@ -319,7 +319,7 @@
                 <span class="pill mono ml-1" x-text="resp.selected_option"></span>
               </template>
               <span class="pill mono ml-auto"
-                    :class="resp.group_id ? teamColor(resp.group_id) : 'bg-surface-2 text-ink-soft ring-line'"
+                    :class="teamColor(resp.group_id)"
                     x-text="groupLabel(resp.group_id)"></span>
             </div>
             <div class="fac-console__response-content grid" :style="assessments[resp.id] ? 'grid-template-columns: 1fr 240px' : 'grid-template-columns: 1fr'">
@@ -379,7 +379,7 @@
               <p class="text-[12px] text-ink-soft mb-2" x-text="s.content"></p>
               <div class="flex flex-wrap gap-1 mb-2" x-show="s.target_teams && s.target_teams.length">
                 <template x-for="t in (s.target_teams || [])" :key="t">
-                  <span class="pill mono ring-1 ring-inset text-[10px]"
+                  <span class="pill mono text-[10px]"
                         :class="teamColor(t)" x-text="t"></span>
                 </template>
               </div>
