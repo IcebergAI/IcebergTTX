@@ -662,10 +662,14 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 ::placeholder { color: var(--faint); }
 
 /* Phone layouts use a 44px hit area.  The visual treatment remains compact,
-   but the tappable box and keyboard focus ring have enough room to breathe. */
+   but the tappable box and keyboard focus ring have enough room to breathe.
+   Any control class that sets its own min-width/min-height must be listed here
+   as well: a class selector outranks the bare `button` element selector, so it
+   would otherwise silently keep its 40px desktop floor on a phone. */
 @media (max-width: 760px) {
   .btn, button, [role="button"], [role="tab"],
   .rail-link, .rail-live-main, .rail-live-opt, .rail-logout, summary,
+  .seg-btn,
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select, textarea {
     min-width: 44px;
