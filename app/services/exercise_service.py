@@ -17,6 +17,7 @@ from app.models.exercise import (
 from app.models.scenario import Scenario
 from app.models.user import User
 from app.services.inject_service import seed_injects_from_scenario
+from app.services.progression_service import seed_progression
 from app.services.scenario_service import export_definition
 
 
@@ -53,6 +54,12 @@ async def create_exercise(
 
     try:
         await seed_injects_from_scenario(session, exercise.id, scenario)
+        await seed_progression(
+            session,
+            exercise_id=exercise.id,
+            start_node_id=definition.start_inject_id,
+            group_ids=[team.id for team in definition.participant_teams],
+        )
         await session.commit()
     except Exception:
         await session.rollback()

@@ -216,7 +216,10 @@ async def test_participant_sees_only_released_visible_injects(
 
 
 async def test_facilitator_preview_participant_uses_preview_team_for_visibility(
-    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
 ):
     injects = (await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
@@ -226,10 +229,22 @@ async def test_facilitator_preview_participant_uses_preview_team_for_visibility(
     legal_inject = next(i for i in injects if i["scenario_node_id"] == "inject_02")
 
     for inject in (it_ops_inject, legal_inject):
-        await client.post(
+        release = await client.post(
             f"/api/exercises/{active_exercise.id}/injects/{inject['id']}/release",
             headers={"Authorization": f"Bearer {facilitator_token}"},
         )
+        assert release.status_code == 200
+        if inject is it_ops_inject:
+            response = await client.post(
+                f"/api/exercises/{active_exercise.id}/responses",
+                json={
+                    "inject_id": inject["id"],
+                    "content": "Escalate to legal.",
+                    "selected_option": "opt_a",
+                },
+                headers={"Authorization": f"Bearer {participant_token}"},
+            )
+            assert response.status_code == 201
 
     client.cookies.set("dt_view_role", "participant")
     client.cookies.set("dt_view_team", "it_ops")
@@ -280,10 +295,22 @@ async def test_different_groups_see_different_released_injects(
     )
 
     for inject in (it_ops_inject, legal_inject):
-        await client.post(
+        release = await client.post(
             f"/api/exercises/{active_exercise.id}/injects/{inject['id']}/release",
             headers={"Authorization": f"Bearer {facilitator_token}"},
         )
+        assert release.status_code == 200
+        if inject is it_ops_inject:
+            response = await client.post(
+                f"/api/exercises/{active_exercise.id}/responses",
+                json={
+                    "inject_id": inject["id"],
+                    "content": "Escalate to legal.",
+                    "selected_option": "opt_a",
+                },
+                headers={"Authorization": f"Bearer {participant_token}"},
+            )
+            assert response.status_code == 201
 
     it_ops_payload = (await client.get(
         f"/api/exercises/{active_exercise.id}/injects",

@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column, DateTime, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -37,6 +37,9 @@ class Inject(SQLModel, table=True):
     state: InjectState = Field(default=InjectState.pending)
     released_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     released_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    resolved_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    resolved_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    resolution_reason: str | None = None
     attachment_filename: str | None = None
     attachment_content_type: str | None = None
     attachment_path: str | None = None
@@ -51,3 +54,26 @@ class Inject(SQLModel, table=True):
         back_populates="triggered_by_inject",
         sa_relationship_kwargs={"passive_deletes": True},
     )
+
+
+class InjectProgress(SQLModel, table=True):
+    """Resolution state for one group moving through a released inject."""
+
+    __table_args__ = (
+        UniqueConstraint(
+            "inject_id",
+            "group_id",
+            name="uq_inject_progress_group",
+            postgresql_nulls_not_distinct=True,
+        ),
+        Index("ix_injectprogress_inject_group", "inject_id", "group_id"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
+    inject_id: int = Field(foreign_key="inject.id", ondelete="CASCADE")
+    group_id: str | None = None
+    state: InjectState = Field(default=InjectState.released)
+    resolved_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    resolved_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    resolution_reason: str | None = None

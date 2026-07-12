@@ -21,6 +21,7 @@ from app.services.access_control import (
 from app.services.background import spawn
 from app.services.inject_service import get_inject_or_404
 from app.services.llm_service import _assessment_payload, run_llm_pipeline
+from app.services.progression_service import progression_snapshot
 from app.services.response_service import (
     broadcast_response_submitted,
     response_next_inject_suggestions,
@@ -128,13 +129,17 @@ async def submit(
         selected_option=body.selected_option,
         group_id=group_id,
     )
-    await broadcast_response_submitted(response, next_injects)
+    facilitator_progression = await progression_snapshot(
+        session, exercise_id, include_all_groups=True
+    )
+    await broadcast_response_submitted(response, next_injects, progression=facilitator_progression)
 
     if exercise.llm_enabled:
         assert response.id is not None
         spawn(run_llm_pipeline(response.id, body.inject_id, exercise_id))
 
-    return response_payload(response)
+    participant_progression = await progression_snapshot(session, exercise_id, group_id=group_id)
+    return response_payload(response, progression=participant_progression)
 
 
 @router.get("/{response_id}", response_model=ResponsePublic)

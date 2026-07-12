@@ -90,6 +90,22 @@ async def submit_response(
     )
     session.add(response)
     try:
+        await session.flush()
+
+        next_ids = await _compute_next_inject_ids(
+            session, exercise_id, inject_id, selected_option
+        )
+        inject = await session.get(Inject, inject_id)
+        assert inject is not None
+        from app.services.progression_service import resolve_response_progression
+
+        await resolve_response_progression(
+            session,
+            inject=inject,
+            group_id=group_id,
+            actor_id=user_id,
+            next_node_id=next_ids[0] if len(next_ids) == 1 else None,
+        )
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
@@ -99,7 +115,6 @@ async def submit_response(
         ) from exc
     await session.refresh(response)
 
-    next_ids = await _compute_next_inject_ids(session, exercise_id, inject_id, selected_option)
     return response, await _pending_next_injects(session, exercise_id, next_ids, group_id)
 
 
@@ -149,8 +164,7 @@ async def _pending_next_injects(
     matches = [
         inject
         for inject in injects
-        if inject.scenario_node_id in ordered_ids
-        and inject_matches_group(inject, group_id)
+        if inject.scenario_node_id in ordered_ids and inject_matches_group(inject, group_id)
     ]
     matches.sort(key=lambda inject: ordered_ids.get(inject.scenario_node_id or "", 9999))
     return [_next_inject_payload(inject) for inject in matches]
@@ -159,6 +173,7 @@ async def _pending_next_injects(
 async def broadcast_response_submitted(
     response: Response,
     next_injects: list[dict],
+    progression: dict | None = None,
 ) -> None:
     from app.services.ws_manager import manager
 
@@ -170,12 +185,17 @@ async def broadcast_response_submitted(
             "response": response_payload(response),
             "next_inject_ids": [item["scenario_node_id"] for item in next_injects],
             "next_injects": next_injects,
+            "progression": progression,
         },
     }
     await manager.send_to_facilitators(response.exercise_id, message)
 
 
-def response_payload(r: Response, next_injects: list[dict] | None = None) -> dict:
+def response_payload(
+    r: Response,
+    next_injects: list[dict] | None = None,
+    progression: dict | None = None,
+) -> dict:
     """Canonical response serialization (HTTP + WS) via the ResponsePublic schema (#31)."""
     assert r.id is not None
     model = ResponsePublic(
@@ -194,6 +214,7 @@ def response_payload(r: Response, next_injects: list[dict] | None = None) -> dic
             if next_injects is not None
             else None
         ),
+        progression=progression,
     )
     return model.model_dump(mode="json")
 

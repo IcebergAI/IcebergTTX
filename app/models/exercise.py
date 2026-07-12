@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Index
+from sqlalchemy import CheckConstraint, Column, DateTime, Index, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.user import UserRole
@@ -91,6 +91,9 @@ class Exercise(SQLModel, table=True):
     state_transitions: list["ExerciseStateTransition"] = Relationship(
         back_populates="exercise", cascade_delete=True
     )
+    progression: list["ExerciseProgress"] = Relationship(
+        back_populates="exercise", cascade_delete=True
+    )
 
 
 class ExerciseMember(SQLModel, table=True):
@@ -133,3 +136,32 @@ class ExerciseStateTransition(SQLModel, table=True):
     )
 
     exercise: Optional["Exercise"] = Relationship(back_populates="state_transitions")
+
+
+class ExerciseProgress(SQLModel, table=True):
+    """Authoritative cursor for one exercise-wide or team-specific progression path."""
+
+    __table_args__ = (
+        UniqueConstraint(
+            "exercise_id",
+            "group_id",
+            name="uq_exercise_progress_group",
+            postgresql_nulls_not_distinct=True,
+        ),
+        Index("ix_exerciseprogress_exercise_group", "exercise_id", "group_id"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
+    # Null denotes the shared/all-teams path. Team-specific paths may diverge.
+    group_id: str | None = None
+    current_node_id: str | None = None
+    current_inject_id: int | None = Field(
+        default=None, foreign_key="inject.id", ondelete="SET NULL"
+    )
+    advanced_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
+    )
+    advanced_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+
+    exercise: Optional["Exercise"] = Relationship(back_populates="progression")

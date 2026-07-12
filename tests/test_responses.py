@@ -335,6 +335,26 @@ async def test_response_records_group_and_facilitator_gets_pending_next_inject(
     r = (await _submit(client, participant_token, exercise.id, first["id"], selected_option="go"))
     assert r.status_code == 201
     assert r.json()["group_id"] == "it_ops"
+    assert r.json()["progression"]["cursors"][0]["current_node_id"] == "b"
+
+    participant_progression = await client.get(
+        f"/api/exercises/{exercise.id}/progression",
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert participant_progression.status_code == 200
+    assert [
+        cursor["group_id"] for cursor in participant_progression.json()["cursors"]
+    ] == ["it_ops"]
+
+    facilitator_progression = await client.get(
+        f"/api/exercises/{exercise.id}/progression",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert facilitator_progression.status_code == 200
+    assert {cursor["group_id"] for cursor in facilitator_progression.json()["cursors"]} == {
+        None,
+        "it_ops",
+    }
 
     rows = (await client.get(
         f"/api/exercises/{exercise.id}/responses",
@@ -349,6 +369,131 @@ async def test_response_records_group_and_facilitator_gets_pending_next_inject(
             "group_id": "it_ops",
         }
     ]
+
+    from sqlmodel import select
+
+    from app.models.exercise import ExerciseProgress
+    from app.models.inject import InjectProgress, InjectState
+
+    inject_progress = (
+        await session.exec(
+            select(InjectProgress).where(
+                InjectProgress.inject_id == first["id"],
+                InjectProgress.group_id == "it_ops",
+            )
+        )
+    ).one()
+    assert inject_progress.state == InjectState.resolved
+    assert inject_progress.resolved_by == participant.id
+    assert inject_progress.resolution_reason == "participant_response"
+
+    cursor = (
+        await session.exec(
+            select(ExerciseProgress).where(
+                ExerciseProgress.exercise_id == exercise.id,
+                ExerciseProgress.group_id == "it_ops",
+            )
+        )
+    ).one()
+    assert cursor.current_node_id == "b"
+    assert cursor.current_inject_id == first["id"]
+
+    refreshed_injects = (await client.get(
+        f"/api/exercises/{exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )).json()
+    assert next(i for i in refreshed_injects if i["id"] == first["id"])["state"] == "resolved"
+
+    timeline = await client.get(
+        f"/api/exercises/{exercise.id}/timeline",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert timeline.status_code == 200
+    resolution_event = next(
+        event for event in timeline.json() if event["kind"] == "inject_resolved"
+    )
+    assert resolution_event["inject_id"] == first["id"]
+    assert resolution_event["group_id"] == "it_ops"
+
+    report = await client.get(
+        f"/api/exercises/{exercise.id}/report",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert report.status_code == 200
+    report_inject = next(
+        item for item in report.json()["injects"] if item["scenario_node_id"] == "a"
+    )
+    assert report_inject["resolutions"][0]["group_id"] == "it_ops"
+
+
+async def test_selected_group_branch_blocks_mutually_exclusive_release(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+):
+    from app.models.exercise import ExerciseState
+    from app.services.exercise_service import create_exercise, enrol_member, transition_state
+    from app.services.scenario_service import create_scenario
+
+    scenario = await create_scenario(
+        session,
+        definition=ScenarioDefinition(
+            title="Exclusive branch",
+            participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+            injects=[
+                InjectNode(
+                    id="a",
+                    title="Choose",
+                    content="Choose a path.",
+                    target_teams=["it_ops"],
+                    options=[
+                        InjectOption(id="left", label="Left", next_inject_id="b"),
+                        InjectOption(id="right", label="Right", next_inject_id="c"),
+                    ],
+                ),
+                InjectNode(id="b", title="Left path", content="Left", target_teams=["it_ops"]),
+                InjectNode(id="c", title="Right path", content="Right", target_teams=["it_ops"]),
+            ],
+            start_inject_id="a",
+        ),
+        created_by=facilitator.id,
+    )
+    exercise = await create_exercise(
+        session,
+        scenario_id=scenario.id,
+        title="Exclusive branch",
+        created_by=facilitator.id,
+    )
+    await enrol_member(session, exercise=exercise, user_id=participant.id, group_id="it_ops")
+    await transition_state(session, exercise, ExerciseState.active)
+
+    headers = {"Authorization": f"Bearer {facilitator_token}"}
+    injects = (await client.get(
+        f"/api/exercises/{exercise.id}/injects", headers=headers
+    )).json()
+    by_node = {inject["scenario_node_id"]: inject for inject in injects}
+    assert (await client.post(
+        f"/api/exercises/{exercise.id}/injects/{by_node['a']['id']}/release",
+        headers=headers,
+    )).status_code == 200
+    assert (await _submit(
+        client,
+        participant_token,
+        exercise.id,
+        by_node["a"]["id"],
+        selected_option="left",
+    )).status_code == 201
+    assert (await client.post(
+        f"/api/exercises/{exercise.id}/injects/{by_node['c']['id']}/release",
+        headers=headers,
+    )).status_code == 409
+    assert (await client.post(
+        f"/api/exercises/{exercise.id}/injects/{by_node['b']['id']}/release",
+        headers=headers,
+    )).status_code == 200
 
 
 async def test_free_text_linear_response_suggests_next_inject(

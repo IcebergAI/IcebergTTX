@@ -340,6 +340,7 @@ document.addEventListener('alpine:init', () => {
     comments: [],
     assessments: {},
     suggestedInjects: [],
+    progression: { cursors: [], resolutions: [] },
     nodeMap: {},
     groupDefs: [],
     newTitle: '',
@@ -391,6 +392,7 @@ document.addEventListener('alpine:init', () => {
     },
     get hasPendingSuggestions() { return this.pendingSuggested.length > 0; },
     get pendingSuggestedCount() { return this.pendingSuggested.length; },
+    get progressionCursors() { return this.progression.cursors || []; },
     get opsPanelVisible() {
       return this.showOpsPanel || (this.isMobileConsole && this.mobilePane === 'ops');
     },
@@ -445,6 +447,12 @@ document.addEventListener('alpine:init', () => {
 
     userFor(userId) {
       return this.allUsers.find(u => u.id === userId) || null;
+    },
+
+    progressionGroupLabel(groupId) {
+      if (!groupId) return 'Shared path';
+      const group = this.groupDefs.find(item => item.id === groupId);
+      return group ? (group.label || group.id) : groupId;
     },
 
     userDisplayName(userId) {
@@ -601,7 +609,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     async load() {
-      const [er, mr, ir, rr, cr, sir, ur] = await Promise.all([
+      const [er, mr, ir, rr, cr, sir, ur, pr] = await Promise.all([
         apiFetch(`/exercises/${exerciseId}`),
         apiFetch(`/exercises/${exerciseId}/members`),
         apiFetch(`/exercises/${exerciseId}/injects`),
@@ -609,6 +617,7 @@ document.addEventListener('alpine:init', () => {
         apiFetch(`/exercises/${exerciseId}/inject-comments`),
         apiFetch(`/exercises/${exerciseId}/suggested-injects`),
         apiFetch('/users'),
+        apiFetch(`/exercises/${exerciseId}/progression`),
       ]);
       if (er && er.ok) this.exercise = await er.json();
       if (mr && mr.ok) this.members = await mr.json();
@@ -624,6 +633,7 @@ document.addEventListener('alpine:init', () => {
       if (cr && cr.ok) this.comments = await cr.json();
       if (sir && sir.ok) this.suggestedInjects = await sir.json();
       if (ur && ur.ok) this.allUsers = await ur.json();
+      if (pr && pr.ok) this.progression = await pr.json();
       if (this.exercise?.scenario_id) {
         const sr = await apiFetch(`/scenarios/${this.exercise.scenario_id}`);
         if (sr && sr.ok) {
@@ -661,6 +671,7 @@ document.addEventListener('alpine:init', () => {
               _next_injects: msg.payload.next_injects || [],
             };
             this.responses.unshift(r);
+            if (msg.payload.progression) this.progression = msg.payload.progression;
           }
           if (msg.type === 'inject_updated') {
             const idx = this.injects.findIndex(i => i.id === msg.payload.id);

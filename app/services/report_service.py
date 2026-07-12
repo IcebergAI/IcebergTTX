@@ -17,7 +17,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.assessment import ResponseAssessment
 from app.models.communication import Communication
 from app.models.exercise import Exercise, ExerciseMember
-from app.models.inject import Inject
+from app.models.inject import Inject, InjectProgress
 from app.models.report_summary import ExecutiveSummary
 from app.models.response import Response
 from app.models.scenario import Scenario
@@ -110,6 +110,13 @@ async def build_report(session: AsyncSession, exercise_id: int) -> dict | None:
     for r in responses:
         responses_by_inject.setdefault(r.inject_id, []).append(r)
 
+    resolution_rows = (
+        await session.exec(select(InjectProgress).where(InjectProgress.exercise_id == exercise_id))
+    ).all()
+    resolutions_by_inject: dict[int, list[InjectProgress]] = {}
+    for resolution in resolution_rows:
+        resolutions_by_inject.setdefault(resolution.inject_id, []).append(resolution)
+
     inject_rows = []
     for i in injects:
         rows = []
@@ -134,6 +141,16 @@ async def build_report(session: AsyncSession, exercise_id: int) -> dict | None:
                 "target_teams": i.target_teams,  # None = all teams
                 "released_at": _fmt(i.released_at),
                 "released_by": name(i.released_by),
+                "resolutions": [
+                    {
+                        "group_id": resolution.group_id,
+                        "state": resolution.state,
+                        "resolved_at": _fmt(resolution.resolved_at),
+                        "resolved_by": name(resolution.resolved_by),
+                        "resolution_reason": resolution.resolution_reason,
+                    }
+                    for resolution in resolutions_by_inject.get(i.id, [])
+                ],
                 "responses": rows,
             }
         )
@@ -234,9 +251,7 @@ def render_markdown(report: dict) -> str:
     lines.append(f"- **Ended:** {ex['ended_at'] or '—'}")
     if ex.get("duration"):
         lines.append(f"- **Duration:** {ex['duration']}")
-    teams = ", ".join(
-        f"{t['label']} ({t['participant_count']})" for t in report["teams"]
-    )
+    teams = ", ".join(f"{t['label']} ({t['participant_count']})" for t in report["teams"])
     if report["unassigned_participant_count"]:
         teams = ", ".join(
             part
@@ -268,6 +283,12 @@ def render_markdown(report: dict) -> str:
         lines.append(f"### {inj['title']}")
         if inj.get("released_at"):
             lines.append(f"*Released {inj['released_at']} by {inj['released_by']}.*")
+        for resolution in inj.get("resolutions", []):
+            context = resolution["group_id"] or "shared path"
+            lines.append(
+                f"*Resolved for {context} at {resolution['resolved_at'] or '—'} "
+                f"by {resolution['resolved_by']}.*"
+            )
         if not inj["responses"]:
             lines.append("")
             lines.append("_No responses recorded._")

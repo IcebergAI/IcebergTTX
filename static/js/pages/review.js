@@ -11,6 +11,7 @@ document.addEventListener('alpine:init', () => {
   };
   const KIND_LABELS = {
     inject_released: 'Inject',
+    inject_resolved: 'Resolution',
     response: 'Response',
     communication: 'Comms',
     comment: 'Comment',
@@ -100,6 +101,7 @@ document.addEventListener('alpine:init', () => {
     kindDotStyle(ev) {
       const map = {
         inject_released: 'var(--accent)',
+        inject_resolved: 'var(--c-success, #2f7d54)',
         response: 'var(--ink-soft)',
         communication: 'var(--c-warn)',
         comment: 'var(--ink-soft)',
@@ -111,6 +113,7 @@ document.addEventListener('alpine:init', () => {
     eventTitle(ev) {
       switch (ev.kind) {
         case 'inject_released': return 'Inject released — ' + (ev.title || '');
+        case 'inject_resolved': return 'Inject resolved — ' + (ev.title || '');
         case 'response': return 'Response from ' + this.userName(ev.user_id);
         case 'communication': return this.commTitle(ev);
         case 'comment': return 'Comment by ' + this.userName(ev.user_id);
@@ -126,6 +129,8 @@ document.addEventListener('alpine:init', () => {
       switch (ev.kind) {
         case 'inject_released':
           return this.teamsLabel(ev.target_teams) + ' · released by ' + this.userName(ev.released_by);
+        case 'inject_resolved':
+          return (ev.group_id || 'Shared path') + ' · resolved by ' + this.userName(ev.resolved_by);
         case 'communication': {
           const who = ev.external_entity ? (' · ' + ev.external_entity) : '';
           return this.teamsLabel(ev.visible_to_teams) + who;

@@ -17,7 +17,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.assessment import ResponseAssessment
 from app.models.communication import Communication
 from app.models.exercise import Exercise, ExerciseStateTransition, transition_action
-from app.models.inject import Inject
+from app.models.inject import Inject, InjectProgress
 from app.models.inject_comment import InjectComment
 from app.models.response import Response
 
@@ -25,9 +25,10 @@ from app.models.response import Response
 _KIND_ORDER = {
     "state_change": 0,
     "inject_released": 1,
-    "response": 2,
-    "comment": 3,
-    "communication": 4,
+    "inject_resolved": 2,
+    "response": 3,
+    "comment": 4,
+    "communication": 5,
 }
 
 
@@ -69,6 +70,30 @@ async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
                 target_teams=i.target_teams,  # None = all teams
                 group_id=i.group_id,
                 released_by=i.released_by,
+            )
+        )
+
+    inject_titles = {inject.id: inject.title for inject in injects}
+    resolutions = (
+        await session.exec(
+            select(InjectProgress).where(
+                InjectProgress.exercise_id == exercise_id,
+                col(InjectProgress.resolved_at).is_not(None),
+            )
+        )
+    ).all()
+    for resolution in resolutions:
+        assert resolution.resolved_at is not None
+        events.append(
+            _event(
+                resolution.resolved_at,
+                "inject_resolved",
+                resolution.id or 0,
+                inject_id=resolution.inject_id,
+                title=inject_titles.get(resolution.inject_id),
+                group_id=resolution.group_id,
+                resolved_by=resolution.resolved_by,
+                resolution_reason=resolution.resolution_reason,
             )
         )
 
