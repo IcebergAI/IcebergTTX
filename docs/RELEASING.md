@@ -32,15 +32,18 @@ cosign (keyless) signature.
 4. **Tag and push** the merge commit on `main`:
    ```
    git checkout main && git pull
-   git tag v0.1.0-beta.1
+   git tag -a v0.1.0-beta.1 -m "IcebergTTX 0.1.0 beta.1"
    git push origin v0.1.0-beta.1
    ```
    The `Release` workflow builds and pushes the image, attaches the SBOM + provenance,
    signs it, and creates a GitHub Release (marked **pre-release** when the tag has a `-`).
 
-Before the very first real tag, validate the pipeline with a throwaway pre-release tag
-(e.g. `v0.0.0-test`) or a `workflow_dispatch` run with **dry_run** unchecked, then delete
-the test tag, its Release, and the GHCR version.
+Before the very first real tag, validate the pipeline with a `workflow_dispatch` run
+from the frozen release-candidate commit with **dry_run** unchecked. Deploy and test
+the resulting immutable `sha-<commit>` tag or digest, not a mutable branch tag. A
+dispatch build pushes and signs the image but does not create the final GitHub Release.
+If a throwaway Git tag is used instead, delete its Release, tag, and GHCR version after
+validation.
 
 ## Security advisory releases
 

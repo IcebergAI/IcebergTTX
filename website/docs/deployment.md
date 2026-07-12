@@ -110,6 +110,11 @@ All three workloads run non-root under a PSS-`restricted`-style `securityContext
 (no privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp; app
 and init containers use a read-only root filesystem). The Postgres StatefulSet runs
 as uid 999 with `fsGroup: 999`, which needs a StorageClass that honours `fsGroup`.
+Its PVC mounts at `/var/lib/postgresql` and `PGDATA` is
+`/var/lib/postgresql/pgdata`: the child directory is created and owned by uid 999,
+and it avoids the image-declared `/var/lib/postgresql/data` volume that some CRI
+runtimes overlay with pod-lifetime storage. Keep non-root static-copy init containers
+on `cp -rL`; metadata-preserving copies can fail against root-owned `emptyDir` roots.
 
 ### Origin checks
 
