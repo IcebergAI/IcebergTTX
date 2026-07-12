@@ -480,9 +480,12 @@
                           <span class="text-muted" x-text="'User #' + m.user_id"></span>
                         </template>
                       </div>
+                      <!-- Bare, not .btn: the global rule still gives it a 40px hit
+                           area, but a ghost-button border around a single glyph
+                           shouts louder than the row it sits on. -->
                       <button @click="removeMember(m.user_id)"
-                              class="btn btn-ghost px-0 text-[11px] text-faint shrink-0"
-                              :aria-label="'Remove ' + memberGroupLabel(m.user_id)">✕</button>
+                              class="text-[13px] text-faint hover:text-crit shrink-0"
+                              :aria-label="'Remove ' + userDisplayName(m.user_id)">✕</button>
                     </div>
                     <select :value="m.group_id || ''"
                             :aria-label="memberGroupLabel(m.user_id)"
