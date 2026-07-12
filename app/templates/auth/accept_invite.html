@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Accept invitation — IcebergTTX{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center" style="background: var(--bg);">
+  <div x-data="acceptInviteForm()" class="paper ring-rule rounded-xl p-8 w-full max-w-sm shadow-sm">
+
+    <div class="flex items-center gap-2.5 mb-7">
+      <img src="/static/img/icebergai-mark.svg" class="h-8 w-8 rounded-md" width="32" height="32" alt="Iceberg" />
+      <div>
+        <div class="text-[15px] font-semibold leading-tight" style="color: var(--ink);">IcebergTTX</div>
+        <div class="smallcaps text-muted leading-tight">TTX control</div>
+      </div>
+    </div>
+
+    <h1 class="text-[20px] font-semibold tracking-tight mb-2">Accept your invitation</h1>
+    <p class="text-[13px] text-muted mb-5">Choose a display name and password to finish setting up your account.</p>
+
+    <div x-show="error"
+         class="mb-4 rounded-md px-3 py-2.5 text-[13px]"
+         style="background:#fee2e2; color:#b91c1c;"
+         x-text="error"></div>
+
+    <div x-show="noToken"
+         class="mb-4 rounded-md px-3 py-2.5 text-[13px]"
+         style="background:#fee2e2; color:#b91c1c;"
+         x-text="'This invitation link is missing its token. Ask your facilitator for a new invite.'"></div>
+
+    <form x-show="!noToken" @submit.prevent="submit()" class="space-y-3.5">
+      <div>
+        <label class="block smallcaps text-muted mb-1">Display name</label>
+        <input type="text" x-model="display_name" required autocomplete="name"
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface outline-none focus:ring-2 focus:ring-line-strong" />
+      </div>
+      <div>
+        <label class="block smallcaps text-muted mb-1">Password</label>
+        <input type="password" x-model="password" required autocomplete="new-password" minlength="12"
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface outline-none focus:ring-2 focus:ring-line-strong" />
+        <p class="text-[12px] text-muted mt-1">At least 12 characters.</p>
+      </div>
+      <button type="submit" :disabled="loading"
+              class="btn btn-primary w-full h-9 text-[13.5px] justify-center disabled:opacity-50 mt-1">
+        <span x-text="loading ? 'Creating account…' : 'Create account'"></span>
+      </button>
+    </form>
+
+    <p class="mt-5 text-[13px] text-center text-muted">
+      Already have an account?
+      <a href="/login" class="text-ink-soft font-medium hover:underline">Sign in</a>
+    </p>
+  </div>
+</div>
+{% endblock %}

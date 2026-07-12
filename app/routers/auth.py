@@ -10,8 +10,10 @@ from app.database import get_session
 from app.dependencies import get_current_actual_user, get_current_user
 from app.middleware import client_ip
 from app.models.auth_token import AuthTokenPurpose
+from app.models.exercise import Exercise
 from app.models.user import LOCAL_AUTH_PROVIDER, User, UserRole
 from app.schemas.auth import (
+    InviteAccept,
     LoginRequest,
     PasswordResetComplete,
     PasswordResetRequest,
@@ -23,6 +25,7 @@ from app.schemas.auth import (
 from app.services import audit_service, mail_service, token_service
 from app.services.auth_service import create_access_token, hash_password, verify_password
 from app.services.background import spawn
+from app.services.exercise_service import enrol_member
 from app.services.rate_limit import (
     login_rate_limiter,
     password_reset_rate_limiter,
@@ -323,6 +326,71 @@ async def password_reset_complete(
         target_type="user",
         target_id=user.id,
         severity="warning",
+    )
+    return TokenResponse(access_token=new_token)
+
+
+@router.post("/invite/accept", response_model=TokenResponse)
+async def invite_accept(
+    body: InviteAccept,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """Redeem a participant invite (#117).
+
+    The emailed token authorises account creation, so this works even while open
+    self-registration is disabled. The email/team/exercise are taken from the token
+    (never the client); a new participant is created, enrolled in the bound exercise
+    if any, and logged in.
+    """
+    _require_smtp()
+    token = await token_service.consume(
+        session, raw=body.token, purpose=AuthTokenPurpose.invite
+    )
+    if token is None:
+        audit_service.emit(
+            "auth.invite_accept",
+            result="fail",
+            reason="invalid or expired token",
+            severity="warning",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired invite link."
+        )
+    if (await session.exec(select(User).where(User.email == token.email))).first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="This email already has an account."
+        )
+
+    # Email is authoritative from the token; role is always participant (like register).
+    user = User(
+        email=token.email,
+        display_name=body.display_name,
+        hashed_password=hash_password(body.password),
+        role=UserRole.participant,
+        team=token.team,
+    )
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    assert user.id is not None  # nosec B101 - narrow the PK for enrol_member
+    # Auto-enrol in the invite's exercise (group defaults from the user's team).
+    if token.exercise_id is not None:
+        exercise = await session.get(Exercise, token.exercise_id)
+        if exercise is not None:
+            await enrol_member(session, exercise=exercise, user_id=user.id)
+
+    new_token = create_access_token(
+        subject=user.email, role=user.role.value, is_admin=user.is_admin
+    )
+    _set_session_cookie(response, new_token)
+    audit_service.emit(
+        "auth.invite_accept",
+        actor_id=user.id,
+        actor_email=user.email,
+        actor_role=user.role.value,
+        target_type="user",
+        target_id=user.id,
     )
     return TokenResponse(access_token=new_token)
 

@@ -1,23 +1,30 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.config import settings
 from app.database import get_session
 from app.dependencies import require_admin, require_role
+from app.models.auth_token import AuthTokenPurpose
+from app.models.exercise import Exercise
 from app.models.user import LOCAL_AUTH_PROVIDER, User, UserRole
 from app.schemas.api import UserPublic
-from app.schemas.auth import AdminCreateUserRequest, AdminResetPasswordRequest
-from app.services import audit_service
+from app.schemas.auth import AdminCreateUserRequest, AdminResetPasswordRequest, InviteRequest
+from app.services import audit_service, mail_service, token_service
 from app.services.auth_service import hash_password
+from app.services.background import spawn
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 FacilitatorDep = Annotated[User, Depends(require_role(UserRole.facilitator))]
 AdminDep = Annotated[User, Depends(require_admin)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+# Invites live longer than a reset — they onboard someone who may not act immediately.
+INVITE_TOKEN_TTL = timedelta(days=7)
 
 
 def _user_out(u: User) -> dict:
@@ -63,6 +70,50 @@ async def create_user(body: AdminCreateUserRequest, admin: AdminDep, session: Se
         reason=f"role={user.role.value} is_admin={user.is_admin}",
     )
     return _user_out(user)
+
+
+@router.post("/invite")
+async def invite_user(
+    body: InviteRequest, request: Request, admin: AdminDep, session: SessionDep
+):
+    """Email a participant a single-use registration link (#117).
+
+    Works while open self-registration is disabled — the token *is* the authorisation.
+    Pre-binds the email (+ optional team/exercise). 404 when SMTP is unconfigured.
+    """
+    if not settings.smtp_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if (await session.exec(select(User).where(User.email == body.email))).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+    if body.exercise_id is not None and await session.get(Exercise, body.exercise_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+
+    raw = await token_service.create(
+        session,
+        purpose=AuthTokenPurpose.invite,
+        email=body.email,
+        team=body.team,
+        exercise_id=body.exercise_id,
+        ttl=INVITE_TOKEN_TTL,
+    )
+    link = mail_service.build_link(request, "/accept-invite", raw)
+    spawn(
+        mail_service.send(
+            body.email,
+            f"{admin.display_name} invited you to IcebergTTX",
+            f"You've been invited to join IcebergTTX, a tabletop-exercise platform.\n\n"
+            f"Set up your account using this link within the next 7 days:\n{link}\n\n"
+            "If you weren't expecting this, you can ignore this email.",
+        )
+    )
+    # Never log the token — only who invited whom.
+    audit_service.emit(
+        "auth.invite",
+        actor=admin,
+        target_type="user",
+        reason=f"email={body.email} team={body.team} exercise={body.exercise_id}",
+    )
+    return {"status": "ok"}
 
 
 @router.post("/{user_id}/reset-password", response_model=UserPublic)
