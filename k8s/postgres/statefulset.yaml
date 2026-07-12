@@ -47,6 +47,13 @@ spec:
               value: iceberg_ttx
             - name: POSTGRES_DB
               value: iceberg_ttx
+            # Mount the PVC one level above PGDATA. Kubernetes can make the PVC
+            # root group-writable via fsGroup, then Postgres creates this child
+            # directory as uid 999 and can enforce its required 0700 mode. A
+            # direct PGDATA mount remains root-owned on common local-path CSI
+            # implementations and the non-root entrypoint cannot chmod it.
+            - name: PGDATA
+              value: /var/lib/postgresql/data
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -54,7 +61,7 @@ spec:
                   key: POSTGRES_PASSWORD
           volumeMounts:
             - name: postgres-data
-              mountPath: /var/lib/postgresql/data
+              mountPath: /var/lib/postgresql
             # Writable paths for a read-only rootfs: the postgres unix socket dir
             # and scratch. emptyDir so nothing persists outside the data PVC.
             - name: postgres-run

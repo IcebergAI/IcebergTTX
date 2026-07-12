@@ -47,3 +47,13 @@ def test_network_policy_allows_backup_job_to_reach_postgres() -> None:
             "ports": [{"protocol": "TCP", "port": 5432}],
         }
     ]
+
+
+def test_postgres_creates_pgdata_below_the_fs_group_owned_volume() -> None:
+    statefulset = _documents("k8s/postgres/statefulset.yaml")[0]
+    container = statefulset["spec"]["template"]["spec"]["containers"][0]
+    env = {item["name"]: item for item in container["env"]}
+    mounts = {item["name"]: item for item in container["volumeMounts"]}
+
+    assert env["PGDATA"]["value"] == "/var/lib/postgresql/data"
+    assert mounts["postgres-data"]["mountPath"] == "/var/lib/postgresql"
