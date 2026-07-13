@@ -329,6 +329,45 @@ def test_exercises_list_page_renders(page: Page):
     expect(page.locator("body")).not_to_contain_text("Internal Server Error")
 
 
+def test_arbitrary_team_ids_receive_stable_shared_scents(page: Page):
+    login_facilitator(page)
+    classes = page.evaluate(
+        """() => ({
+          known: DT.uiHelpers.teamColor('it_ops'),
+          finance: DT.uiHelpers.teamColor('finance'),
+          financeAgain: DT.uiHelpers.teamColor('finance'),
+          board: DT.uiHelpers.teamColor('board'),
+          missing: DT.uiHelpers.teamColor(''),
+        })"""
+    )
+    assert classes["known"] == "team-itops"
+    assert classes["finance"].startswith("team-scent-")
+    assert classes["finance"] == classes["financeAgain"]
+    assert classes["board"].startswith("team-scent-")
+    assert classes["missing"] == ""
+
+    rendered = page.evaluate(
+        """({ scent }) => {
+          const pill = document.createElement('span');
+          pill.className = `pill ${scent}`;
+          const label = document.createElement('span');
+          label.className = `team-label ${scent}`;
+          document.body.append(pill, label);
+          const result = {
+            pillInk: getComputedStyle(pill).color,
+            labelInk: getComputedStyle(label).color,
+            pillFill: getComputedStyle(pill).backgroundColor,
+          };
+          pill.remove();
+          label.remove();
+          return result;
+        }""",
+        {"scent": classes["finance"]},
+    )
+    assert rendered["pillInk"] == rendered["labelInk"]
+    assert rendered["pillFill"] != "rgba(0, 0, 0, 0)"
+
+
 def test_facilitator_console_renders(page: Page):
     login_facilitator(page)
     scenario_id = _make_scenario(page)
