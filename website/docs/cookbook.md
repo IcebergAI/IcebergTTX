@@ -99,8 +99,10 @@ form a **cycle** (the validator rejects loops across both option and node-level 
 the matching `next_inject_id` and surfaces it as a **Suggested next** button on the response
 card. The team's choice settles *which* branch follows — releasing the one they did not pick
 is rejected with `409 Inject is not the current branch for its group`. What the facilitator
-controls is *whether and when* that branch is released; nothing reaches participants until
-they release it. Set an option's `next_inject_id` to `null` to make it a dead-end.
+controls is *whether and when* that branch is released — by hand, or on a countdown if the
+node carries `release_at_minutes` (see [scheduled
+release](#recipe-scheduled-release-put-an-inject-on-a-clock)). No branch is ever selected
+automatically. Set an option's `next_inject_id` to `null` to make it a dead-end.
 
 ## Recipe: team-targeted injects
 

@@ -115,8 +115,10 @@ What you **cannot** do is overrule the choice. The response card surfaces the te
 resolved next step as a **Suggested next** button; releasing the branch they did *not* pick
 is rejected with `409 Inject is not the current branch for its group`.
 
-So the scenario never auto-advances — nothing reaches anyone until you release it — but the
-route through the tree is theirs.
+So the scenario never picks a branch on its own — the route through the tree is theirs, and
+the pace is yours. The one thing that *can* reach participants without you is a **scheduled
+inject** (above): its countdown fires by itself, but only on a node the team's cursor has
+already reached. A timer never chooses a branch, and never jumps ahead of the room.
 
 ![Reviewing a response and its suggested next branch](assets/inject-release.png){ .shot }
 

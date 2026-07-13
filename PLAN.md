@@ -330,7 +330,7 @@ Stored as a JSON blob in `Scenario.definition`. Validated against `ScenarioDefin
 
 **Design choices:**
 - JSON stored as blob — always read/written as a unit; normalising injects into rows would complicate the branching graph
-- Branching is "pull not push" — facilitator manually releases the next inject after seeing which branch was triggered
+- Branching: the participant's selected option settles *which* inject comes next (it advances their team's cursor); the facilitator controls only *whether and when* it is released. No branch is ever selected automatically, and the facilitator cannot substitute a different one (409) — but *delivery* can be automatic (a `release_at_minutes` inject self-releases once the cursor reaches it), so don't overstate it as "nothing reaches participants until a human releases it". Avoid the old "pull not push" shorthand — it reads as though the facilitator picks the branch, and that misreading has shipped as a docs bug.
 - Option-bearing responses require an exact option from their scenario node; `free_text_response` controls whether reasoning is also required, while no-option injects always require content
 - `triggers_communications` delays use `asyncio.create_task(asyncio.sleep(...))` — fine for single-process SQLite; would use a task queue in a multi-process deployment
 

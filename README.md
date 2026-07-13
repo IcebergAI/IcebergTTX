@@ -90,13 +90,19 @@ cp .env.example .env
 # Outside DEV_MODE the app refuses to start if SECRET_KEY is unset/weak, or if the selected
 # LLM_PROVIDER is missing its credentials (set LLM_PROVIDER=none to run without the LLM).
 #
-# Optional, all off by default (see .env.example for the full list):
-#   REGISTRATION_ENABLED=false   disable self-registration entirely (invite-only)
-#   SMTP_HOST + SMTP_FROM        enable password reset + participant invites (also
-#                                PUBLIC_BASE_URL, so emailed links are absolute)
-#   AUTH_MODE / OIDC_*           OpenID Connect SSO (Entra, Authentik, Auth0, Okta)
-#   PROXY_MODE=explicit          route outbound LLM/SIEM-HTTP/OIDC egress via PROXY_URL
-#   SIEM_*                       forward audit events off-host (syslog / HTTP / file)
+# Optional (see .env.example for the full list) — note the defaults, two are NOT "off":
+#   REGISTRATION_ENABLED=false   self-registration is ON by default (creating participants);
+#                                set false for an invite-only deployment
+#   PROXY_MODE=explicit          egress defaults to `system`, which HONOURS any ambient
+#                                HTTP(S)_PROXY/NO_PROXY vars; `explicit` routes outbound
+#                                LLM/SIEM-HTTP/OIDC via PROXY_URL, `none` forces direct
+#   SMTP_HOST + SMTP_FROM        off until both are set — enables password reset +
+#                                participant invites (also PUBLIC_BASE_URL, so emailed
+#                                links are absolute)
+#   AUTH_MODE / OIDC_*           no SSO providers are configured by default; add OIDC_*
+#                                for OpenID Connect (Entra, Authentik, Auth0, Okta)
+#   SIEM_*                       off by default — forward audit events off-host
+#                                (syslog / HTTP / file)
 
 # Compile CSS, watch templates/design tokens, and run the development server
 uv run iceberg-ttx-dev

@@ -132,9 +132,14 @@ that inject when the room is ready. What the facilitator *cannot* do is overrule
 choice: releasing the branch the team did **not** pick is rejected with
 `409 Inject is not the current branch for its group`.
 
-So the scenario does not auto-advance — nothing reaches participants until a human releases
-it — but the path through the tree is the participants' to choose. That is the point: their
-decisions have to actually carry consequences.
+So the scenario never picks a branch on its own: the route through the tree is the
+participants' to choose. That is the point — their decisions have to actually carry
+consequences.
+
+*Delivery*, on the other hand, can be automatic. An inject carrying
+[`release_at_minutes`](#fields) releases itself on a countdown once the team's cursor has
+reached it, with no facilitator action. That is a timer on an inject the participants have
+already unlocked — it never selects a branch, and it can never jump the cursor.
 
 !!! note "One response settles the branch for the whole team"
     The cursor is per team, not per person. The first response resolves the inject for the
