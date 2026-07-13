@@ -352,6 +352,55 @@ def test_shared_exercise_clock_math_handles_active_paused_and_completed(page: Pa
     assert values == {"active": 480, "paused": 240, "completed": 1020}
 
 
+def test_arbitrary_team_ids_receive_stable_shared_scents(page: Page):
+    login_facilitator(page)
+    classes = page.evaluate(
+        """() => ({
+          known: DT.uiHelpers.teamColor('it_ops'),
+          finance: DT.uiHelpers.teamColor('finance'),
+          financeAgain: DT.uiHelpers.teamColor('finance'),
+          board: DT.uiHelpers.teamColor('board'),
+          missing: DT.uiHelpers.teamColor(''),
+        })"""
+    )
+    assert classes["known"] == "team-itops"
+    assert classes["finance"].startswith("team-scent-")
+    assert classes["finance"] == classes["financeAgain"]
+    assert classes["board"].startswith("team-scent-")
+    assert classes["missing"] == ""
+
+    rendered = page.evaluate(
+        """({ scent }) => {
+          const pill = document.createElement('span');
+          pill.className = `pill ${scent}`;
+          const label = document.createElement('span');
+          label.className = `team-label ${scent}`;
+          const shared = document.createElement('span');
+          shared.className = 'team-label';
+          const muted = document.createElement('span');
+          muted.className = 'text-muted';
+          document.body.append(pill, label, shared, muted);
+          const result = {
+            pillInk: getComputedStyle(pill).color,
+            labelInk: getComputedStyle(label).color,
+            pillFill: getComputedStyle(pill).backgroundColor,
+            sharedInk: getComputedStyle(shared).color,
+            mutedInk: getComputedStyle(muted).color,
+          };
+          pill.remove();
+          label.remove();
+          shared.remove();
+          muted.remove();
+          return result;
+        }""",
+        {"scent": classes["finance"]},
+    )
+    assert rendered["pillInk"] == rendered["labelInk"]
+    assert rendered["pillFill"] != "rgba(0, 0, 0, 0)"
+    assert rendered["sharedInk"] == rendered["mutedInk"]
+    assert rendered["sharedInk"] != rendered["labelInk"]
+
+
 def test_facilitator_console_renders(page: Page):
     login_facilitator(page)
     scenario_id = _make_scenario(page)
