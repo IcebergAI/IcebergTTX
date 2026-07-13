@@ -20,14 +20,15 @@ single host, and **Kubernetes** manifests for a cluster. Both front the app with
     | In-memory state | What a second replica would break | Needs |
     |---|---|---|
     | **WebSocket manager** | Clients connected to replica A never see events raised on replica B | A shared bus (e.g. Redis pub/sub) |
-    | **Scheduled inject release** | Timers are `asyncio` tasks armed in one process; a restart or a second replica loses or duplicates them | A task queue (Celery, ARQ) |
-    | **Delayed triggered comms** | Same — `triggers_communications` fires via an in-process delayed task, so a delivery in flight is lost on restart | A task queue |
+    | **Exercise schedules** | Inject and communication timers are process-local; persisted state restores them after one process restarts, but a second live replica can duplicate scheduling work | A task queue (Celery, ARQ) |
     | **Login / registration / reset rate limiters** | Attempt counters are per process, so the effective limit multiplies by the replica count | A shared store |
     | **SIEM and proxy config caches** | An admin's change on replica A leaves replica B forwarding to the old sink, or egressing via the old proxy | Cache invalidation across replicas |
     | **In-flight LLM assessments** | Best-effort background tasks, tracked per process | A task queue |
 
-    `rehydrate_schedules()` re-arms pending release timers on startup, but only for a
-    **single-process** restart — it is not a substitute for any of the above.
+    `rehydrate_schedules()` reconstructs pending inject releases and delayed triggered
+    communications on startup. Pause cancels both timer types and resume re-arms their
+    remaining active-time delay. This protects a **single-process** restart; it is not a
+    substitute for shared scheduling across live replicas.
 
 ## Docker Compose
 
