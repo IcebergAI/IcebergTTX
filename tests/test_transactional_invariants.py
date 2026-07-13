@@ -18,7 +18,7 @@ from app.models.suggested_inject import SuggestedInject, SuggestedInjectStatus
 from app.models.user import User, UserRole
 from app.routers.suggested_injects import approve as approve_suggested_inject
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition
-from app.services.exercise_service import create_exercise, transition_state
+from app.services.exercise_service import create_exercise, enrol_member, transition_state
 from app.services.inject_service import release_inject
 from app.services.response_service import submit_response
 from app.services.scenario_service import create_scenario
@@ -55,6 +55,7 @@ async def _persisted_active_exercise() -> tuple[int, int, int, int, int]:
             title=f"Transaction exercise {unique}",
             created_by=facilitator.id,
         )
+        await enrol_member(setup, exercise=exercise, user_id=participant.id)
         exercise = await transition_state(
             setup, exercise, ExerciseState.active, actor_id=facilitator.id
         )

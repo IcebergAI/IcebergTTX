@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.exercise import Exercise, ExerciseState
 from app.models.inject import Inject
 from app.models.scenario import Scenario
+from app.models.user import UserRole
 from app.schemas.scenario_json import ScenarioDefinition
 from app.services.exercise_service import create_exercise, enrol_member, transition_state
 from app.services.inject_service import release_inject
@@ -83,7 +84,17 @@ async def create_sample_demo_exercise(
         title=f"Demo: {scenario.title}",
         created_by=created_by,
     )
-    await enrol_member(session, exercise=exercise, user_id=created_by)
+    definition = get_sample_definition(sample_id)
+    assert definition is not None
+    demo_group = definition.participant_teams[0].id if definition.participant_teams else None
+    member = await enrol_member(
+        session, exercise=exercise, user_id=created_by, group_id=demo_group
+    )
+    # A sample demo is intentionally a one-person participant preview: the
+    # facilitator owns the exercise but acts as its participant audience.
+    member.role_at_enrolment = UserRole.participant
+    session.add(member)
+    await session.commit()
     exercise = await transition_state(session, exercise, ExerciseState.active)
     start_inject = (
         await session.exec(

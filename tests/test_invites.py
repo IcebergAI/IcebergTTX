@@ -202,6 +202,53 @@ async def test_accept_enrols_in_bound_exercise(
     assert member is not None
 
 
+async def test_accept_bound_invite_after_release_preserves_token_without_account(
+    client: AsyncClient,
+    session: AsyncSession,
+    active_exercise: Exercise,
+    facilitator_token: str,
+    smtp_on,
+):
+    email = "locked-roster-invite@example.com"
+    exercise_id = active_exercise.id
+    raw = await _invite_token(
+        session, email, team="it_ops", exercise_id=exercise_id
+    )
+    injects = (
+        await client.get(
+            f"/api/exercises/{exercise_id}/injects",
+            headers=AUTH(facilitator_token),
+        )
+    ).json()
+    start = next(inject for inject in injects if inject["state"] == "pending")
+    released = await client.post(
+        f"/api/exercises/{exercise_id}/injects/{start['id']}/release",
+        headers=AUTH(facilitator_token),
+    )
+    assert released.status_code == 200
+
+    payload = {
+        "token": raw,
+        "display_name": "Locked Invitee",
+        "password": "welcomepass12",
+    }
+    rejected = await client.post("/api/auth/invite/accept", json=payload)
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"] == (
+        "Roster changes are locked after the first inject is released"
+    )
+
+    token = (
+        await session.exec(select(AuthToken).where(AuthToken.email == email))
+    ).one()
+    assert token.used_at is None
+    assert (await session.exec(select(User).where(User.email == email))).first() is None
+
+    # A retry still reaches the roster policy rather than reporting a burned token.
+    retry = await client.post("/api/auth/invite/accept", json=payload)
+    assert retry.status_code == 409
+
+
 async def test_accept_is_single_use(client: AsyncClient, session: AsyncSession, smtp_on):
     raw = await _invite_token(session, "once@example.com")
     first = await client.post(

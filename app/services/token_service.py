@@ -53,12 +53,17 @@ async def create(
 
 
 async def consume(
-    session: AsyncSession, *, raw: str, purpose: AuthTokenPurpose
+    session: AsyncSession,
+    *,
+    raw: str,
+    purpose: AuthTokenPurpose,
+    commit: bool = True,
 ) -> AuthToken | None:
     """Validate + burn a token. Returns the row on success, else None.
 
     Rejects a token that is the wrong purpose, already used, or expired. On success
-    it stamps ``used_at`` (single-use) and commits before returning.
+    it stamps ``used_at`` (single-use). Callers composing the token burn with
+    other writes may defer the commit so the complete operation is atomic.
     """
     row = (
         await session.exec(select(AuthToken).where(AuthToken.token_hash == _hash(raw)))
@@ -69,6 +74,9 @@ async def consume(
         return None
     row.used_at = datetime.now(UTC)
     session.add(row)
-    await session.commit()
-    await session.refresh(row)
+    if commit:
+        await session.commit()
+        await session.refresh(row)
+    else:
+        await session.flush()
     return row

@@ -247,8 +247,16 @@ async def enrol_member(
     exercise: Exercise,
     user_id: int,
     group_id: str | None = None,
+    commit: bool = True,
 ) -> ExerciseMember:
     assert exercise.id is not None
+    from app.services.progression_service import roster_changes_allowed
+
+    if not await roster_changes_allowed(session, exercise.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Roster changes are locked after the first inject is released",
+        )
     user = await session.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -276,8 +284,11 @@ async def enrol_member(
         role_at_enrolment=user.role,
     )
     session.add(member)
-    await session.commit()
-    await session.refresh(member)
+    if commit:
+        await session.commit()
+        await session.refresh(member)
+    else:
+        await session.flush()
     return member
 
 
@@ -288,6 +299,14 @@ async def update_member_group(
     user_id: int,
     group_id: str | None,
 ) -> ExerciseMember:
+    assert exercise.id is not None
+    from app.services.progression_service import roster_changes_allowed
+
+    if not await roster_changes_allowed(session, exercise.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Roster changes are locked after the first inject is released",
+        )
     member = (
         await session.exec(
             select(ExerciseMember)
@@ -307,6 +326,14 @@ async def update_member_group(
 
 
 async def remove_member(session: AsyncSession, *, exercise: Exercise, user_id: int) -> None:
+    assert exercise.id is not None
+    from app.services.progression_service import roster_changes_allowed
+
+    if not await roster_changes_allowed(session, exercise.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Roster changes are locked after the first inject is released",
+        )
     member = (
         await session.exec(
             select(ExerciseMember)

@@ -3,7 +3,7 @@ from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.routers.injects import _safe_filename
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -282,10 +282,29 @@ async def test_participant_sees_only_released_visible_injects(
 
 async def test_facilitator_preview_participant_uses_preview_team_for_visibility(
     client: AsyncClient,
+    session: AsyncSession,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
 ):
+    from app.services.exercise_service import enrol_member
+
+    legal_participant = User(
+        email="preview-legal@example.com",
+        display_name="Preview Legal Participant",
+        role=UserRole.participant,
+        team="legal",
+    )
+    session.add(legal_participant)
+    await session.commit()
+    await session.refresh(legal_participant)
+    await enrol_member(
+        session,
+        exercise=active_exercise,
+        user_id=legal_participant.id,
+        group_id="legal",
+    )
+
     injects = (await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
         headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -508,6 +527,46 @@ async def test_release_broadcast_team_targeted(
     )
     assert r.status_code == 200
     assert r.json()["target_teams"] == ["it_ops"]
+
+
+async def test_release_rejects_empty_participant_roster(
+    client: AsyncClient, facilitator_token: str, draft_exercise: Exercise
+):
+    await client.post(
+        f"/api/exercises/{draft_exercise.id}/start",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    injects = (
+        await client.get(
+            f"/api/exercises/{draft_exercise.id}/injects",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+    ).json()
+    response = await client.post(
+        f"/api/exercises/{draft_exercise.id}/injects/{injects[0]['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert response.status_code == 409
+    assert "eligible participant audience" in response.json()["detail"]
+
+
+async def test_release_rejects_target_with_no_enrolled_participant(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
+):
+    created = (
+        await _create_inject(
+            client,
+            facilitator_token,
+            active_exercise.id,
+            target_teams=["legal"],
+        )
+    ).json()
+    response = await client.post(
+        f"/api/exercises/{active_exercise.id}/injects/{created['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert response.status_code == 409
+    assert "eligible participant audience" in response.json()["detail"]
 
 
 # ── #16/#39: attachment filename sanitization (path-traversal defence) ─────────

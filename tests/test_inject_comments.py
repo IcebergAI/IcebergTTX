@@ -203,19 +203,37 @@ async def test_team_comments_are_scoped_to_the_commenters_team(
 
 async def test_comment_on_wrong_team_inject_is_forbidden(
     client: AsyncClient,
+    session: AsyncSession,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
 ):
-    await _advance_to_legal(
-        client, facilitator_token, participant_token, active_exercise.id
+    from app.services.exercise_service import enrol_member
+
+    exercise_id = active_exercise.id
+    legal = await _participant(
+        session,
+        email="wrong-team-legal@example.com",
+        name="Wrong Team Legal",
+        team="legal",
     )
-    legal_inject = (await _release_node(client, facilitator_token, active_exercise.id, "inject_02"))
+    await enrol_member(
+        session,
+        exercise=active_exercise,
+        user_id=legal.id,
+        group_id="legal",
+    )
+    await _advance_to_legal(
+        client, facilitator_token, participant_token, exercise_id
+    )
+    legal_inject = await _release_node(
+        client, facilitator_token, exercise_id, "inject_02"
+    )
 
     response = (await _comment(
         client,
         participant_token,
-        active_exercise.id,
+        exercise_id,
         legal_inject["id"],
         "Can I see this?",
     ))

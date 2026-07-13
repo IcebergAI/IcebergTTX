@@ -9,17 +9,28 @@ Ownership scoping is enforced by the caller (``require_exercise_owner``) — thi
 only reads by ``exercise_id``.
 """
 
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.assessment import ResponseAssessment
 from app.models.communication import Communication
-from app.models.exercise import Exercise, ExerciseStateTransition, transition_action
-from app.models.inject import Inject, InjectProgress
+from app.models.exercise import (
+    Exercise,
+    ExerciseMember,
+    ExerciseStateTransition,
+    transition_action,
+)
+from app.models.inject import Inject, InjectProgress, InjectState
 from app.models.inject_comment import InjectComment
+from app.models.report_summary import ExecutiveSummary
 from app.models.response import Response
+from app.models.scenario import Scenario
+from app.models.user import User
+from app.schemas.scenario_json import ScenarioDefinition
+from app.services.scenario_service import export_definition
 
 # Stable secondary sort so events sharing a timestamp never swap between calls.
 _KIND_ORDER = {
@@ -32,31 +43,173 @@ _KIND_ORDER = {
 }
 
 
+@dataclass(frozen=True)
+class ExerciseBundle:
+    """One authoritative read snapshot for every exercise projection."""
+
+    exercise: Exercise
+    scenario: Scenario | None
+    definition: ScenarioDefinition | None
+    users: tuple[User, ...]
+    members: tuple[ExerciseMember, ...]
+    injects: tuple[Inject, ...]
+    resolutions: tuple[InjectProgress, ...]
+    responses: tuple[Response, ...]
+    assessments: tuple[ResponseAssessment, ...]
+    communications: tuple[Communication, ...]
+    comments: tuple[InjectComment, ...]
+    transitions: tuple[ExerciseStateTransition, ...]
+    summary: ExecutiveSummary | None
+
+
+async def load_exercise_bundle(
+    session: AsyncSession, exercise_id: int
+) -> ExerciseBundle | None:
+    """Load each exercise-domain table once for report/timeline/export projections."""
+    exercise = await session.get(Exercise, exercise_id)
+    if exercise is None:
+        return None
+    scenario = await session.get(Scenario, exercise.scenario_id)
+    definition = export_definition(scenario) if scenario else None
+    members = tuple(
+        (
+            await session.exec(
+                select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id)
+            )
+        ).all()
+    )
+    injects = tuple(
+        (await session.exec(select(Inject).where(Inject.exercise_id == exercise_id))).all()
+    )
+    resolutions = tuple(
+        (
+            await session.exec(
+                select(InjectProgress).where(InjectProgress.exercise_id == exercise_id)
+            )
+        ).all()
+    )
+    responses = tuple(
+        (await session.exec(select(Response).where(Response.exercise_id == exercise_id))).all()
+    )
+    response_ids = [response.id for response in responses if response.id is not None]
+    assessments = (
+        tuple(
+            (
+                await session.exec(
+                    select(ResponseAssessment).where(
+                        col(ResponseAssessment.response_id).in_(response_ids)
+                    )
+                )
+            ).all()
+        )
+        if response_ids
+        else ()
+    )
+    communications = tuple(
+        (
+            await session.exec(
+                select(Communication).where(Communication.exercise_id == exercise_id)
+            )
+        ).all()
+    )
+    comments = tuple(
+        (
+            await session.exec(
+                select(InjectComment).where(InjectComment.exercise_id == exercise_id)
+            )
+        ).all()
+    )
+    transitions = tuple(
+        (
+            await session.exec(
+                select(ExerciseStateTransition).where(
+                    ExerciseStateTransition.exercise_id == exercise_id
+                )
+            )
+        ).all()
+    )
+    summary = (
+        await session.exec(
+            select(ExecutiveSummary).where(ExecutiveSummary.exercise_id == exercise_id)
+        )
+    ).first()
+    users = tuple((await session.exec(select(User))).all())
+    return ExerciseBundle(
+        exercise=exercise,
+        scenario=scenario,
+        definition=definition,
+        users=users,
+        members=members,
+        injects=injects,
+        resolutions=resolutions,
+        responses=responses,
+        assessments=assessments,
+        communications=communications,
+        comments=comments,
+        transitions=transitions,
+        summary=summary,
+    )
+
+
+def inject_resolution_projection(bundle: ExerciseBundle, inject: Inject) -> dict:
+    """Derive the compatible scalar state from authoritative per-context rows."""
+    assert inject.id is not None
+    rows = [row for row in bundle.resolutions if row.inject_id == inject.id]
+    resolved = [row for row in rows if row.state == InjectState.resolved]
+    complete = bool(rows) and len(resolved) == len(rows)
+    if complete:
+        last = max(
+            resolved,
+            key=lambda row: row.resolved_at or datetime.min.replace(tzinfo=UTC),
+        )
+        state = InjectState.resolved
+        resolved_at = last.resolved_at
+        resolved_by = last.resolved_by
+        reason = last.resolution_reason
+    elif rows:
+        # Once progression exists the compatible scalar remains partial until every
+        # enrolled participant context has resolved.
+        state = InjectState.released if inject.released_at else InjectState.pending
+        resolved_at = None
+        resolved_by = None
+        reason = None
+    else:
+        state = inject.state
+        resolved_at = inject.resolved_at
+        resolved_by = inject.resolved_by
+        reason = inject.resolution_reason
+    return {
+        "state": state,
+        "resolved_at": resolved_at,
+        "resolved_by": resolved_by,
+        "resolution_reason": reason,
+        "resolutions": rows,
+    }
+
+
 def _event(at: datetime, kind: str, ref_id: int, **payload) -> dict:
     return {"kind": kind, "at": at.isoformat(), **payload, "_sort": (at, _KIND_ORDER[kind], ref_id)}
 
 
-async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
+async def build_timeline(
+    session: AsyncSession,
+    exercise_id: int,
+    *,
+    bundle: ExerciseBundle | None = None,
+) -> list[dict]:
     """Return the merged event feed for ``exercise_id``, oldest first.
 
     Each event is a dict with ``kind`` + ``at`` (ISO string) plus per-kind payload
     fields. Callers must have already checked ownership.
     """
-    exercise = await session.get(Exercise, exercise_id)
-    if exercise is None:
+    bundle = bundle or await load_exercise_bundle(session, exercise_id)
+    if bundle is None:
         return []
 
     events: list[dict] = []
 
     # ── Injects released ──────────────────────────────────────────────────────
-    injects = (
-        await session.exec(
-            select(Inject).where(
-                Inject.exercise_id == exercise_id,
-                col(Inject.released_at).is_not(None),
-            )
-        )
-    ).all()
+    injects = [inject for inject in bundle.injects if inject.released_at is not None]
     for i in injects:
         assert i.id is not None
         assert i.released_at is not None  # guaranteed by the WHERE clause
@@ -75,14 +228,11 @@ async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
         )
 
     inject_titles = {inject.id: inject.title for inject in injects}
-    resolutions = (
-        await session.exec(
-            select(InjectProgress).where(
-                InjectProgress.exercise_id == exercise_id,
-                col(InjectProgress.resolved_at).is_not(None),
-            )
-        )
-    ).all()
+    resolutions = [
+        resolution
+        for resolution in bundle.resolutions
+        if resolution.resolved_at is not None
+    ]
     for resolution in resolutions:
         assert resolution.resolved_at is not None
         events.append(
@@ -99,21 +249,11 @@ async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
         )
 
     # ── Responses (+ LLM decision quality where assessed) ─────────────────────
-    responses = (
-        await session.exec(select(Response).where(Response.exercise_id == exercise_id))
-    ).all()
-    quality_by_response: dict[int, str | None] = {}
-    if responses:
-        response_ids = [r.id for r in responses if r.id is not None]
-        assessments = (
-            await session.exec(
-                select(ResponseAssessment).where(
-                    col(ResponseAssessment.response_id).in_(response_ids)
-                )
-            )
-        ).all()
-        quality_by_response = {a.response_id: a.decision_quality for a in assessments}
-    for r in responses:
+    quality_by_response = {
+        assessment.response_id: assessment.decision_quality
+        for assessment in bundle.assessments
+    }
+    for r in bundle.responses:
         assert r.id is not None
         events.append(
             _event(
@@ -131,10 +271,7 @@ async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
         )
 
     # ── Communications ────────────────────────────────────────────────────────
-    comms = (
-        await session.exec(select(Communication).where(Communication.exercise_id == exercise_id))
-    ).all()
-    for c in comms:
+    for c in bundle.communications:
         assert c.id is not None
         events.append(
             _event(
@@ -153,10 +290,7 @@ async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
         )
 
     # ── Inject comments ───────────────────────────────────────────────────────
-    comments = (
-        await session.exec(select(InjectComment).where(InjectComment.exercise_id == exercise_id))
-    ).all()
-    for cm in comments:
+    for cm in bundle.comments:
         assert cm.id is not None
         events.append(
             _event(
@@ -174,14 +308,7 @@ async def build_timeline(session: AsyncSession, exercise_id: int) -> list[dict]:
     # ── State transitions ─────────────────────────────────────────────────────
     # Lifecycle history is an authoritative domain record committed in the same
     # transaction as Exercise.state (#129), not an optional audit-log projection.
-    transitions = (
-        await session.exec(
-            select(ExerciseStateTransition).where(
-                ExerciseStateTransition.exercise_id == exercise_id
-            )
-        )
-    ).all()
-    for transition in transitions:
+    for transition in bundle.transitions:
         events.append(
             _event(
                 transition.transitioned_at,
