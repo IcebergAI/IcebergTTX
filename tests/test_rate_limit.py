@@ -63,6 +63,18 @@ def test_reset_clears_counter(clock):
     assert limiter.is_limited("ip:a") is False
 
 
+def test_reconfigure_preserves_hits_and_applies_tighter_threshold(clock):
+    limiter = RateLimiter(max_attempts=5, window_seconds=300)
+    limiter.record_failure("ip:a")
+    limiter.record_failure("ip:a")
+
+    limiter.reconfigure(max_attempts=2, window_seconds=600)
+
+    assert len(limiter._hits["ip:a"]) == 2
+    assert limiter.is_limited("ip:a") is True
+    assert limiter.retry_after("ip:a") > 300
+
+
 def test_periodic_sweep_bounds_rotating_keys(clock):
     """Rotating attacker keys (unique X-Forwarded-For / email) must not grow
     the dict without bound — expired keys are purged once per window (#49)."""

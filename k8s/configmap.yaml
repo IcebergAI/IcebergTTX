@@ -4,7 +4,16 @@ metadata:
   name: iceberg-ttx-config
   namespace: iceberg-ttx
 data:
+  # General runtime policy (#188, #190) — seeds /admin/settings on first startup.
+  REGISTRATION_ENABLED: "true"
   ACCESS_TOKEN_EXPIRE_MINUTES: "480"
+  AUDIT_PERSIST: "true"
+  LOGIN_MAX_ATTEMPTS: "5"
+  LOGIN_LOCKOUT_SECONDS: "300"
+  REGISTRATION_MAX_ATTEMPTS: "5"
+  REGISTRATION_LOCKOUT_SECONDS: "3600"
+  PASSWORD_RESET_MAX_ATTEMPTS: "5"
+  PASSWORD_RESET_LOCKOUT_SECONDS: "3600"
   # Email (#186) — non-secret values seed the admin-editable /admin/email row.
   # SMTP_PASSWORD remains in the Secret; after first startup the DB is authoritative.
   SMTP_HOST: ""

@@ -482,6 +482,17 @@ slash) so the callback URL matches what you register with the IdP.
    # OIDC_OKTA_ROLE_MAP=ttx-facilitators=facilitator
    ```
 
+## Runtime application settings
+
+Admins can change registration policy, new-token lifetime, audit persistence, and the login,
+registration, and password-reset rate limits at **`/admin/settings`**. The corresponding
+environment values seed the singleton row on first startup; after that, the database row is
+authoritative. Rate-limit changes reach the live limiters without clearing active attempt
+histories, and token-lifetime changes affect newly issued tokens only.
+
+Security-sensitive process settings such as `SECRET_KEY`, `TRUSTED_ORIGINS`, `DEV_MODE`, and
+cookie security are deliberately not exposed by this page or API.
+
 ## Email (password reset & invites)
 
 Email is **optional and off by default**. On first startup, the non-secret `SMTP_*` values
