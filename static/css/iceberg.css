@@ -63,6 +63,19 @@
   --team-comms-bg:   oklch(0.95 0.03 155);
   --team-comms-ink:  oklch(0.42 0.11 155);
   --team-comms-line: oklch(0.84 0.07 155);
+  /* Stable fallback palette for arbitrary scenario-defined team ids. */
+  --team-slot-0-bg: oklch(0.955 0.028 0);    --team-slot-0-ink: oklch(0.40 0.09 0);    --team-slot-0-line: oklch(0.86 0.055 0);
+  --team-slot-1-bg: oklch(0.955 0.028 30);   --team-slot-1-ink: oklch(0.40 0.09 30);   --team-slot-1-line: oklch(0.86 0.055 30);
+  --team-slot-2-bg: oklch(0.955 0.028 60);   --team-slot-2-ink: oklch(0.40 0.09 60);   --team-slot-2-line: oklch(0.86 0.055 60);
+  --team-slot-3-bg: oklch(0.955 0.028 90);   --team-slot-3-ink: oklch(0.40 0.09 90);   --team-slot-3-line: oklch(0.86 0.055 90);
+  --team-slot-4-bg: oklch(0.955 0.028 120);  --team-slot-4-ink: oklch(0.40 0.09 120);  --team-slot-4-line: oklch(0.86 0.055 120);
+  --team-slot-5-bg: oklch(0.955 0.028 150);  --team-slot-5-ink: oklch(0.40 0.09 150);  --team-slot-5-line: oklch(0.86 0.055 150);
+  --team-slot-6-bg: oklch(0.955 0.028 180);  --team-slot-6-ink: oklch(0.40 0.09 180);  --team-slot-6-line: oklch(0.86 0.055 180);
+  --team-slot-7-bg: oklch(0.955 0.028 210);  --team-slot-7-ink: oklch(0.40 0.09 210);  --team-slot-7-line: oklch(0.86 0.055 210);
+  --team-slot-8-bg: oklch(0.955 0.028 240);  --team-slot-8-ink: oklch(0.40 0.09 240);  --team-slot-8-line: oklch(0.86 0.055 240);
+  --team-slot-9-bg: oklch(0.955 0.028 270);  --team-slot-9-ink: oklch(0.40 0.09 270);  --team-slot-9-line: oklch(0.86 0.055 270);
+  --team-slot-10-bg: oklch(0.955 0.028 300); --team-slot-10-ink: oklch(0.40 0.09 300); --team-slot-10-line: oklch(0.86 0.055 300);
+  --team-slot-11-bg: oklch(0.955 0.028 330); --team-slot-11-ink: oklch(0.40 0.09 330); --team-slot-11-line: oklch(0.86 0.055 330);
 
   --radius: 9px;
   --radius-sm: 6px;
@@ -131,6 +144,18 @@ html[data-theme="dark"] {
   --team-comms-bg:   oklch(0.30 0.05 155);
   --team-comms-ink:  oklch(0.82 0.10 158);
   --team-comms-line: oklch(0.44 0.08 156);
+  --team-slot-0-bg: oklch(0.30 0.05 0);    --team-slot-0-ink: oklch(0.84 0.08 0);    --team-slot-0-line: oklch(0.44 0.07 0);
+  --team-slot-1-bg: oklch(0.30 0.05 30);   --team-slot-1-ink: oklch(0.84 0.08 30);   --team-slot-1-line: oklch(0.44 0.07 30);
+  --team-slot-2-bg: oklch(0.30 0.05 60);   --team-slot-2-ink: oklch(0.84 0.08 60);   --team-slot-2-line: oklch(0.44 0.07 60);
+  --team-slot-3-bg: oklch(0.30 0.05 90);   --team-slot-3-ink: oklch(0.84 0.08 90);   --team-slot-3-line: oklch(0.44 0.07 90);
+  --team-slot-4-bg: oklch(0.30 0.05 120);  --team-slot-4-ink: oklch(0.84 0.08 120);  --team-slot-4-line: oklch(0.44 0.07 120);
+  --team-slot-5-bg: oklch(0.30 0.05 150);  --team-slot-5-ink: oklch(0.84 0.08 150);  --team-slot-5-line: oklch(0.44 0.07 150);
+  --team-slot-6-bg: oklch(0.30 0.05 180);  --team-slot-6-ink: oklch(0.84 0.08 180);  --team-slot-6-line: oklch(0.44 0.07 180);
+  --team-slot-7-bg: oklch(0.30 0.05 210);  --team-slot-7-ink: oklch(0.84 0.08 210);  --team-slot-7-line: oklch(0.44 0.07 210);
+  --team-slot-8-bg: oklch(0.30 0.05 240);  --team-slot-8-ink: oklch(0.84 0.08 240);  --team-slot-8-line: oklch(0.44 0.07 240);
+  --team-slot-9-bg: oklch(0.30 0.05 270);  --team-slot-9-ink: oklch(0.84 0.08 270);  --team-slot-9-line: oklch(0.44 0.07 270);
+  --team-slot-10-bg: oklch(0.30 0.05 300); --team-slot-10-ink: oklch(0.84 0.08 300); --team-slot-10-line: oklch(0.44 0.07 300);
+  --team-slot-11-bg: oklch(0.30 0.05 330); --team-slot-11-ink: oklch(0.84 0.08 330); --team-slot-11-line: oklch(0.44 0.07 330);
 
   --shadow:      0 1px 2px oklch(0 0 0 / 0.30), 0 1px 1px oklch(0 0 0 / 0.24);
   --shadow-lift: 0 8px 24px -10px oklch(0 0 0 / 0.55), 0 2px 6px -2px oklch(0 0 0 / 0.4);
@@ -416,12 +441,25 @@ code, .code { font-family: var(--fs-mono); font-size: 0.86em; background: var(--
 }
 .pill.mono { font-family: var(--fs-mono); font-size: 10.5px; }
 
-/* Team-scent tints. Layered onto .pill by uiHelpers.teamColor(); a team id
-   outside these four falls back to the neutral .pill above. */
-.pill.team-itops { background: var(--team-itops-bg); color: var(--team-itops-ink); box-shadow: inset 0 0 0 1px var(--team-itops-line); }
-.pill.team-legal { background: var(--team-legal-bg); color: var(--team-legal-ink); box-shadow: inset 0 0 0 1px var(--team-legal-line); }
-.pill.team-exec  { background: var(--team-exec-bg);  color: var(--team-exec-ink);  box-shadow: inset 0 0 0 1px var(--team-exec-line); }
-.pill.team-comms { background: var(--team-comms-bg); color: var(--team-comms-ink); box-shadow: inset 0 0 0 1px var(--team-comms-line); }
+/* Team scents use one set of consumer rules. Named overrides preserve the
+   bundled scenarios pixel-for-pixel; arbitrary ids select a stable slot. */
+.pill[class*="team-"] { background: var(--team-bg); color: var(--team-ink); box-shadow: inset 0 0 0 1px var(--team-line); }
+.team-itops { --team-bg: var(--team-itops-bg); --team-ink: var(--team-itops-ink); --team-line: var(--team-itops-line); }
+.team-legal { --team-bg: var(--team-legal-bg); --team-ink: var(--team-legal-ink); --team-line: var(--team-legal-line); }
+.team-exec  { --team-bg: var(--team-exec-bg);  --team-ink: var(--team-exec-ink);  --team-line: var(--team-exec-line); }
+.team-comms { --team-bg: var(--team-comms-bg); --team-ink: var(--team-comms-ink); --team-line: var(--team-comms-line); }
+.team-scent-0  { --team-bg: var(--team-slot-0-bg);  --team-ink: var(--team-slot-0-ink);  --team-line: var(--team-slot-0-line); }
+.team-scent-1  { --team-bg: var(--team-slot-1-bg);  --team-ink: var(--team-slot-1-ink);  --team-line: var(--team-slot-1-line); }
+.team-scent-2  { --team-bg: var(--team-slot-2-bg);  --team-ink: var(--team-slot-2-ink);  --team-line: var(--team-slot-2-line); }
+.team-scent-3  { --team-bg: var(--team-slot-3-bg);  --team-ink: var(--team-slot-3-ink);  --team-line: var(--team-slot-3-line); }
+.team-scent-4  { --team-bg: var(--team-slot-4-bg);  --team-ink: var(--team-slot-4-ink);  --team-line: var(--team-slot-4-line); }
+.team-scent-5  { --team-bg: var(--team-slot-5-bg);  --team-ink: var(--team-slot-5-ink);  --team-line: var(--team-slot-5-line); }
+.team-scent-6  { --team-bg: var(--team-slot-6-bg);  --team-ink: var(--team-slot-6-ink);  --team-line: var(--team-slot-6-line); }
+.team-scent-7  { --team-bg: var(--team-slot-7-bg);  --team-ink: var(--team-slot-7-ink);  --team-line: var(--team-slot-7-line); }
+.team-scent-8  { --team-bg: var(--team-slot-8-bg);  --team-ink: var(--team-slot-8-ink);  --team-line: var(--team-slot-8-line); }
+.team-scent-9  { --team-bg: var(--team-slot-9-bg);  --team-ink: var(--team-slot-9-ink);  --team-line: var(--team-slot-9-line); }
+.team-scent-10 { --team-bg: var(--team-slot-10-bg); --team-ink: var(--team-slot-10-ink); --team-line: var(--team-slot-10-line); }
+.team-scent-11 { --team-bg: var(--team-slot-11-bg); --team-ink: var(--team-slot-11-ink); --team-line: var(--team-slot-11-line); }
 
 .dot { width: 7px; height: 7px; border-radius: 999px; display: inline-block; flex-shrink: 0; }
 
@@ -527,10 +565,9 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
    surface, so a team reads the same in a list header and on a pill. */
 .team-label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .team-label-swatch { width: 6px; height: 6px; border-radius: 2px; background: currentColor; flex: none; }
-.team-label.team-itops { color: var(--team-itops-ink); }
-.team-label.team-legal { color: var(--team-legal-ink); }
-.team-label.team-exec  { color: var(--team-exec-ink); }
-.team-label.team-comms { color: var(--team-comms-ink); }
+.team-label:is(
+  .team-itops, .team-legal, .team-exec, .team-comms, [class*="team-scent-"]
+) { color: var(--team-ink); }
 
 /* Participant briefing card */
 .briefing {
