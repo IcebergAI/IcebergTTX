@@ -764,7 +764,7 @@ async def test_release_serializes_against_concurrent_roster_change(monkeypatch):
             release_task = asyncio.create_task(
                 release_inject(release_session, release_view, released_by=owner_id)
             )
-            await snapshot_started.wait()
+            await asyncio.wait_for(snapshot_started.wait(), timeout=5)
             roster_task = asyncio.create_task(
                 enrol_member(
                     roster_session,
@@ -776,10 +776,10 @@ async def test_release_serializes_against_concurrent_roster_change(monkeypatch):
             await asyncio.sleep(0.05)
             assert not roster_task.done()
             allow_snapshot.set()
-            released = await release_task
+            released = await asyncio.wait_for(release_task, timeout=5)
             assert released.state.value == "released"
             with pytest.raises(HTTPException) as exc_info:
-                await roster_task
+                await asyncio.wait_for(roster_task, timeout=5)
             assert exc_info.value.status_code == 409
 
         async with AsyncSession(engine, expire_on_commit=False) as verify:
