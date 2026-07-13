@@ -366,23 +366,9 @@ a:hover { color: var(--accent-deep); }
   .rail-foot-btn { min-height: 44px; }
   .rail-foot-link { min-height: 44px; }
   .topbar { display: none !important; }
-  .workspace { padding: 20px 18px 48px; }
   .page-head { flex-direction: column; align-items: flex-start; gap: 12px; }
   .dashboard-grid { display: block; }
   .dashboard-grid > * + * { margin-top: 24px; }
-  /* Sub-nav becomes a wrapping strip above the content; the version and issue
-     link drop onto their own full-width lines rather than disappearing. */
-  .settings-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-  .settings-nav { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; }
-  .settings-nav-btn { min-height: 44px; flex: 1 1 auto; justify-content: center; }
-  .settings-nav-version { flex: 1 0 100%; margin-top: 8px; }
-  .settings-nav-link { flex: 1 0 100%; min-height: 44px; display: flex; align-items: center; }
-  .settings-password { grid-template-columns: minmax(0, 1fr); }
-  .settings-profile { grid-template-columns: minmax(0, 1fr) !important; }
-  .settings-profile > .btn { width: 100%; }
-  .settings-sample-row { flex-direction: column; gap: 12px; }
-  .settings-sample-actions { width: 100%; flex-wrap: wrap; }
-  .settings-sample-actions > .btn { flex: 1 1 140px; }
 }
 
 /* --------------------------------------------------------------------------
@@ -391,6 +377,9 @@ a:hover { color: var(--accent-deep); }
 .workspace {
   width: 100%; max-width: 1180px; margin-inline: auto;
   padding: 26px 32px 64px;
+}
+@media (max-width: 760px) {
+  .workspace { padding: 20px 18px 48px; }
 }
 /* A page that fills the viewport rather than growing with its content, so a pane
    inside it can scroll on its own. Replaces per-page `calc(100vh - 180px)`
@@ -648,6 +637,26 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
 .settings-input:focus { box-shadow: inset 0 0 0 1px var(--accent), var(--ring); }
 .settings-password { grid-template-columns: 1fr 1fr; max-width: 560px; }
 
+@media (max-width: 760px) {
+  /* Keep mobile overrides after the base settings declarations so the
+     source-order cascade cannot restore the desktop two-column layout. */
+  .settings-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .settings-nav { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .settings-nav-btn { min-height: 44px; flex: 1 1 auto; justify-content: center; }
+  .settings-nav-version { flex: 1 0 100%; margin-top: 8px; }
+  .settings-nav-link { flex: 1 0 100%; min-height: 44px; display: flex; align-items: center; }
+  .settings-password { grid-template-columns: minmax(0, 1fr); }
+  .settings-profile { grid-template-columns: minmax(0, 1fr) !important; }
+  .settings-profile > .btn { width: 100%; }
+  .settings-sample-row { flex-direction: column; gap: 12px; }
+  .settings-sample-actions { width: 100%; flex-wrap: wrap; }
+  .settings-sample-actions > .btn { flex: 1 1 140px; }
+  .settings-page .seg {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%;
+  }
+  .settings-page .seg-btn { width: 100%; min-width: 0; padding-inline: 6px; }
+}
+
 /* --------------------------------------------------------------------------
  *  Communications inbox
  * ------------------------------------------------------------------------ */
@@ -662,6 +671,12 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
 }
 .comm-filter-control::placeholder { color: var(--muted); }
 .comm-filter-control:focus { box-shadow: inset 0 0 0 1px var(--accent), var(--ring); }
+
+.comm-layout {
+  display: grid; grid-template-columns: 352px minmax(0, 1fr);
+}
+.comm-pane { min-width: 0; }
+.comm-mobile-back { display: none; }
 
 .comm-list-row { position: relative; transition: background .12s ease, box-shadow .12s ease, color .12s ease; }
 .comm-list-row:hover { background: color-mix(in oklch, var(--accent) 7%, transparent); }
@@ -681,6 +696,24 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
 .comm-list-row-selected .comm-row-time { color: var(--accent-deep); }
 .comm-list-row-selected .comm-row-subject { color: var(--ink); }
 .comm-list-row-selected .comm-row-preview { color: var(--ink-soft); }
+
+@media (max-width: 760px) {
+  .comm-layout {
+    display: block; width: 100%; max-width: 100%;
+    overflow: hidden; grid-template-columns: minmax(0, 1fr);
+  }
+  .comm-pane {
+    display: none !important; width: 100%; max-width: 100%; height: 100%;
+    min-width: 0; overflow-x: hidden; overscroll-behavior: contain;
+  }
+  .comm-pane.is-mobile-active { display: flex !important; }
+  .comm-pane-reader.is-mobile-active { display: block !important; padding: 16px; }
+  .comm-pane-list { border-right: 0; }
+  .comm-mobile-back {
+    display: inline-flex; min-height: 44px; padding-inline: 12px;
+    align-items: center; gap: 7px;
+  }
+}
 
 /* --------------------------------------------------------------------------
  *  Facilitator console
