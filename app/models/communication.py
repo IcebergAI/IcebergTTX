@@ -25,8 +25,13 @@ class Communication(SQLModel, table=True):
             "trigger_key",
             name="uq_communication_exercise_trigger_key",
         ),
+        # The inbox both filters on exercise_id and orders by sent_at, so one index
+        # serves the whole query. Declared ascending: btree scans backwards for DESC.
+        Index("ix_communication_exercise_sent_at", "exercise_id", "sent_at"),
     )
     id: int | None = Field(default=None, primary_key=True)
+    # exercise_id needs no index of its own: it leads both the unique constraint and
+    # the composite above.
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
     sender_id: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
     sender_team: str | None = None

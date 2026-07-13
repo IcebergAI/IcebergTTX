@@ -23,7 +23,7 @@ class InjectState(StrEnum):
 
 class Inject(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
+    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE", index=True)
     scenario_node_id: str | None = None   # links back to the ScenarioDefinition inject id
     title: str
     content: str
@@ -72,7 +72,7 @@ class InjectProgress(SQLModel, table=True):
     )
 
     id: int | None = Field(default=None, primary_key=True)
-    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
+    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE", index=True)
     inject_id: int = Field(foreign_key="inject.id", ondelete="CASCADE")
     group_id: str | None = None
     state: InjectState = Field(default=InjectState.released)

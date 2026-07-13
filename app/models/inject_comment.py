@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 
 class InjectComment(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    inject_id: int = Field(foreign_key="inject.id", ondelete="CASCADE")
-    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
+    inject_id: int = Field(foreign_key="inject.id", ondelete="CASCADE", index=True)
+    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE", index=True)
     user_id: int = Field(foreign_key="user.id")
     group_id: str | None = None
     content: str

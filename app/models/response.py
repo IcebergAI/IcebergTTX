@@ -23,7 +23,8 @@ class Response(SQLModel, table=True):
         ),
     )
     id: int | None = Field(default=None, primary_key=True)
-    inject_id: int = Field(foreign_key="inject.id", ondelete="CASCADE")
+    inject_id: int = Field(foreign_key="inject.id", ondelete="CASCADE", index=True)
+    # exercise_id needs no index of its own: it leads uq_response_exercise_inject_user.
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
     user_id: int = Field(foreign_key="user.id")
     group_id: str | None = None

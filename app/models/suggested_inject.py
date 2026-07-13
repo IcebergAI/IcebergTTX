@@ -27,7 +27,7 @@ class SuggestedInject(SQLModel, table=True):
         ),
     )
     id: int | None = Field(default=None, primary_key=True)
-    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
+    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE", index=True)
     triggered_by_response_id: int = Field(foreign_key="response.id", ondelete="CASCADE")
     title: str
     content: str

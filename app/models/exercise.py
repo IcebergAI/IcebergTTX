@@ -50,7 +50,7 @@ def transition_action(from_state: ExerciseState, to_state: ExerciseState) -> str
 
 class Exercise(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    scenario_id: int = Field(foreign_key="scenario.id")
+    scenario_id: int = Field(foreign_key="scenario.id", index=True)
     title: str
     state: ExerciseState = Field(default=ExerciseState.draft)
     current_node_id: str | None = None  # tracks active inject in the scenario tree
@@ -99,9 +99,15 @@ class Exercise(SQLModel, table=True):
 
 
 class ExerciseMember(SQLModel, table=True):
+    # The (exercise_id, user_id) pair is the app's hottest lookup — every
+    # exercise_group_for_user() and sender-team resolution goes through it. Its leading
+    # column also serves the exercise_id-only roster scan, so exercise_id needs no
+    # index of its own.
+    __table_args__ = (Index("ix_exercisemember_exercise_user", "exercise_id", "user_id"),)
+
     id: int | None = Field(default=None, primary_key=True)
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
-    user_id: int = Field(foreign_key="user.id")
+    user_id: int = Field(foreign_key="user.id", index=True)
     group_id: str | None = None
     # Immutable attendance metadata: reporting must not be rewritten when an
     # administrator later changes the user's global role. Removing and re-enrolling
