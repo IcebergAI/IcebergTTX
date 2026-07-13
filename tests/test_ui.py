@@ -7,14 +7,16 @@ Seed users are created by conftest (see below). Run with:
   pytest tests/test_ui.py --headed -v    # watch the browser
 """
 import json
+import os
 import re
 
 import pytest
 
 httpx = pytest.importorskip("httpx")
+BASE = os.environ.get("ICEBERG_TTX_UI_BASE", "http://localhost:8765").rstrip("/")
 
 try:
-    httpx.get("http://localhost:8765/login", timeout=1.0)
+    httpx.get(f"{BASE}/login", timeout=1.0)
 except Exception:
     pytest.skip("Playwright UI tests require the dev server on port 8765", allow_module_level=True)
 
@@ -22,8 +24,6 @@ sync_api = pytest.importorskip("playwright.sync_api")
 Browser = sync_api.Browser
 Page = sync_api.Page
 expect = sync_api.expect
-
-BASE = "http://localhost:8765"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -37,6 +37,10 @@ def login(page: Page, email: str, password: str = "password1234") -> None:
         )
     except Exception:
         pass
+    # Stop authenticated-page work before invalidating its cookie. Otherwise a
+    # late API 401 can redirect this page to /login while the explicit login
+    # navigation below is starting, which Chromium reports as ERR_ABORTED (#219).
+    page.goto("about:blank")
     page.context.clear_cookies()
     page.goto(f"{BASE}/login")
     page.fill("input[type=email]", email)
