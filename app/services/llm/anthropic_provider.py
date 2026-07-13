@@ -3,8 +3,8 @@
 Both backends share the ``client.messages.create`` surface, so they differ only in
 client construction (``AsyncAnthropic`` vs ``AsyncAnthropicBedrock``) and the model
 ID (Bedrock requires an ``anthropic.``-prefixed ID, direct Anthropic must not carry
-it). Prompt caching (a ``cache_control`` block on the shared context + the
-``anthropic-beta`` header) is applied only on the direct API path.
+it). Prompt caching (a ``cache_control`` block on the shared context) is applied
+only on the direct API path; the retired beta header is no longer required.
 
 The ``anthropic`` SDK is a core dependency; ``anthropic[bedrock]`` (boto3) is the
 optional ``llm-bedrock`` extra, imported lazily so a non-Bedrock deployment never
@@ -25,8 +25,6 @@ from app.services.llm.base import register_adapter
 
 if TYPE_CHECKING:
     from app.config import LLMProviderConfig
-
-_PROMPT_CACHING_BETA = "prompt-caching-2024-07-31"
 
 ANTHROPIC_API_BASE = "https://api.anthropic.com"
 _BEDROCK_HOST = "https://bedrock-runtime.{region}.amazonaws.com"
@@ -93,7 +91,6 @@ class AnthropicFamilyAdapter:
         self, system: str, cached_context: str, user_prompt: str, max_tokens: int
     ) -> str:
         client = self._get_client()
-        kwargs: dict = {}
         if self.cfg.backend == "bedrock":
             # Bedrock: send a plain two-part message (no cache_control / beta header).
             context_block: dict = {"type": "text", "text": cached_context}
@@ -103,7 +100,6 @@ class AnthropicFamilyAdapter:
                 "text": cached_context,
                 "cache_control": {"type": "ephemeral"},
             }
-            kwargs["extra_headers"] = {"anthropic-beta": _PROMPT_CACHING_BETA}
         msg = await client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
@@ -114,7 +110,6 @@ class AnthropicFamilyAdapter:
                     "content": [context_block, {"type": "text", "text": user_prompt}],
                 }
             ],
-            **kwargs,
         )
         for block in msg.content:
             text = getattr(block, "text", None)
