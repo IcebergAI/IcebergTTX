@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import io
 import json
@@ -664,6 +665,150 @@ async def test_stale_transition_cannot_revert_completed_exercise(
                     await cleanup.delete(scenario)
                     await cleanup.commit()
             if user_id is not None:
+                user = await cleanup.get(User, user_id)
+                if user is not None:
+                    await cleanup.delete(user)
+                    await cleanup.commit()
+
+
+async def test_release_serializes_against_concurrent_roster_change(monkeypatch):
+    """A roster writer waiting behind release must observe the durable lock (#194)."""
+    from app.database import engine
+    from app.services import progression_service
+    from app.services.exercise_service import create_exercise, enrol_member
+    from app.services.inject_service import release_inject
+    from app.services.scenario_service import create_scenario
+
+    user_ids: list[int] = []
+    scenario_id = exercise_id = None
+    release_task = roster_task = None
+    unique = uuid4().hex
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as setup:
+            facilitator = User(
+                email=f"roster-lock-owner-{unique}@example.test",
+                display_name="Roster Lock Owner",
+                role=UserRole.facilitator,
+            )
+            initial = User(
+                email=f"roster-lock-initial-{unique}@example.test",
+                display_name="Initial Participant",
+                role=UserRole.participant,
+                team="it_ops",
+            )
+            late = User(
+                email=f"roster-lock-late-{unique}@example.test",
+                display_name="Late Participant",
+                role=UserRole.participant,
+                team="legal",
+            )
+            setup.add_all([facilitator, initial, late])
+            await setup.commit()
+            for user in (facilitator, initial, late):
+                await setup.refresh(user)
+                assert user.id is not None
+                user_ids.append(user.id)
+            scenario = await create_scenario(
+                setup,
+                definition=ScenarioDefinition(
+                    title="Roster serialization",
+                    participant_teams=[
+                        {"id": "it_ops", "label": "IT Ops"},
+                        {"id": "legal", "label": "Legal"},
+                    ],
+                    injects=[InjectNode(id="shared", title="Shared", content="Respond")],
+                    start_inject_id="shared",
+                ),
+                created_by=facilitator.id,
+            )
+            scenario_id = scenario.id
+            exercise = await create_exercise(
+                setup,
+                scenario_id=scenario.id,
+                title="Roster serialization",
+                created_by=facilitator.id,
+            )
+            exercise_id = exercise.id
+            await enrol_member(
+                setup, exercise=exercise, user_id=initial.id, group_id="it_ops"
+            )
+            exercise = await transition_state(setup, exercise, ExerciseState.active)
+            inject = (
+                await setup.exec(
+                    select(Inject).where(Inject.exercise_id == exercise.id)
+                )
+            ).one()
+            inject_id = inject.id
+            owner_id = facilitator.id
+            late_id = late.id
+
+        snapshot_started = asyncio.Event()
+        allow_snapshot = asyncio.Event()
+        original_seed = progression_service.seed_inject_resolution_contexts
+
+        async def paused_seed(session, inject):
+            snapshot_started.set()
+            await allow_snapshot.wait()
+            return await original_seed(session, inject)
+
+        monkeypatch.setattr(
+            progression_service, "seed_inject_resolution_contexts", paused_seed
+        )
+        async with (
+            AsyncSession(engine, expire_on_commit=False) as release_session,
+            AsyncSession(engine, expire_on_commit=False) as roster_session,
+        ):
+            release_view = await release_session.get(Inject, inject_id)
+            roster_view = await roster_session.get(Exercise, exercise_id)
+            assert release_view is not None and roster_view is not None
+            release_task = asyncio.create_task(
+                release_inject(release_session, release_view, released_by=owner_id)
+            )
+            await snapshot_started.wait()
+            roster_task = asyncio.create_task(
+                enrol_member(
+                    roster_session,
+                    exercise=roster_view,
+                    user_id=late_id,
+                    group_id="legal",
+                )
+            )
+            await asyncio.sleep(0.05)
+            assert not roster_task.done()
+            allow_snapshot.set()
+            released = await release_task
+            assert released.state.value == "released"
+            with pytest.raises(HTTPException) as exc_info:
+                await roster_task
+            assert exc_info.value.status_code == 409
+
+        async with AsyncSession(engine, expire_on_commit=False) as verify:
+            members = (
+                await verify.exec(
+                    select(ExerciseMember).where(
+                        ExerciseMember.exercise_id == exercise_id
+                    )
+                )
+            ).all()
+            assert {member.group_id for member in members} == {"it_ops"}
+    finally:
+        for task in (release_task, roster_task):
+            if task is not None and not task.done():
+                task.cancel()
+        async with AsyncSession(engine, expire_on_commit=False) as cleanup:
+            if exercise_id is not None:
+                exercise = await cleanup.get(Exercise, exercise_id)
+                if exercise is not None:
+                    await cleanup.delete(exercise)
+                    await cleanup.commit()
+            if scenario_id is not None:
+                from app.models.scenario import Scenario
+
+                scenario = await cleanup.get(Scenario, scenario_id)
+                if scenario is not None:
+                    await cleanup.delete(scenario)
+                    await cleanup.commit()
+            for user_id in user_ids:
                 user = await cleanup.get(User, user_id)
                 if user is not None:
                     await cleanup.delete(user)

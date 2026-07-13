@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.exercise import ExerciseMember, ExerciseProgress
+from app.models.exercise import Exercise, ExerciseMember, ExerciseProgress
 from app.models.inject import Inject, InjectProgress, InjectState
 from app.models.user import UserRole
 from app.services.scenario_service import definition_for_exercise
@@ -79,7 +79,10 @@ async def seed_inject_resolution_contexts(
 
 
 async def roster_changes_allowed(session: AsyncSession, exercise_id: int) -> bool:
-    """Roster changes stop once the first inject fixes its resolution audience."""
+    """Lock the exercise and reject roster changes after its first release."""
+    await session.exec(
+        select(Exercise.id).where(Exercise.id == exercise_id).with_for_update()
+    )
     released = (
         await session.exec(
             select(Inject.id)
@@ -91,6 +94,15 @@ async def roster_changes_allowed(session: AsyncSession, exercise_id: int) -> boo
         )
     ).first()
     return released is None
+
+
+async def lock_exercise_for_audience_snapshot(
+    session: AsyncSession, exercise_id: int
+) -> None:
+    """Serialize inject release with roster mutation on the exercise row."""
+    await session.exec(
+        select(Exercise.id).where(Exercise.id == exercise_id).with_for_update()
+    )
 
 
 async def resolve_response_progression(

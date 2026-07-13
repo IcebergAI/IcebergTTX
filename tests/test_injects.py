@@ -510,6 +510,46 @@ async def test_release_broadcast_team_targeted(
     assert r.json()["target_teams"] == ["it_ops"]
 
 
+async def test_release_rejects_empty_participant_roster(
+    client: AsyncClient, facilitator_token: str, draft_exercise: Exercise
+):
+    await client.post(
+        f"/api/exercises/{draft_exercise.id}/start",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    injects = (
+        await client.get(
+            f"/api/exercises/{draft_exercise.id}/injects",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+    ).json()
+    response = await client.post(
+        f"/api/exercises/{draft_exercise.id}/injects/{injects[0]['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert response.status_code == 409
+    assert "eligible participant audience" in response.json()["detail"]
+
+
+async def test_release_rejects_target_with_no_enrolled_participant(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
+):
+    created = (
+        await _create_inject(
+            client,
+            facilitator_token,
+            active_exercise.id,
+            target_teams=["legal"],
+        )
+    ).json()
+    response = await client.post(
+        f"/api/exercises/{active_exercise.id}/injects/{created['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert response.status_code == 409
+    assert "eligible participant audience" in response.json()["detail"]
+
+
 # ── #16/#39: attachment filename sanitization (path-traversal defence) ─────────
 
 

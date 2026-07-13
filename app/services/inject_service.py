@@ -74,12 +74,26 @@ async def release_inject(
     inject: Inject,
     released_by: int | None,
 ) -> Inject:
-    from app.services.progression_service import release_is_allowed
+    from app.services.progression_service import (
+        lock_exercise_for_audience_snapshot,
+        release_is_allowed,
+        seed_inject_resolution_contexts,
+    )
+
+    await lock_exercise_for_audience_snapshot(session, inject.exercise_id)
 
     if not await release_is_allowed(session, inject):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Inject is not the current branch for its group",
+        )
+
+    contexts = await seed_inject_resolution_contexts(session, inject)
+    if not contexts:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Inject cannot be released without an eligible participant audience",
         )
 
     now = datetime.now(UTC)
@@ -97,9 +111,6 @@ async def release_inject(
             status_code=status.HTTP_409_CONFLICT,
             detail="Inject is no longer pending and cannot be released",
         )
-    from app.services.progression_service import seed_inject_resolution_contexts
-
-    await seed_inject_resolution_contexts(session, inject)
     await session.commit()
     # ``inject`` may already be in this session's identity map, so a returned ORM
     # row would retain its old pending attributes with synchronize_session=False.
