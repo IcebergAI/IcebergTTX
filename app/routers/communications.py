@@ -17,7 +17,6 @@ from app.services.access_control import (
 )
 from app.services.communication_service import (
     all_team_ids_for_exercise,
-    broadcast_communication,
     comm_payload,
     communication_read_at,
     communication_read_times,
@@ -161,7 +160,6 @@ async def send_comm(
         external_entity=None if visible_to_teams else body.external_entity,
         visible_to_teams=visible_to_teams,
     )
-    await broadcast_communication(comm)
     return await comm_payload(comm, session)
 
 
@@ -193,7 +191,6 @@ async def inject_comm(
         external_entity=body.external_entity,
         visible_to_teams=visible_to_teams,
     )
-    await broadcast_communication(comm)
     return await comm_payload(comm, session)
 
 

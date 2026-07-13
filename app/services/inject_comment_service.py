@@ -1,11 +1,10 @@
-from datetime import UTC, datetime
-
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.inject import Inject
 from app.models.inject_comment import InjectComment
 from app.models.user import User
 from app.services.access_control import exercise_group_for_user, inject_target_teams
+from app.services.domain_events import InjectCommentCreated, dispatch, record
 
 
 async def comment_group_for_user(session: AsyncSession, inject: Inject, user: User) -> str | None:
@@ -23,6 +22,25 @@ async def comment_group_for_user(session: AsyncSession, inject: Inject, user: Us
     return exercise_group or user.team
 
 
+async def comment_payload(session: AsyncSession, comment: InjectComment) -> dict:
+    """Canonical comment serialization, shared by the HTTP reply and the WS frame.
+
+    Lives here rather than in the router because the event that carries it is recorded
+    *inside* the transaction, so the payload has to be built before the commit.
+    """
+    author = await session.get(User, comment.user_id)
+    return {
+        "id": comment.id,
+        "inject_id": comment.inject_id,
+        "exercise_id": comment.exercise_id,
+        "user_id": comment.user_id,
+        "author_name": author.display_name if author else f"User #{comment.user_id}",
+        "group_id": comment.group_id,
+        "content": comment.content,
+        "created_at": comment.created_at.isoformat(),
+    }
+
+
 async def create_inject_comment(
     session: AsyncSession,
     *,
@@ -31,7 +49,8 @@ async def create_inject_comment(
     user_id: int,
     group_id: str | None,
     content: str,
-) -> InjectComment:
+) -> tuple[InjectComment, dict]:
+    """Create a comment and return it with its payload, which the caller also broadcasts."""
     comment = InjectComment(
         inject_id=inject_id,
         exercise_id=exercise_id,
@@ -40,21 +59,15 @@ async def create_inject_comment(
         content=content,
     )
     session.add(comment)
+    await session.flush()  # id + created_at, so the payload is complete pre-commit
+    payload = await comment_payload(session, comment)
+    record(
+        session,
+        InjectCommentCreated(exercise_id=exercise_id, comment=comment, payload=payload),
+    )
     await session.commit()
     await session.refresh(comment)
-    return comment
+    await dispatch(session)
+    return comment, payload
 
 
-async def broadcast_inject_comment_created(comment: InjectComment, payload: dict) -> None:
-    from app.services.ws_manager import manager
-
-    message = {
-        "type": "inject_comment_created",
-        "exercise_id": comment.exercise_id,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "payload": payload,
-    }
-    if comment.group_id:
-        await manager.broadcast_to_groups(comment.exercise_id, [comment.group_id], message)
-    else:
-        await manager.broadcast_to_exercise(comment.exercise_id, message)

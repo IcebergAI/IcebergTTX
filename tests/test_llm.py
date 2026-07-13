@@ -692,7 +692,12 @@ async def test_run_llm_pipeline_broadcasts_to_facilitator(
             return_value=_fake_provider(_assessment_json(), _suggestion_json()),
         ),
         _patch("app.services.llm_service.engine", test_engine),
-        _patch("app.services.ws_manager.manager") as mock_manager,
+        # Patch the projector's `manager`, not ws_manager's module attribute (#212).
+        # llm_service used to import `manager` lazily *inside* the function, so patching
+        # the module attribute was re-resolved at call time. The frames now terminate in
+        # ws_projector, which binds `manager` at import — so that is the reference the
+        # patch has to replace, or the mock is simply never consulted.
+        _patch("app.services.ws_projector.manager") as mock_manager,
     ):
         mock_manager.send_to_facilitators = AsyncMock(side_effect=_fake_send)
         await run_llm_pipeline(response.id, inject.id, active_exercise.id)

@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -10,6 +9,7 @@ from app.models.response import Response
 from app.schemas.api import ExerciseProgressionPublic, ResponsePublic
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.access_control import inject_matches_group
+from app.services.domain_events import ResponseSubmitted, dispatch, record
 from app.services.scenario_service import (
     definition_for_exercise,
     get_inject_node,
@@ -92,7 +92,7 @@ async def submit_response(
     try:
         await session.flush()
 
-        next_ids = await _compute_next_inject_ids(
+        next_ids = await compute_next_inject_ids(
             session, exercise_id, inject_id, selected_option
         )
         inject = await session.get(Inject, inject_id)
@@ -106,6 +106,10 @@ async def submit_response(
             actor_id=user_id,
             next_node_id=next_ids[0] if len(next_ids) == 1 else None,
         )
+        # Inside the transaction: the IntegrityError branch below rolls back, which
+        # discards this — so a duplicate submission cannot broadcast. That used to be
+        # guaranteed only by the broadcast sitting after the try block.
+        record(session, ResponseSubmitted(exercise_id=exercise_id, response=response))
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
@@ -114,11 +118,12 @@ async def submit_response(
             detail="Response already submitted for this inject",
         ) from exc
     await session.refresh(response)
+    await dispatch(session)
 
-    return response, await _pending_next_injects(session, exercise_id, next_ids, group_id)
+    return response, await pending_next_injects(session, exercise_id, next_ids, group_id)
 
 
-async def _compute_next_inject_ids(
+async def compute_next_inject_ids(
     session: AsyncSession,
     exercise_id: int,
     inject_id: int,
@@ -136,16 +141,16 @@ async def _compute_next_inject_ids(
 
 
 async def response_next_inject_suggestions(session: AsyncSession, response: Response) -> list[dict]:
-    next_ids = await _compute_next_inject_ids(
+    next_ids = await compute_next_inject_ids(
         session,
         response.exercise_id,
         response.inject_id,
         response.selected_option,
     )
-    return await _pending_next_injects(session, response.exercise_id, next_ids, response.group_id)
+    return await pending_next_injects(session, response.exercise_id, next_ids, response.group_id)
 
 
-async def _pending_next_injects(
+async def pending_next_injects(
     session: AsyncSession,
     exercise_id: int,
     scenario_node_ids: list[str],
@@ -170,25 +175,6 @@ async def _pending_next_injects(
     return [_next_inject_payload(inject) for inject in matches]
 
 
-async def broadcast_response_submitted(
-    response: Response,
-    next_injects: list[dict],
-    progression: dict | None = None,
-) -> None:
-    from app.services.ws_manager import manager
-
-    message = {
-        "type": "response_submitted",
-        "exercise_id": response.exercise_id,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "payload": {
-            "response": response_payload(response),
-            "next_inject_ids": [item["scenario_node_id"] for item in next_injects],
-            "next_injects": next_injects,
-            "progression": progression,
-        },
-    }
-    await manager.send_to_facilitators(response.exercise_id, message)
 
 
 def response_payload(
