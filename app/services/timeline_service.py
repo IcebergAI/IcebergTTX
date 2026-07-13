@@ -28,8 +28,9 @@ from app.models.inject_comment import InjectComment
 from app.models.report_summary import ExecutiveSummary
 from app.models.response import Response
 from app.models.scenario import Scenario
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.scenario_json import ScenarioDefinition
+from app.services.progression_service import participant_contexts
 from app.services.scenario_service import export_definition
 
 # Stable secondary sort so events sharing a timestamp never swap between calls.
@@ -151,15 +152,6 @@ async def load_exercise_bundle(
     )
 
 
-def participant_contexts(bundle: ExerciseBundle) -> set[str | None]:
-    """Contexts that can actually resolve a shared inject (participants only)."""
-    return {
-        member.group_id
-        for member in bundle.members
-        if member.role_at_enrolment == UserRole.participant
-    }
-
-
 def inject_resolution_projection(bundle: ExerciseBundle, inject: Inject) -> dict:
     """Derive the compatible scalar state from authoritative per-context rows."""
     assert inject.id is not None
@@ -167,7 +159,7 @@ def inject_resolution_projection(bundle: ExerciseBundle, inject: Inject) -> dict
     expected = (
         {inject.group_id}
         if inject.group_id is not None
-        else participant_contexts(bundle)
+        else participant_contexts(bundle.members)
     )
     resolved = [row for row in rows if row.state == InjectState.resolved]
     complete = bool(expected) and expected <= {row.group_id for row in resolved}
@@ -181,9 +173,8 @@ def inject_resolution_projection(bundle: ExerciseBundle, inject: Inject) -> dict
         resolved_by = last.resolved_by
         reason = last.resolution_reason
     elif rows:
-        # Once progression exists the legacy scalar is known to be partial. In
-        # particular, an unassigned participant mirrors `resolved` to it even
-        # while a named participant team remains outstanding.
+        # Once progression exists the compatible scalar remains partial until every
+        # enrolled participant context has resolved.
         state = InjectState.released if inject.released_at else InjectState.pending
         resolved_at = None
         resolved_by = None

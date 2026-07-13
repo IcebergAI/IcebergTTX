@@ -1,13 +1,15 @@
 """Transactional, group-aware scenario progression (#126)."""
 
+from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.exercise import ExerciseProgress
+from app.models.exercise import ExerciseMember, ExerciseProgress
 from app.models.inject import Inject, InjectProgress, InjectState
+from app.models.user import UserRole
 from app.services.scenario_service import definition_for_exercise
 
 
@@ -28,6 +30,15 @@ async def seed_progression(
         )
 
 
+def participant_contexts(members: Iterable[ExerciseMember]) -> set[str | None]:
+    """Contexts that can resolve a shared inject, based on enrolment-time roles."""
+    return {
+        member.group_id
+        for member in members
+        if member.role_at_enrolment == UserRole.participant
+    }
+
+
 async def resolve_response_progression(
     session: AsyncSession,
     *,
@@ -41,6 +52,14 @@ async def resolve_response_progression(
     Returns ``True`` only when this call performed the transition; replayed
     deliveries observe the existing resolution without changing the cursor.
     """
+    # Serialize shared-inject resolution. Without the row lock, two teams could each
+    # observe only their own uncommitted progress and neither would close the scalar.
+    locked_inject = (
+        await session.exec(
+            select(Inject).where(Inject.id == inject.id).with_for_update()
+        )
+    ).one()
+    inject = locked_inject
     context = group_id or inject.group_id
     await session.exec(
         insert(InjectProgress)
@@ -70,10 +89,28 @@ async def resolve_response_progression(
     progress.resolution_reason = "participant_response"
     session.add(progress)
 
-    # A team-specific physical inject has one progression context, so its legacy
-    # top-level state can safely mirror the authoritative per-context resolution.
-    # Shared injects remain released while other teams may still respond.
-    if inject.group_id is not None or context is None:
+    # A team-specific physical inject has one progression context. A shared inject
+    # closes only after every enrolled participant context has resolved; observers
+    # and facilitators can never submit responses and therefore do not count.
+    complete = inject.group_id is not None
+    if inject.group_id is None:
+        members = (
+            await session.exec(
+                select(ExerciseMember).where(
+                    ExerciseMember.exercise_id == inject.exercise_id
+                )
+            )
+        ).all()
+        expected = participant_contexts(members)
+        resolutions = (
+            await session.exec(
+                select(InjectProgress).where(InjectProgress.inject_id == inject.id)
+            )
+        ).all()
+        complete = bool(expected) and expected <= {
+            row.group_id for row in resolutions if row.state == InjectState.resolved
+        }
+    if complete:
         inject.state = InjectState.resolved
         inject.resolved_at = now
         inject.resolved_by = actor_id
