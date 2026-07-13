@@ -81,6 +81,7 @@ jobs:
       DATABASE_URL_OVERRIDE_FOR_TESTS: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/iceberg_ui
       SECRET_KEY: test-secret-key-for-ui-ci
       DEV_MODE: "true"
+      ICEBERG_TTX_UI_BASE: http://127.0.0.1:8765
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -164,17 +165,21 @@ jobs:
         run: |
           uv run uvicorn app.main:app --host 127.0.0.1 --port 8765 > /tmp/iceberg-ui.log 2>&1 &
           server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          cleanup() {
+            status=$?
+            kill "$server_pid" 2>/dev/null || true
+            if [ "$status" -ne 0 ]; then
+              cat /tmp/iceberg-ui.log
+            fi
+          }
+          trap cleanup EXIT
           for _ in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:8765/login > /dev/null; then
+            if curl --fail --silent "$ICEBERG_TTX_UI_BASE/login" > /dev/null; then
               break
             fi
             sleep 1
           done
-          if ! curl --fail --silent http://127.0.0.1:8765/login > /dev/null; then
-            cat /tmp/iceberg-ui.log
-            exit 1
-          fi
+          curl --fail --silent "$ICEBERG_TTX_UI_BASE/login" > /dev/null
           uv run pytest -n0 tests/test_ui.py
 
   # Lint the workflows themselves (#81): zizmor for CI/CD security risks
