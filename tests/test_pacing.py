@@ -1,4 +1,6 @@
-"""Pacing: exercise clock + scheduled inject release (#116)."""
+"""Pacing: exercise clock and durable exercise schedules (#116, #194)."""
+
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -7,10 +9,11 @@ from httpx_ws import aconnect_ws
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.exercise import Exercise, ExerciseState
+from app.models.communication import CommDirection, Communication
+from app.models.exercise import Exercise, ExerciseState, ExerciseStateTransition
 from app.models.inject import Inject, InjectState
 from app.models.user import User
-from app.schemas.scenario_json import InjectNode, ScenarioDefinition
+from app.schemas.scenario_json import InjectNode, ScenarioDefinition, TriggerComm
 from app.services import schedule_service
 from app.services.exercise_service import (
     create_exercise,
@@ -26,7 +29,8 @@ AUTH = lambda t: {"Authorization": f"Bearer {t}"}  # noqa: E731
 async def _clear_schedules():
     """Cancel any timers a test armed so sleeping tasks don't leak between tests."""
     yield
-    for ex_id in list(schedule_service._scheduled.keys()):
+    exercise_ids = set(schedule_service._scheduled) | set(schedule_service._scheduled_comms)
+    for ex_id in exercise_ids:
         schedule_service.cancel_exercise_schedules(ex_id)
 
 
@@ -165,6 +169,113 @@ async def test_pause_defers_and_resume_rearms(
     assert ex.id not in schedule_service._scheduled  # deferred
     await client.post(f"/api/exercises/{ex.id}/resume", headers=AUTH(facilitator_token))
     assert inject.id in schedule_service._scheduled.get(ex.id, {})  # re-armed
+
+
+async def test_triggered_comms_rehydrate_and_follow_pause_resume(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    active_exercise: Exercise,
+    sample_scenario,
+):
+    """Pending trigger timers derive from durable state after restart or resume (#194)."""
+    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
+    definition.injects[0].triggers_communications = [
+        TriggerComm(
+            external_entity="NCSC",
+            direction="inbound",
+            subject="Delayed advisory",
+            body="Call the incident hotline.",
+            delay_after_release_seconds=300,
+        )
+    ]
+    sample_scenario.definition = definition.model_dump_json()
+    inject = await _first_inject(session, active_exercise.id)
+    inject.state = InjectState.released
+    inject.released_at = datetime.now(UTC) - timedelta(seconds=30)
+    session.add(sample_scenario)
+    session.add(inject)
+    await session.commit()
+
+    # Startup rehydration delegates to this persisted-state reconstruction.
+    await schedule_service.schedule_exercise_injects(session, active_exercise)
+    assert "inject_01:0" in schedule_service._scheduled_comms.get(active_exercise.id, {})
+
+    await client.post(
+        f"/api/exercises/{active_exercise.id}/pause", headers=AUTH(facilitator_token)
+    )
+    assert active_exercise.id not in schedule_service._scheduled_comms
+    await client.post(
+        f"/api/exercises/{active_exercise.id}/resume", headers=AUTH(facilitator_token)
+    )
+    assert "inject_01:0" in schedule_service._scheduled_comms.get(active_exercise.id, {})
+
+    # A persisted delivery key wins over reconstruction, including after a restart.
+    schedule_service.cancel_exercise_schedules(active_exercise.id)
+    session.add(
+        Communication(
+            exercise_id=active_exercise.id,
+            direction=CommDirection.inbound,
+            external_entity="NCSC",
+            subject="Delayed advisory",
+            body="Call the incident hotline.",
+            triggered_by_inject_id=inject.id,
+            trigger_key="inject_01:0",
+        )
+    )
+    await session.commit()
+    await session.refresh(active_exercise)
+    await schedule_service.schedule_exercise_injects(session, active_exercise)
+    assert active_exercise.id not in schedule_service._scheduled_comms
+
+
+def test_trigger_delay_excludes_multiple_persisted_pause_spans(monkeypatch):
+    now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(schedule_service, "datetime", FrozenDateTime)
+    exercise = Exercise(
+        id=7,
+        scenario_id=3,
+        title="Pause-aware trigger",
+        state=ExerciseState.active,
+        created_by=1,
+    )
+    transitions = [
+        ExerciseStateTransition(
+            exercise_id=7,
+            from_state=ExerciseState.active,
+            to_state=ExerciseState.paused,
+            transitioned_at=now - timedelta(seconds=240),
+        ),
+        ExerciseStateTransition(
+            exercise_id=7,
+            from_state=ExerciseState.paused,
+            to_state=ExerciseState.active,
+            transitioned_at=now - timedelta(seconds=180),
+        ),
+        ExerciseStateTransition(
+            exercise_id=7,
+            from_state=ExerciseState.active,
+            to_state=ExerciseState.paused,
+            transitioned_at=now - timedelta(seconds=120),
+        ),
+        ExerciseStateTransition(
+            exercise_id=7,
+            from_state=ExerciseState.paused,
+            to_state=ExerciseState.active,
+            transitioned_at=now - timedelta(seconds=90),
+        ),
+    ]
+
+    elapsed = schedule_service._active_elapsed_since(
+        exercise, now - timedelta(seconds=300), transitions
+    )
+    assert elapsed == 210
 
 
 async def test_complete_cancels_schedules(
