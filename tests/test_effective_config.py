@@ -25,6 +25,7 @@ async def test_effective_config_lists_every_setting_and_never_secret_values(
     secrets = {
         "anthropic_api_key": "never-render-anthropic",
         "smtp_password": "never-render-smtp",
+        "proxy_url": "http://embedded-user:embedded-password@proxy.example:3128",
         "proxy_password": "never-render-proxy",
         "oidc_authentik_client_secret": "never-render-oidc",
     }

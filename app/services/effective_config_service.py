@@ -30,6 +30,7 @@ SECRET_FIELDS = {
     "gemini_api_key",
     "smtp_password",
     "siem_http_token",
+    "proxy_url",
     "proxy_username",
     "proxy_password",
     "oidc_entra_client_secret",
