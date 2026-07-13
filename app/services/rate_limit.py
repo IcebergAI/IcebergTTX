@@ -86,6 +86,12 @@ class RateLimiter:
     def clear(self) -> None:
         self._hits.clear()
 
+    def reconfigure(self, max_attempts: int, window_seconds: int) -> None:
+        """Apply new limits without erasing active histories."""
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self._last_sweep = time.monotonic()
+
 
 login_rate_limiter = RateLimiter(
     settings.login_max_attempts, settings.login_lockout_seconds
@@ -102,3 +108,22 @@ registration_rate_limiter = RateLimiter(
 password_reset_rate_limiter = RateLimiter(
     settings.password_reset_max_attempts, settings.password_reset_lockout_seconds
 )
+
+
+def apply_config(
+    *,
+    login_max_attempts: int,
+    login_lockout_seconds: int,
+    registration_max_attempts: int,
+    registration_lockout_seconds: int,
+    password_reset_max_attempts: int,
+    password_reset_lockout_seconds: int,
+) -> None:
+    """Push a runtime settings snapshot into all three live limiters."""
+    login_rate_limiter.reconfigure(login_max_attempts, login_lockout_seconds)
+    registration_rate_limiter.reconfigure(
+        registration_max_attempts, registration_lockout_seconds
+    )
+    password_reset_rate_limiter.reconfigure(
+        password_reset_max_attempts, password_reset_lockout_seconds
+    )

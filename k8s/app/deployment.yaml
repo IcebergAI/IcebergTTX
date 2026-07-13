@@ -159,6 +159,47 @@ spec:
                 configMapKeyRef:
                   name: iceberg-ttx-config
                   key: ACCESS_TOKEN_EXPIRE_MINUTES
+            # General policy values seed /admin/settings on first startup.
+            - name: REGISTRATION_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: REGISTRATION_ENABLED
+            - name: AUDIT_PERSIST
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: AUDIT_PERSIST
+            - name: LOGIN_MAX_ATTEMPTS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: LOGIN_MAX_ATTEMPTS
+            - name: LOGIN_LOCKOUT_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: LOGIN_LOCKOUT_SECONDS
+            - name: REGISTRATION_MAX_ATTEMPTS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: REGISTRATION_MAX_ATTEMPTS
+            - name: REGISTRATION_LOCKOUT_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: REGISTRATION_LOCKOUT_SECONDS
+            - name: PASSWORD_RESET_MAX_ATTEMPTS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: PASSWORD_RESET_MAX_ATTEMPTS
+            - name: PASSWORD_RESET_LOCKOUT_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: PASSWORD_RESET_LOCKOUT_SECONDS
             # Email (#186) — non-secret fields seed /admin/email; password stays Secret-only.
             - name: SMTP_HOST
               valueFrom:

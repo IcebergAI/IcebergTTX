@@ -210,4 +210,42 @@ document.addEventListener('alpine:init', () => {
       this.testResult = data && data.result ? data.result : 'error: request failed';
     },
   }));
+
+  Alpine.data('adminGeneral', () => ({
+    cfg: {
+      registration_enabled: true,
+      access_token_expire_minutes: 480,
+      audit_persist: true,
+      login_max_attempts: 5,
+      login_lockout_seconds: 300,
+      registration_max_attempts: 5,
+      registration_lockout_seconds: 3600,
+      password_reset_max_attempts: 5,
+      password_reset_lockout_seconds: 3600,
+    },
+    saving: false,
+    message: '',
+
+    async init() { await this.loadSettings(); },
+
+    async loadSettings() {
+      const resp = await apiFetch('/general/settings');
+      const data = await readJson(resp, null);
+      if (!data) return;
+      for (const key of Object.keys(this.cfg)) {
+        if (data[key] !== undefined) this.cfg[key] = data[key];
+      }
+    },
+
+    async save() {
+      this.saving = true;
+      this.message = '';
+      const resp = await apiFetch('/general/settings', {
+        method: 'PUT', body: JSON.stringify(this.cfg),
+      });
+      this.saving = false;
+      this.message = resp && resp.ok ? 'General settings saved.' : 'Could not save.';
+      if (resp && resp.ok) await this.loadSettings();
+    },
+  }));
 });
