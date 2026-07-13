@@ -3,12 +3,11 @@ from typing import Annotated
 
 from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from jwt import PyJWTError
-from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.models.user import User, UserRole
-from app.services import audit_service
+from app.services import audit_service, user_service
 from app.services.auth_service import decode_access_token
 from app.services.role_preview import apply_role_preview
 
@@ -54,7 +53,7 @@ async def resolve_user_from_token(
         )
         return None
 
-    user = (await session.exec(select(User).where(User.email == email))).first()
+    user = await user_service.get_by_email(session, email)
     if user is None or not user.is_active:
         audit_service.emit(
             "auth.token_invalid",

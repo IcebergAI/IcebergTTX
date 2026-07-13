@@ -30,12 +30,11 @@ import sys
 from datetime import UTC, datetime
 from getpass import getpass
 
-from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.user import User, UserRole
 from app.schemas.auth import EMAIL_RE, validate_password_strength
-from app.services import audit_service
+from app.services import audit_service, user_service
 from app.services.auth_service import hash_password
 
 
@@ -60,9 +59,7 @@ async def upsert_admin(
     if not EMAIL_RE.match(email):
         raise ValueError(f"Not a valid email address: {email!r}")
 
-    existing = (
-        await session.exec(select(User).where(User.email == email).with_for_update())
-    ).first()
+    existing = await user_service.get_by_email_for_update(session, email)
 
     if existing is None:
         if not password:
@@ -179,9 +176,7 @@ async def _run(args: argparse.Namespace) -> int:
     from app.database import engine
 
     async with AsyncSession(engine, expire_on_commit=False) as session:
-        existing = (
-            await session.exec(select(User).where(User.email == args.email.strip().lower()))
-        ).first()
+        existing = await user_service.get_by_email(session, args.email.strip().lower())
         needed = existing is None or args.reset_password
         try:
             password = _resolve_password(args, needed=needed)

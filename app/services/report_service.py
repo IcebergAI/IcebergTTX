@@ -11,9 +11,11 @@ collapse them gracefully.
 
 from datetime import datetime
 
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.inject import InjectProgress
+from app.models.report_summary import ExecutiveSummary
 from app.models.user import UserRole
 from app.services.timeline_service import ExerciseBundle, load_exercise_bundle
 
@@ -305,3 +307,13 @@ def render_markdown(report: dict) -> str:
             lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+async def executive_summary_for_exercise(
+    session: AsyncSession, exercise_id: int
+) -> ExecutiveSummary | None:
+    return (
+        await session.exec(
+            select(ExecutiveSummary).where(ExecutiveSummary.exercise_id == exercise_id)
+        )
+    ).first()

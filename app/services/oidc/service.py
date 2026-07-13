@@ -17,7 +17,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import OIDCProviderConfig
 from app.models.user import User, UserRole
-from app.services import audit_service, proxy, ws_manager
+from app.services import audit_service, proxy, user_service, ws_manager
 from app.services.oidc import auth0 as _auth0  # noqa: F401 - registers adapter
 from app.services.oidc import authentik as _authentik  # noqa: F401 - registers adapter
 from app.services.oidc import entra as _entra  # noqa: F401 - registers adapter
@@ -208,9 +208,7 @@ async def provision_oidc_user(
 
     # 2. Email is a mutable display/contact attribute, never an identity key.
     normalized_email = identity.email.strip().lower()
-    by_email = (
-        await session.exec(select(User).where(User.email == normalized_email))
-    ).first()
+    by_email = await user_service.get_by_email(session, normalized_email)
     if by_email is not None:
         if not by_email.is_active:
             raise OIDCProvisionError("account disabled")

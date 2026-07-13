@@ -2,7 +2,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
@@ -28,6 +27,7 @@ from app.services import (
     mail_service,
     oidc_settings_service,
     token_service,
+    user_service,
 )
 from app.services.auth_service import create_access_token, hash_password, verify_password
 from app.services.background import spawn
@@ -129,7 +129,7 @@ async def register(
         )
     registration_rate_limiter.record_failure(ip)
 
-    if (await session.exec(select(User).where(User.email == body.email))).first():
+    if await user_service.email_exists(session, body.email):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
     # Role is never taken from the request — self-registration is always a
@@ -180,7 +180,7 @@ async def login(
             headers={"Retry-After": str(retry_after)},
         )
 
-    user = (await session.exec(select(User).where(User.email == body.email))).first()
+    user = await user_service.get_by_email(session, body.email)
     # An OIDC-provisioned account has no local password (hashed_password is NULL) and
     # must not authenticate here — it signs in via SSO (#25).
     if not user or user.hashed_password is None or not verify_password(
@@ -242,7 +242,7 @@ async def password_reset_request(
         )
     password_reset_rate_limiter.record_failure(ip)
 
-    user = (await session.exec(select(User).where(User.email == body.email))).first()
+    user = await user_service.get_by_email(session, body.email)
     if user is not None and user.auth_provider == LOCAL_AUTH_PROVIDER:
         raw = await token_service.create(
             session,
@@ -366,7 +366,7 @@ async def invite_accept(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired invite link."
         )
-    if (await session.exec(select(User).where(User.email == token.email))).first():
+    if await user_service.email_exists(session, token.email):
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="This email already has an account."

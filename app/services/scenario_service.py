@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
@@ -132,3 +132,13 @@ def resolve_branch(
         if opt.id == selected_option_id:
             return opt.next_inject_id
     return None
+
+
+async def titles_for(session: AsyncSession, scenario_ids: set[int]) -> dict[int, str]:
+    """id -> title for the given scenarios — one query, not an N+1 per exercise row."""
+    if not scenario_ids:
+        return {}
+    rows = await session.exec(
+        select(Scenario.id, Scenario.title).where(col(Scenario.id).in_(scenario_ids))
+    )
+    return {scenario_id: title for scenario_id, title in rows.all() if scenario_id is not None}
