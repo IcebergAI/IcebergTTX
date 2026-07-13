@@ -329,6 +329,29 @@ def test_exercises_list_page_renders(page: Page):
     expect(page.locator("body")).not_to_contain_text("Internal Server Error")
 
 
+def test_shared_exercise_clock_math_handles_active_paused_and_completed(page: Page):
+    login_facilitator(page)
+    values = page.evaluate(
+        """() => {
+          const started_at = '2026-01-01T00:00:00Z';
+          return {
+            active: DT.uiHelpers.exerciseElapsedSeconds({
+              started_at, state: 'active', accumulated_pause_seconds: 120,
+            }, Date.parse('2026-01-01T00:10:00Z')),
+            paused: DT.uiHelpers.exerciseElapsedSeconds({
+              started_at, state: 'paused', paused_at: '2026-01-01T00:05:00Z',
+              accumulated_pause_seconds: 60,
+            }),
+            completed: DT.uiHelpers.exerciseElapsedSeconds({
+              started_at, state: 'completed', ended_at: '2026-01-01T00:20:00Z',
+              accumulated_pause_seconds: 180,
+            }),
+          };
+        }"""
+    )
+    assert values == {"active": 480, "paused": 240, "completed": 1020}
+
+
 def test_facilitator_console_renders(page: Page):
     login_facilitator(page)
     scenario_id = _make_scenario(page)
