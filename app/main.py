@@ -184,7 +184,7 @@ async def request_validation_handler(
     retain the structured error while removing raw inputs from every entry.
     """
     errors = [
-        {key: value for key, value in error.items() if key != "input"}
+        {key: value for key, value in error.items() if key not in {"input", "ctx"}}
         for error in exc.errors()
     ]
     return JSONResponse(status_code=422, content={"detail": errors})
