@@ -204,11 +204,11 @@
     <div class="section-title mb-4">
       <h2 class="smallcaps text-muted">LLM assessment</h2>
     </div>
-    <p class="text-[13.5px] text-ink-soft leading-relaxed mb-3">When enabled on an exercise, Claude evaluates each participant response and produces:</p>
+    <p class="text-[13.5px] text-ink-soft leading-relaxed mb-3">When enabled on an exercise, the configured AI model evaluates each participant response and produces:</p>
     <ul class="space-y-2 mb-4">
       <li class="flex items-start gap-2 text-[13.5px] text-ink-soft">
         <span class="dot mt-1.5 shrink-0" style="background: var(--accent-d);"></span>
-        A <strong>decision quality</strong> rating — <em>strong</em>, <em>acceptable</em>, or <em>poor</em>
+        A <strong>decision quality</strong> rating — <em>good</em>, <em>adequate</em>, or <em>poor</em>
       </li>
       <li class="flex items-start gap-2 text-[13.5px] text-ink-soft">
         <span class="dot mt-1.5 shrink-0" style="background: var(--accent-d);"></span>
@@ -219,7 +219,7 @@
         A suggested <strong>follow-up inject</strong> the facilitator can approve and queue
       </li>
     </ul>
-    <p class="text-[13.5px] text-ink-soft leading-relaxed">Set <code class="mono text-[12.5px]">ANTHROPIC_API_KEY</code> in your <code class="mono text-[12.5px]">.env</code> file to enable. Assessments appear in the AI assessment column of each response card in the facilitator console, and in the right pane's AI suggestions widget.</p>
+    <p class="text-[13.5px] text-ink-soft leading-relaxed">The provider is chosen on the server with <code class="mono text-[12.5px]">LLM_PROVIDER</code> — Anthropic, Amazon Bedrock, OpenAI, Ollama, or Gemini — each with its own credential and model settings (see <code class="mono text-[12.5px]">.env.example</code>). Assessments appear in the AI assessment column of each response card in the facilitator console, and in the right pane's AI suggestions widget. The <strong>Flagged</strong> filter surfaces the responses rated <em>poor</em>.</p>
   </section>
 
   <!-- Tips -->
