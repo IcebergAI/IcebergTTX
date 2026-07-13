@@ -1159,16 +1159,22 @@ async def test_all_projections_share_authoritative_inject_resolution(
     export_row, report_row, timeline, csv_row = await projections()
     assert export_row["state"] == "released"
     assert csv_row["inject_state"] == "released"
-    assert {row["group_id"] for row in export_row["resolutions"]} == {None}
-    assert {row["group_id"] for row in report_row["resolutions"]} == {None}
+    expected_partial = {None: "resolved", "legal": "released"}
+    assert {
+        row["group_id"]: row["state"] for row in export_row["resolutions"]
+    } == expected_partial
+    assert {
+        row["group_id"]: row["state"] for row in report_row["resolutions"]
+    } == expected_partial
     assert {
         event["group_id"]
         for event in timeline
         if event["kind"] == "inject_resolved"
     } == {None}
-    assert {row["group_id"] for row in json.loads(csv_row["inject_resolutions"])} == {
-        None
-    }
+    assert {
+        row["group_id"]: row["state"]
+        for row in json.loads(csv_row["inject_resolutions"])
+    } == expected_partial
     late_enrolment = await client.post(
         f"/api/exercises/{exercise.id}/members",
         json={"user_id": late_participant.id, "group_id": "legal"},
