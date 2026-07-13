@@ -632,6 +632,7 @@ document.addEventListener('alpine:init', () => {
       if (p.startsWith('/admin/proxy')) return 'Outbound proxy';
       if (p.startsWith('/admin/settings')) return 'General settings';
       if (p.startsWith('/admin/llm')) return 'AI provider';
+      if (p.startsWith('/admin/oidc')) return 'Single sign-on';
       if (p.startsWith('/help')) return 'Help';
       if (p.startsWith('/settings')) return 'Settings';
       const seg = p.replace(/^\/+/, '').split('/')[0] || 'Home';

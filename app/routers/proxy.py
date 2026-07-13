@@ -88,7 +88,9 @@ def egress_targets() -> dict[str, str]:
     if endpoint:
         targets["SIEM (http sink)"] = endpoint
 
-    for cfg in settings.enabled_oidc_providers():
+    from app.services import oidc_settings_service
+
+    for cfg in oidc_settings_service.get_config().enabled_providers():
         targets[f"OIDC ({cfg.key})"] = cfg.metadata_url
 
     return targets

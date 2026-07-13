@@ -393,8 +393,15 @@ role/authorization check is unchanged.
   login/JIT-provision/role-sync events are audited (`auth.oidc_login`,
   `auth.jit_provision`, `auth.oidc_role_sync`) without tokens or codes.
 
-Set `OIDC_REDIRECT_BASE_URL` to the app's public `https://` origin (no trailing
-slash) so the callback URL matches what you register with the IdP.
+Admins edit every non-secret provider field at **`/admin/oidc`**. Environment
+values seed the singleton row on first startup; the database is authoritative
+after that. Saving rebuilds the Authlib registry so client IDs, scopes, discovery
+locations, and role maps apply on the next login. A change that would select
+SSO-only mode without a complete provider and environment client secret is refused,
+so the active administrator cannot remove the last viable login path.
+
+Set the public redirect base URL in Admin → Single sign-on (or seed it with
+`OIDC_REDIRECT_BASE_URL`) so the callback URL matches what you register with the IdP.
 
 ### Microsoft Entra ID
 

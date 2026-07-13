@@ -155,6 +155,19 @@ def _reset_general_config_cache():
     general_settings_service.set_config(None)
 
 
+@pytest.fixture(autouse=True)
+def _reset_oidc_config_cache():
+    """Keep runtime SSO config and the Authlib registry isolated between tests."""
+    from app.services import oidc_settings_service
+    from app.services.oidc import service as oidc_service
+
+    oidc_settings_service.set_config(None)
+    oidc_service.reset_registration()
+    yield
+    oidc_settings_service.set_config(None)
+    oidc_service.reset_registration()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _create_schema():
     # The test suite builds a throwaway schema directly from the models rather

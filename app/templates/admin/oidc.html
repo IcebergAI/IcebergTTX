@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Single sign-on — IcebergTTX{% endblock %}
+
+{% macro provider_card(key, label, locator_label, locator_field, extra_label='', extra_field='') %}
+<details class="surface p-5" {% if key == 'entra' %}open{% endif %}>
+  <summary class="cursor-pointer select-none">
+    <span class="font-medium text-[14px]">{{ label }}</span>
+    <span class="ml-2 text-[11.5px]" :class="secretClass('{{ key }}')"
+          x-text="'client secret ' + secretStatus('{{ key }}')"></span>
+  </summary>
+  <div class="mt-5 space-y-4">
+    <label class="flex items-center gap-3">
+      <input type="checkbox" x-model="cfg.oidc_{{ key }}_enabled" />
+      <span class="text-[13.5px]">Enable {{ label }}</span>
+    </label>
+    <div class="grid gap-4 md:grid-cols-2">
+      <div>
+        <label class="block smallcaps text-muted mb-1" for="{{ key }}-client-id">Client ID</label>
+        <input id="{{ key }}-client-id" type="text" x-model="cfg.oidc_{{ key }}_client_id"
+               autocomplete="off" class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+      </div>
+      <div>
+        <label class="block smallcaps text-muted mb-1" for="{{ key }}-locator">{{ locator_label }}</label>
+        <input id="{{ key }}-locator" type="text" x-model="cfg.{{ locator_field }}"
+               autocomplete="off" class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+      </div>
+      {% if extra_field %}
+      <div>
+        <label class="block smallcaps text-muted mb-1" for="{{ key }}-extra">{{ extra_label }}</label>
+        <input id="{{ key }}-extra" type="text" x-model="cfg.{{ extra_field }}"
+               autocomplete="off" class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+      </div>
+      {% endif %}
+      <div>
+        <label class="block smallcaps text-muted mb-1" for="{{ key }}-scopes">Scopes</label>
+        <input id="{{ key }}-scopes" type="text" x-model="cfg.oidc_{{ key }}_scopes"
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+      </div>
+      <div>
+        <label class="block smallcaps text-muted mb-1" for="{{ key }}-role-claim">Role/group claim</label>
+        <input id="{{ key }}-role-claim" type="text" x-model="cfg.oidc_{{ key }}_role_claim"
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+      </div>
+      <div class="md:col-span-2">
+        <label class="block smallcaps text-muted mb-1" for="{{ key }}-role-map">Role map</label>
+        <input id="{{ key }}-role-map" type="text" x-model="cfg.oidc_{{ key }}_role_map"
+               placeholder="group=participant,responders=facilitator"
+               class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        <p class="text-[11.5px] text-faint mt-1">Comma-separated group=role allowlist. Unknown roles are refused.</p>
+      </div>
+    </div>
+  </div>
+</details>
+{% endmacro %}
+
+{% block content %}
+<div x-data="adminOidc()" class="workspace max-w-[1040px]">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Single sign-on</h1>
+      <p class="text-[13.5px] text-muted mt-1">
+        Change identity-provider routing without restarting. Client secrets remain environment-only.
+      </p>
+    </div>
+  </div>
+
+  <div class="space-y-5">
+    <section class="surface p-5">
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="auth-mode">Authentication mode</label>
+          <select id="auth-mode" x-model="cfg.auth_mode"
+                  class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface">
+            <option value="local">Local only</option>
+            <option value="both">Local and SSO</option>
+            <option value="oidc">SSO only</option>
+          </select>
+          <p class="text-[11.5px] text-faint mt-1">SSO-only is refused unless a complete provider and environment secret are ready.</p>
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="oidc-redirect-base">Public redirect base URL</label>
+          <input id="oidc-redirect-base" type="url" x-model="cfg.oidc_redirect_base_url"
+                 placeholder="https://ttx.example.com"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+      </div>
+    </section>
+
+    {{ provider_card('entra', 'Microsoft Entra ID', 'Tenant ID', 'oidc_entra_tenant_id') }}
+    {{ provider_card('authentik', 'Authentik', 'Base URL', 'oidc_authentik_base_url', 'Application slug', 'oidc_authentik_app_slug') }}
+    {{ provider_card('auth0', 'Auth0', 'Tenant domain', 'oidc_auth0_domain') }}
+    {{ provider_card('okta', 'Okta', 'Tenant domain', 'oidc_okta_domain', 'Authorization server', 'oidc_okta_auth_server') }}
+
+    <section class="surface p-5 flex flex-wrap items-center gap-3">
+      <button type="button" @click="save()" :disabled="saving"
+              class="btn btn-primary h-10 px-4 text-[13px] justify-center disabled:opacity-50">
+        <span x-text="saving ? 'Saving…' : 'Save SSO settings'"></span>
+      </button>
+      <p class="text-[12.5px] text-muted" role="status" x-text="message"></p>
+    </section>
+  </div>
+</div>
+{% endblock %}

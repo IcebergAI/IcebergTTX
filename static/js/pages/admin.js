@@ -301,4 +301,54 @@ document.addEventListener('alpine:init', () => {
       this.message = data && data.result ? data.result : 'error: request failed';
     },
   }));
+
+  Alpine.data('adminOidc', () => ({
+    cfg: {
+      auth_mode: 'both', oidc_redirect_base_url: '',
+      oidc_entra_enabled: false, oidc_entra_client_id: '', oidc_entra_tenant_id: '',
+      oidc_entra_scopes: 'openid email profile', oidc_entra_role_claim: '', oidc_entra_role_map: '',
+      oidc_authentik_enabled: false, oidc_authentik_client_id: '', oidc_authentik_base_url: '',
+      oidc_authentik_app_slug: '', oidc_authentik_scopes: 'openid email profile',
+      oidc_authentik_role_claim: 'groups', oidc_authentik_role_map: '',
+      oidc_auth0_enabled: false, oidc_auth0_client_id: '', oidc_auth0_domain: '',
+      oidc_auth0_scopes: 'openid email profile', oidc_auth0_role_claim: '', oidc_auth0_role_map: '',
+      oidc_okta_enabled: false, oidc_okta_client_id: '', oidc_okta_domain: '',
+      oidc_okta_auth_server: '', oidc_okta_scopes: 'openid email profile',
+      oidc_okta_role_claim: 'groups', oidc_okta_role_map: '',
+    },
+    secrets: { entra: false, authentik: false, auth0: false, okta: false },
+    saving: false,
+    message: '',
+
+    async init() { await this.loadSettings(); },
+    secretStatus(key) { return this.secrets[key] ? 'set' : 'not set'; },
+    secretClass(key) { return this.secrets[key] ? 'text-ok' : 'text-crit'; },
+
+    async loadSettings() {
+      const resp = await apiFetch('/oidc/settings');
+      const data = await readJson(resp, null);
+      if (!data) return;
+      for (const key of Object.keys(this.cfg)) {
+        if (data[key] !== undefined) this.cfg[key] = data[key];
+      }
+      this.secrets = data.client_secrets_set || this.secrets;
+    },
+
+    async save() {
+      this.saving = true;
+      this.message = '';
+      const resp = await apiFetch('/oidc/settings', {
+        method: 'PUT', body: JSON.stringify(this.cfg),
+      });
+      const data = await readJson(resp, null);
+      this.saving = false;
+      if (resp && resp.ok) {
+        this.message = 'SSO settings saved.';
+        await this.loadSettings();
+      } else {
+        this.message = data && typeof data.detail === 'string'
+          ? data.detail : 'Could not save.';
+      }
+    },
+  }));
 });
