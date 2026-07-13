@@ -1,7 +1,18 @@
 # IMPORTANT: replicas must remain 1.
-# ws_manager.py holds all WebSocket state in-memory. Scaling beyond 1 replica
-# silently breaks broadcasts — clients on different replicas cannot receive
-# each other's events. Add Redis pub/sub to ws_manager.py before scaling.
+# Every piece of cross-request state the app keeps lives in the process, so a
+# second replica would not share it. Redis pub/sub in ws_manager.py is NOT
+# sufficient on its own — it only fixes the first of these:
+#   - ws_manager.py       WebSocket fan-out       -> shared bus (Redis pub/sub)
+#   - schedule_service    scheduled inject release, and the delayed triggered
+#                         comms in communication_service: in-process asyncio
+#                         tasks, lost or duplicated per replica
+#                                                 -> task queue (Celery/ARQ)
+#   - rate_limit          per-process attempt counters, so a 2nd replica
+#                         DOUBLES the effective login/registration/reset limits
+#                                                 -> shared store
+#   - SiemConfig/ProxyConfig caches: an admin's policy change would not reach
+#                         the other replica       -> cross-replica invalidation
+# See website/docs/deployment.md for the full table.
 #
 # strategy: Recreate ensures the old pod is terminated before the new one
 # starts, so there is never a brief window with 2 replicas running.
