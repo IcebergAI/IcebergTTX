@@ -29,7 +29,8 @@ async def test_oidc_settings_expose_only_secret_status(
     )
     assert response.status_code == 200
     assert response.json()["client_secrets_set"]["authentik"] is True
-    assert "client_secret" not in response.text
+    for provider in oidc_settings_service.PROVIDER_KEYS:
+        assert f'"oidc_{provider}_client_secret"' not in response.text
     assert "env-secret-value" not in response.text
 
 
