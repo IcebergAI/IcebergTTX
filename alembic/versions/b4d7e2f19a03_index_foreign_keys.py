@@ -21,10 +21,17 @@ parent (Exercise, Inject). Two categories are deliberately left unindexed:
     PK + ix_communicationread_user_communication).
   - The actor columns — *.created_by, *.released_by, *.resolved_by, *.reviewed_by,
     *.advanced_by, exercisestatetransition.actor_id, communication.sender_id,
-    communication.triggered_by_inject_id, exerciseprogress.current_inject_id,
-    injectcomment.user_id, response.user_id. No query filters on any of them and
-    their parent User rows are not deleted in bulk, so an index would be pure
-    write overhead.
+    injectcomment.user_id, response.user_id. These all reference User: no query
+    filters on any of them, and User rows are not deleted in bulk, so an index
+    would be pure write overhead.
+
+Note that communication.triggered_by_inject_id and exerciseprogress.current_inject_id
+ARE indexed here even though no query filters on them either. They reference Inject,
+not User, and Inject is routinely deleted (DELETE /injects/{id}, plus the cascade from
+deleting an Exercise). Both are ON DELETE SET NULL, so without an index PostgreSQL
+sequentially scans the whole child table on every inject deletion to find the rows to
+null — which is the same lifetime-scaling problem this migration exists to fix, and it
+multiplies when an exercise cascades to all of its injects at once.
 
 Plain CREATE INDEX, not CONCURRENTLY: startup migrations run inside a transaction
 (database.run_migrations), which CONCURRENTLY cannot. The brief lock is free
@@ -70,8 +77,22 @@ def upgrade() -> None:
     op.create_index("ix_authtoken_user_id", "authtoken", ["user_id"])
     op.create_index("ix_authtoken_exercise_id", "authtoken", ["exercise_id"])
 
+    # Not for a query — for the ON DELETE SET NULL fan-out when an inject is deleted.
+    op.create_index(
+        "ix_communication_triggered_by_inject_id",
+        "communication",
+        ["triggered_by_inject_id"],
+    )
+    op.create_index(
+        "ix_exerciseprogress_current_inject_id",
+        "exerciseprogress",
+        ["current_inject_id"],
+    )
+
 
 def downgrade() -> None:
+    op.drop_index("ix_exerciseprogress_current_inject_id", table_name="exerciseprogress")
+    op.drop_index("ix_communication_triggered_by_inject_id", table_name="communication")
     op.drop_index("ix_authtoken_exercise_id", table_name="authtoken")
     op.drop_index("ix_authtoken_user_id", table_name="authtoken")
     op.drop_index("ix_communication_exercise_sent_at", table_name="communication")

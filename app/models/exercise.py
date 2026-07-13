@@ -164,8 +164,9 @@ class ExerciseProgress(SQLModel, table=True):
     # Null denotes the shared/all-teams path. Team-specific paths may diverge.
     group_id: str | None = None
     current_node_id: str | None = None
+    # Indexed for the SET NULL fan-out when an inject is deleted, not for a query.
     current_inject_id: int | None = Field(
-        default=None, foreign_key="inject.id", ondelete="SET NULL"
+        default=None, foreign_key="inject.id", ondelete="SET NULL", index=True
     )
     advanced_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)

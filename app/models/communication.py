@@ -39,8 +39,9 @@ class Communication(SQLModel, table=True):
     external_entity: str | None = None      # e.g. "ICO", "NCSC", "CEO"
     subject: str
     body: str
+    # Indexed for the SET NULL fan-out when an inject is deleted, not for a query.
     triggered_by_inject_id: int | None = Field(
-        default=None, foreign_key="inject.id", ondelete="SET NULL"
+        default=None, foreign_key="inject.id", ondelete="SET NULL", index=True
     )
     # Durable idempotency key for node-level scenario-triggered communications (#140).
     trigger_key: str | None = None
