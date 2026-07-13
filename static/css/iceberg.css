@@ -720,7 +720,7 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
   .fac-console__connection { flex: 1 0 100%; }
   .fac-console__action-divider,
   .fac-console__ops-toggle { display: none !important; }
-  .fac-console__actions > .btn {
+  .is-dense .fac-console__actions > .btn {
     min-width: 0; min-height: 34px; height: 34px;
     padding-inline: 12px; flex: 1 1 auto;
   }

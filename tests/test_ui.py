@@ -585,6 +585,18 @@ def test_facilitator_console_desktop_preserves_split_panes(page: Page):
     assert ticker_heights and all(height == 34 for height in ticker_heights)
     assert release_heights and all(height == 28 for height in release_heights)
 
+    # The 761–1120 responsive rule must not make density global. Prove the
+    # same controls return to the shared 40px floor without the opt-in class.
+    console = page.get_by_test_id("facilitator-console")
+    page.set_viewport_size({"width": 900, "height": 1000})
+    console.evaluate("node => node.classList.remove('is-dense')")
+    non_dense_heights = page.locator(".fac-console__actions > .btn:visible").evaluate_all(
+        "nodes => nodes.map(node => node.getBoundingClientRect().height)"
+    )
+    assert non_dense_heights and all(height >= 40 for height in non_dense_heights)
+    console.evaluate("node => node.classList.add('is-dense')")
+    page.set_viewport_size({"width": 1440, "height": 1000})
+
     injects = page.get_by_test_id("facilitator-pane-injects")
     responses = page.get_by_test_id("facilitator-pane-responses")
     ops = page.get_by_test_id("facilitator-pane-ops")
