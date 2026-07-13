@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}AI provider — IcebergTTX{% endblock %}
+
+{% block content %}
+<div x-data="adminLlm()" class="workspace max-w-[1040px]">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">AI provider</h1>
+      <p class="text-[13.5px] text-muted mt-1">
+        Select the model used for assessments, suggested injects, and report summaries.
+      </p>
+    </div>
+  </div>
+
+  <div class="space-y-5">
+    <section class="surface p-5">
+      <div class="section-title mb-4"><h2 class="smallcaps text-muted">Active provider</h2></div>
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="llm-provider">Provider</label>
+          <select id="llm-provider" x-model="cfg.llm_provider"
+                  class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface">
+            <option value="none">Disabled</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="bedrock">Amazon Bedrock</option>
+            <option value="openai">OpenAI</option>
+            <option value="ollama">Ollama</option>
+            <option value="gemini">Google Gemini</option>
+          </select>
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="llm-max-tokens">Maximum output tokens</label>
+          <input id="llm-max-tokens" type="number" min="1" max="32768"
+                 x-model.number="cfg.llm_max_tokens"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+      </div>
+    </section>
+
+    <section class="surface p-5">
+      <div class="section-title mb-4"><h2 class="smallcaps text-muted">Provider details</h2></div>
+      <div x-show="cfg.llm_provider === 'none'" class="text-[13px] text-muted">
+        AI-assisted features are disabled. Existing assessments and summaries remain available.
+      </div>
+
+      <div x-show="cfg.llm_provider === 'anthropic'" class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="anthropic-model">Model</label>
+          <input id="anthropic-model" x-model="cfg.anthropic_model"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+        <div class="well p-3 text-[12.5px]">
+          <span class="mono">ANTHROPIC_API_KEY</span>
+          <span class="ml-2" :class="keyClass('anthropic')" x-text="keyStatus('anthropic')"></span>
+        </div>
+      </div>
+
+      <div x-show="cfg.llm_provider === 'bedrock'" class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="bedrock-model">Model</label>
+          <input id="bedrock-model" x-model="cfg.bedrock_model"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="bedrock-region">AWS region</label>
+          <input id="bedrock-region" x-model="cfg.bedrock_aws_region" placeholder="us-east-1"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+      </div>
+
+      <div x-show="cfg.llm_provider === 'openai'" class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="openai-model">Model</label>
+          <input id="openai-model" x-model="cfg.openai_model"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="openai-base-url">Base URL override</label>
+          <input id="openai-base-url" type="url" x-model="cfg.openai_base_url" placeholder="SDK default"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+        <div class="well p-3 text-[12.5px] md:col-span-2">
+          <span class="mono">OPENAI_API_KEY</span>
+          <span class="ml-2" :class="keyClass('openai')" x-text="keyStatus('openai')"></span>
+        </div>
+      </div>
+
+      <div x-show="cfg.llm_provider === 'ollama'" class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="ollama-model">Model</label>
+          <input id="ollama-model" x-model="cfg.ollama_model"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="ollama-base-url">Base URL</label>
+          <input id="ollama-base-url" type="url" x-model="cfg.ollama_base_url"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+        <p class="text-[12px] text-muted md:col-span-2">Ollama does not require an API key.</p>
+      </div>
+
+      <div x-show="cfg.llm_provider === 'gemini'" class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="gemini-model">Model</label>
+          <input id="gemini-model" x-model="cfg.gemini_model"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="gemini-base-url">Base URL</label>
+          <input id="gemini-base-url" type="url" x-model="cfg.gemini_base_url"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+        <div class="well p-3 text-[12.5px] md:col-span-2">
+          <span class="mono">GEMINI_API_KEY</span>
+          <span class="ml-2" :class="keyClass('gemini')" x-text="keyStatus('gemini')"></span>
+        </div>
+      </div>
+    </section>
+
+    <div class="flex flex-wrap items-center gap-3">
+      <button type="button" @click="save()" :disabled="saving"
+              class="btn btn-primary h-10 px-4 text-[13px] disabled:opacity-50">
+        <span x-text="saving ? 'Saving…' : 'Save AI settings'"></span>
+      </button>
+      <button type="button" @click="runTest()" :disabled="testing || cfg.llm_provider === 'none'"
+              class="btn btn-ghost h-10 px-4 text-[13px] disabled:opacity-50">
+        <span x-text="testing ? 'Testing…' : 'Test provider'"></span>
+      </button>
+      <p class="text-[12.5px] text-muted" role="status" x-text="message"></p>
+    </div>
+  </div>
+</div>
+{% endblock %}

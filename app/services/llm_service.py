@@ -7,9 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
-from app.config import settings
 from app.database import engine
 from app.schemas.api import AssessmentPublic, ExecutiveSummaryPublic, SuggestedInjectPublic
+from app.services import llm_settings_service
 from app.services.background import spawn
 from app.services.llm.service import active_provider
 
@@ -85,7 +85,7 @@ def _inject_summary(inject, node) -> str:
 async def _call(provider, system: str, cached_context: str, user_prompt: str) -> str:
     """Delegate one completion to the active provider (provider-agnostic)."""
     return await provider.complete(
-        system, cached_context, user_prompt, settings.llm_max_tokens
+        system, cached_context, user_prompt, llm_settings_service.get_config().llm_max_tokens
     )
 
 

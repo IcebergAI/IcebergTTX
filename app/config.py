@@ -529,19 +529,8 @@ def validate_settings(s: Settings | None = None) -> None:
             "AUTH_MODE=oidc but no OIDC provider is enabled/configured; users would "
             "have no way to sign in."
         )
-    # The active AI provider must carry the credentials its backend needs. Set
-    # LLM_PROVIDER=none to run without the LLM (assessment/inject suggestion).
-    llm = s.active_llm_provider()
-    if llm is not None:
-        if llm.key in ("anthropic", "openai", "gemini") and not llm.api_key:
-            raise RuntimeError(
-                f"LLM_PROVIDER={llm.key} is set but its API key "
-                f"({llm.key.upper()}_API_KEY) is empty. Set it, or LLM_PROVIDER=none."
-            )
-        if llm.key == "bedrock" and not llm.aws_region:
-            raise RuntimeError(
-                "LLM_PROVIDER=bedrock is set but BEDROCK_AWS_REGION is empty."
-            )
+    # Provider credential readiness is validated on the runtime admin save path.
+    # Secrets remain environment-only, while the active provider itself is DB-backed.
 
 
 settings = Settings()
