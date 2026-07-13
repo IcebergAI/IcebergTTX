@@ -63,6 +63,19 @@
   --team-comms-bg:   oklch(0.95 0.03 155);
   --team-comms-ink:  oklch(0.42 0.11 155);
   --team-comms-line: oklch(0.84 0.07 155);
+  /* Stable fallback palette for arbitrary scenario-defined team ids. */
+  --team-slot-0-bg: oklch(0.955 0.028 0);    --team-slot-0-ink: oklch(0.40 0.09 0);    --team-slot-0-line: oklch(0.86 0.055 0);
+  --team-slot-1-bg: oklch(0.955 0.028 30);   --team-slot-1-ink: oklch(0.40 0.09 30);   --team-slot-1-line: oklch(0.86 0.055 30);
+  --team-slot-2-bg: oklch(0.955 0.028 60);   --team-slot-2-ink: oklch(0.40 0.09 60);   --team-slot-2-line: oklch(0.86 0.055 60);
+  --team-slot-3-bg: oklch(0.955 0.028 90);   --team-slot-3-ink: oklch(0.40 0.09 90);   --team-slot-3-line: oklch(0.86 0.055 90);
+  --team-slot-4-bg: oklch(0.955 0.028 120);  --team-slot-4-ink: oklch(0.40 0.09 120);  --team-slot-4-line: oklch(0.86 0.055 120);
+  --team-slot-5-bg: oklch(0.955 0.028 150);  --team-slot-5-ink: oklch(0.40 0.09 150);  --team-slot-5-line: oklch(0.86 0.055 150);
+  --team-slot-6-bg: oklch(0.955 0.028 180);  --team-slot-6-ink: oklch(0.40 0.09 180);  --team-slot-6-line: oklch(0.86 0.055 180);
+  --team-slot-7-bg: oklch(0.955 0.028 210);  --team-slot-7-ink: oklch(0.40 0.09 210);  --team-slot-7-line: oklch(0.86 0.055 210);
+  --team-slot-8-bg: oklch(0.955 0.028 240);  --team-slot-8-ink: oklch(0.40 0.09 240);  --team-slot-8-line: oklch(0.86 0.055 240);
+  --team-slot-9-bg: oklch(0.955 0.028 270);  --team-slot-9-ink: oklch(0.40 0.09 270);  --team-slot-9-line: oklch(0.86 0.055 270);
+  --team-slot-10-bg: oklch(0.955 0.028 300); --team-slot-10-ink: oklch(0.40 0.09 300); --team-slot-10-line: oklch(0.86 0.055 300);
+  --team-slot-11-bg: oklch(0.955 0.028 330); --team-slot-11-ink: oklch(0.40 0.09 330); --team-slot-11-line: oklch(0.86 0.055 330);
 
   --radius: 9px;
   --radius-sm: 6px;
@@ -131,6 +144,18 @@ html[data-theme="dark"] {
   --team-comms-bg:   oklch(0.30 0.05 155);
   --team-comms-ink:  oklch(0.82 0.10 158);
   --team-comms-line: oklch(0.44 0.08 156);
+  --team-slot-0-bg: oklch(0.30 0.05 0);    --team-slot-0-ink: oklch(0.84 0.08 0);    --team-slot-0-line: oklch(0.44 0.07 0);
+  --team-slot-1-bg: oklch(0.30 0.05 30);   --team-slot-1-ink: oklch(0.84 0.08 30);   --team-slot-1-line: oklch(0.44 0.07 30);
+  --team-slot-2-bg: oklch(0.30 0.05 60);   --team-slot-2-ink: oklch(0.84 0.08 60);   --team-slot-2-line: oklch(0.44 0.07 60);
+  --team-slot-3-bg: oklch(0.30 0.05 90);   --team-slot-3-ink: oklch(0.84 0.08 90);   --team-slot-3-line: oklch(0.44 0.07 90);
+  --team-slot-4-bg: oklch(0.30 0.05 120);  --team-slot-4-ink: oklch(0.84 0.08 120);  --team-slot-4-line: oklch(0.44 0.07 120);
+  --team-slot-5-bg: oklch(0.30 0.05 150);  --team-slot-5-ink: oklch(0.84 0.08 150);  --team-slot-5-line: oklch(0.44 0.07 150);
+  --team-slot-6-bg: oklch(0.30 0.05 180);  --team-slot-6-ink: oklch(0.84 0.08 180);  --team-slot-6-line: oklch(0.44 0.07 180);
+  --team-slot-7-bg: oklch(0.30 0.05 210);  --team-slot-7-ink: oklch(0.84 0.08 210);  --team-slot-7-line: oklch(0.44 0.07 210);
+  --team-slot-8-bg: oklch(0.30 0.05 240);  --team-slot-8-ink: oklch(0.84 0.08 240);  --team-slot-8-line: oklch(0.44 0.07 240);
+  --team-slot-9-bg: oklch(0.30 0.05 270);  --team-slot-9-ink: oklch(0.84 0.08 270);  --team-slot-9-line: oklch(0.44 0.07 270);
+  --team-slot-10-bg: oklch(0.30 0.05 300); --team-slot-10-ink: oklch(0.84 0.08 300); --team-slot-10-line: oklch(0.44 0.07 300);
+  --team-slot-11-bg: oklch(0.30 0.05 330); --team-slot-11-ink: oklch(0.84 0.08 330); --team-slot-11-line: oklch(0.44 0.07 330);
 
   --shadow:      0 1px 2px oklch(0 0 0 / 0.30), 0 1px 1px oklch(0 0 0 / 0.24);
   --shadow-lift: 0 8px 24px -10px oklch(0 0 0 / 0.55), 0 2px 6px -2px oklch(0 0 0 / 0.4);
@@ -341,23 +366,9 @@ a:hover { color: var(--accent-deep); }
   .rail-foot-btn { min-height: 44px; }
   .rail-foot-link { min-height: 44px; }
   .topbar { display: none !important; }
-  .workspace { padding: 20px 18px 48px; }
   .page-head { flex-direction: column; align-items: flex-start; gap: 12px; }
   .dashboard-grid { display: block; }
   .dashboard-grid > * + * { margin-top: 24px; }
-  /* Sub-nav becomes a wrapping strip above the content; the version and issue
-     link drop onto their own full-width lines rather than disappearing. */
-  .settings-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-  .settings-nav { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; }
-  .settings-nav-btn { min-height: 44px; flex: 1 1 auto; justify-content: center; }
-  .settings-nav-version { flex: 1 0 100%; margin-top: 8px; }
-  .settings-nav-link { flex: 1 0 100%; min-height: 44px; display: flex; align-items: center; }
-  .settings-password { grid-template-columns: minmax(0, 1fr); }
-  .settings-profile { grid-template-columns: minmax(0, 1fr) !important; }
-  .settings-profile > .btn { width: 100%; }
-  .settings-sample-row { flex-direction: column; gap: 12px; }
-  .settings-sample-actions { width: 100%; flex-wrap: wrap; }
-  .settings-sample-actions > .btn { flex: 1 1 140px; }
 }
 
 /* --------------------------------------------------------------------------
@@ -366,6 +377,9 @@ a:hover { color: var(--accent-deep); }
 .workspace {
   width: 100%; max-width: 1180px; margin-inline: auto;
   padding: 26px 32px 64px;
+}
+@media (max-width: 760px) {
+  .workspace { padding: 20px 18px 48px; }
 }
 /* A page that fills the viewport rather than growing with its content, so a pane
    inside it can scroll on its own. Replaces per-page `calc(100vh - 180px)`
@@ -427,12 +441,25 @@ code, .code { font-family: var(--fs-mono); font-size: 0.86em; background: var(--
 }
 .pill.mono { font-family: var(--fs-mono); font-size: 10.5px; }
 
-/* Team-scent tints. Layered onto .pill by uiHelpers.teamColor(); a team id
-   outside these four falls back to the neutral .pill above. */
-.pill.team-itops { background: var(--team-itops-bg); color: var(--team-itops-ink); box-shadow: inset 0 0 0 1px var(--team-itops-line); }
-.pill.team-legal { background: var(--team-legal-bg); color: var(--team-legal-ink); box-shadow: inset 0 0 0 1px var(--team-legal-line); }
-.pill.team-exec  { background: var(--team-exec-bg);  color: var(--team-exec-ink);  box-shadow: inset 0 0 0 1px var(--team-exec-line); }
-.pill.team-comms { background: var(--team-comms-bg); color: var(--team-comms-ink); box-shadow: inset 0 0 0 1px var(--team-comms-line); }
+/* Team scents use one set of consumer rules. Named overrides preserve the
+   bundled scenarios pixel-for-pixel; arbitrary ids select a stable slot. */
+.pill[class*="team-"] { background: var(--team-bg); color: var(--team-ink); box-shadow: inset 0 0 0 1px var(--team-line); }
+.team-itops { --team-bg: var(--team-itops-bg); --team-ink: var(--team-itops-ink); --team-line: var(--team-itops-line); }
+.team-legal { --team-bg: var(--team-legal-bg); --team-ink: var(--team-legal-ink); --team-line: var(--team-legal-line); }
+.team-exec  { --team-bg: var(--team-exec-bg);  --team-ink: var(--team-exec-ink);  --team-line: var(--team-exec-line); }
+.team-comms { --team-bg: var(--team-comms-bg); --team-ink: var(--team-comms-ink); --team-line: var(--team-comms-line); }
+.team-scent-0  { --team-bg: var(--team-slot-0-bg);  --team-ink: var(--team-slot-0-ink);  --team-line: var(--team-slot-0-line); }
+.team-scent-1  { --team-bg: var(--team-slot-1-bg);  --team-ink: var(--team-slot-1-ink);  --team-line: var(--team-slot-1-line); }
+.team-scent-2  { --team-bg: var(--team-slot-2-bg);  --team-ink: var(--team-slot-2-ink);  --team-line: var(--team-slot-2-line); }
+.team-scent-3  { --team-bg: var(--team-slot-3-bg);  --team-ink: var(--team-slot-3-ink);  --team-line: var(--team-slot-3-line); }
+.team-scent-4  { --team-bg: var(--team-slot-4-bg);  --team-ink: var(--team-slot-4-ink);  --team-line: var(--team-slot-4-line); }
+.team-scent-5  { --team-bg: var(--team-slot-5-bg);  --team-ink: var(--team-slot-5-ink);  --team-line: var(--team-slot-5-line); }
+.team-scent-6  { --team-bg: var(--team-slot-6-bg);  --team-ink: var(--team-slot-6-ink);  --team-line: var(--team-slot-6-line); }
+.team-scent-7  { --team-bg: var(--team-slot-7-bg);  --team-ink: var(--team-slot-7-ink);  --team-line: var(--team-slot-7-line); }
+.team-scent-8  { --team-bg: var(--team-slot-8-bg);  --team-ink: var(--team-slot-8-ink);  --team-line: var(--team-slot-8-line); }
+.team-scent-9  { --team-bg: var(--team-slot-9-bg);  --team-ink: var(--team-slot-9-ink);  --team-line: var(--team-slot-9-line); }
+.team-scent-10 { --team-bg: var(--team-slot-10-bg); --team-ink: var(--team-slot-10-ink); --team-line: var(--team-slot-10-line); }
+.team-scent-11 { --team-bg: var(--team-slot-11-bg); --team-ink: var(--team-slot-11-ink); --team-line: var(--team-slot-11-line); }
 
 .dot { width: 7px; height: 7px; border-radius: 999px; display: inline-block; flex-shrink: 0; }
 
@@ -538,10 +565,9 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
    surface, so a team reads the same in a list header and on a pill. */
 .team-label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .team-label-swatch { width: 6px; height: 6px; border-radius: 2px; background: currentColor; flex: none; }
-.team-label.team-itops { color: var(--team-itops-ink); }
-.team-label.team-legal { color: var(--team-legal-ink); }
-.team-label.team-exec  { color: var(--team-exec-ink); }
-.team-label.team-comms { color: var(--team-comms-ink); }
+.team-label:is(
+  .team-itops, .team-legal, .team-exec, .team-comms, [class*="team-scent-"]
+) { color: var(--team-ink); }
 
 /* Participant briefing card */
 .briefing {
@@ -613,6 +639,26 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
 .settings-input:focus { box-shadow: inset 0 0 0 1px var(--accent), var(--ring); }
 .settings-password { grid-template-columns: 1fr 1fr; max-width: 560px; }
 
+@media (max-width: 760px) {
+  /* Keep mobile overrides after the base settings declarations so the
+     source-order cascade cannot restore the desktop two-column layout. */
+  .settings-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .settings-nav { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .settings-nav-btn { min-height: 44px; flex: 1 1 auto; justify-content: center; }
+  .settings-nav-version { flex: 1 0 100%; margin-top: 8px; }
+  .settings-nav-link { flex: 1 0 100%; min-height: 44px; display: flex; align-items: center; }
+  .settings-password { grid-template-columns: minmax(0, 1fr); }
+  .settings-profile { grid-template-columns: minmax(0, 1fr) !important; }
+  .settings-profile > .btn { width: 100%; }
+  .settings-sample-row { flex-direction: column; gap: 12px; }
+  .settings-sample-actions { width: 100%; flex-wrap: wrap; }
+  .settings-sample-actions > .btn { flex: 1 1 140px; }
+  .settings-page .seg {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%;
+  }
+  .settings-page .seg-btn { width: 100%; min-width: 0; padding-inline: 6px; }
+}
+
 /* --------------------------------------------------------------------------
  *  Communications inbox
  * ------------------------------------------------------------------------ */
@@ -627,6 +673,12 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
 }
 .comm-filter-control::placeholder { color: var(--muted); }
 .comm-filter-control:focus { box-shadow: inset 0 0 0 1px var(--accent), var(--ring); }
+
+.comm-layout {
+  display: grid; grid-template-columns: 352px minmax(0, 1fr);
+}
+.comm-pane { min-width: 0; }
+.comm-mobile-back { display: none; }
 
 .comm-list-row { position: relative; transition: background .12s ease, box-shadow .12s ease, color .12s ease; }
 .comm-list-row:hover { background: color-mix(in oklch, var(--accent) 7%, transparent); }
@@ -647,12 +699,36 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
 .comm-list-row-selected .comm-row-subject { color: var(--ink); }
 .comm-list-row-selected .comm-row-preview { color: var(--ink-soft); }
 
+@media (max-width: 760px) {
+  .comm-layout {
+    display: block; width: 100%; max-width: 100%;
+    overflow: hidden; grid-template-columns: minmax(0, 1fr);
+  }
+  .comm-pane {
+    display: none !important; width: 100%; max-width: 100%; height: 100%;
+    min-width: 0; overflow-x: hidden; overscroll-behavior: contain;
+  }
+  .comm-pane.is-mobile-active { display: flex !important; }
+  .comm-pane-reader.is-mobile-active { display: block !important; padding: 16px; }
+  .comm-pane-list { border-right: 0; }
+  .comm-mobile-back {
+    display: inline-flex; min-height: 44px; padding-inline: 12px;
+    align-items: center; gap: 7px;
+  }
+}
+
 /* --------------------------------------------------------------------------
  *  Facilitator console
  * ------------------------------------------------------------------------ */
 .fac-console__body,
 .fac-console__pane { min-width: 0; }
 .fac-console__mobile-nav { display: none; }
+.is-dense .fac-console__ticker .btn {
+  min-height: 34px; height: 34px;
+}
+.is-dense .fac-console__release-control {
+  min-width: 28px; min-height: 28px; height: 28px;
+}
 
 /* Ops pane: three labelled sections rather than one mixed scroll, so
    "who's in the room" and "what do I do with the session" don't run together. */
@@ -681,8 +757,8 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
   .fac-console__connection { flex: 1 0 100%; }
   .fac-console__action-divider,
   .fac-console__ops-toggle { display: none !important; }
-  .fac-console__actions > .btn {
-    min-width: 0; min-height: 44px; height: 44px;
+  .is-dense .fac-console__actions > .btn {
+    min-width: 0; min-height: 34px; height: 34px;
     padding-inline: 12px; flex: 1 1 auto;
   }
 
@@ -768,6 +844,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   .btn, button, [role="button"], [role="tab"],
   .rail-link, .rail-live-main, .rail-live-opt, .rail-logout, summary,
   .seg-btn, .settings-nav-btn, .settings-input, .comm-filter-control,
+  .is-dense .fac-console__ticker .btn, .is-dense .fac-console__release-control,
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select, textarea {
     min-width: 44px;

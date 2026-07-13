@@ -329,6 +329,55 @@ def test_exercises_list_page_renders(page: Page):
     expect(page.locator("body")).not_to_contain_text("Internal Server Error")
 
 
+def test_arbitrary_team_ids_receive_stable_shared_scents(page: Page):
+    login_facilitator(page)
+    classes = page.evaluate(
+        """() => ({
+          known: DT.uiHelpers.teamColor('it_ops'),
+          finance: DT.uiHelpers.teamColor('finance'),
+          financeAgain: DT.uiHelpers.teamColor('finance'),
+          board: DT.uiHelpers.teamColor('board'),
+          missing: DT.uiHelpers.teamColor(''),
+        })"""
+    )
+    assert classes["known"] == "team-itops"
+    assert classes["finance"].startswith("team-scent-")
+    assert classes["finance"] == classes["financeAgain"]
+    assert classes["board"].startswith("team-scent-")
+    assert classes["missing"] == ""
+
+    rendered = page.evaluate(
+        """({ scent }) => {
+          const pill = document.createElement('span');
+          pill.className = `pill ${scent}`;
+          const label = document.createElement('span');
+          label.className = `team-label ${scent}`;
+          const shared = document.createElement('span');
+          shared.className = 'team-label';
+          const muted = document.createElement('span');
+          muted.className = 'text-muted';
+          document.body.append(pill, label, shared, muted);
+          const result = {
+            pillInk: getComputedStyle(pill).color,
+            labelInk: getComputedStyle(label).color,
+            pillFill: getComputedStyle(pill).backgroundColor,
+            sharedInk: getComputedStyle(shared).color,
+            mutedInk: getComputedStyle(muted).color,
+          };
+          pill.remove();
+          label.remove();
+          shared.remove();
+          muted.remove();
+          return result;
+        }""",
+        {"scent": classes["finance"]},
+    )
+    assert rendered["pillInk"] == rendered["labelInk"]
+    assert rendered["pillFill"] != "rgba(0, 0, 0, 0)"
+    assert rendered["sharedInk"] == rendered["mutedInk"]
+    assert rendered["sharedInk"] != rendered["labelInk"]
+
+
 def test_facilitator_console_renders(page: Page):
     login_facilitator(page)
     scenario_id = _make_scenario(page)
@@ -425,6 +474,59 @@ def test_mobile_shell_opens_navigation_and_reaches_settings(page: Page):
     expect(page.locator("h1")).to_contain_text("Settings")
 
 
+def test_communications_mobile_list_reader_navigation(page: Page):
+    """Phone users get one usable comms pane at a time and can return with focus (#202)."""
+    page.set_viewport_size({"width": 390, "height": 844})
+    login_facilitator(page)
+    scenario_id = _make_scenario(page)
+    exercise_id = _make_exercise(page, scenario_id, title="Mobile communications")
+    api_post(page, f"/exercises/{exercise_id}/start")
+    created = api_post(
+        page,
+        f"/exercises/{exercise_id}/communications/inject",
+        {
+            "external_entity": "Press office",
+            "subject": "Mobile reader proof",
+            "body": "This message must remain readable at phone widths.",
+            "visible_to_teams": ["it_ops"],
+        },
+    )
+    assert created.status == 201, created.text()
+
+    page.goto(f"{BASE}/exercises/{exercise_id}/communications")
+    layout = page.get_by_test_id("communications-layout")
+    list_pane = page.get_by_test_id("communications-list-pane")
+    reader_pane = page.get_by_test_id("communications-reader-pane")
+    expect(list_pane).to_be_visible()
+    expect(reader_pane).to_be_hidden()
+
+    row = list_pane.locator('[data-comm-id]').filter(has_text="Mobile reader proof")
+    row.click()
+    expect(list_pane).to_be_hidden()
+    expect(reader_pane).to_be_visible()
+    expect(
+        reader_pane.get_by_text("This message must remain readable at phone widths.")
+    ).to_be_visible()
+
+    back = reader_pane.get_by_role("button", name="Back to messages")
+    expect(back).to_be_focused()
+    back.click()
+    expect(list_pane).to_be_visible()
+    expect(reader_pane).to_be_hidden()
+    expect(row).to_be_focused()
+
+    for width in (320, 390, 760):
+        page.set_viewport_size({"width": width, "height": 844})
+        page.wait_for_timeout(50)
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+        pane_width = list_pane.evaluate("el => el.getBoundingClientRect().width")
+        layout_width = layout.evaluate("el => el.getBoundingClientRect().width")
+        assert pane_width >= layout_width - 1
+        _assert_visible_control_geometry(page, 44)
+
+
 def _assert_visible_control_geometry(page: Page, minimum: int) -> None:
     """Verify the visible shared controls meet the touch-target baseline."""
     undersized = page.evaluate(
@@ -436,8 +538,13 @@ def _assert_visible_control_geometry(page: Page, minimum: int) -> None:
         )].filter(node => {
           const style = getComputedStyle(node);
           const rect = node.getBoundingClientRect();
+          const denseDesktop = minimum === 40 && (
+            node.matches('[data-dense-control]')
+            || node.matches('.is-dense .fac-console__ticker .btn')
+          );
           return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0
-            && rect.height > 0 && (rect.width < minimum || rect.height < minimum);
+            && rect.height > 0 && !denseDesktop
+            && (rect.width < minimum || rect.height < minimum);
         }).map(node => ({
           tag: node.tagName, text: node.textContent.trim().slice(0, 48),
           width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height,
@@ -485,6 +592,16 @@ def test_touch_target_geometry_across_core_routes(page: Page):
             "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
         )
 
+    # Comms and settings are core phone surfaces too; neither may silently
+    # squeeze an internal pane while the document itself remains overflow-free.
+    page.set_viewport_size({"width": 390, "height": 844})
+    for route in (f"/exercises/{exercise_id}/communications", "/settings"):
+        page.goto(f"{BASE}{route}")
+        _assert_visible_control_geometry(page, 44)
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+
     # The participant response controls are a separate touch-first surface and
     # must meet the same 44px phone baseline.
     page.set_viewport_size({"width": 390, "height": 844})
@@ -507,6 +624,27 @@ def test_facilitator_console_desktop_preserves_split_panes(page: Page):
     page.goto(f"{BASE}/exercises/{exercise_id}/facilitate")
     expect(page.locator('[x-text="exTitle"]')).to_have_text("Desktop Console Exercise")
     expect(page.locator(".fac-console__mobile-nav")).to_be_hidden()
+
+    ticker_heights = page.locator(".fac-console__ticker .btn:visible").evaluate_all(
+        "nodes => nodes.map(node => node.getBoundingClientRect().height)"
+    )
+    release_heights = page.locator("[data-dense-control]:visible").evaluate_all(
+        "nodes => nodes.map(node => node.getBoundingClientRect().height)"
+    )
+    assert ticker_heights and all(height == 34 for height in ticker_heights)
+    assert release_heights and all(height == 28 for height in release_heights)
+
+    # The 761–1120 responsive rule must not make density global. Prove the
+    # same controls return to the shared 40px floor without the opt-in class.
+    console = page.get_by_test_id("facilitator-console")
+    page.set_viewport_size({"width": 900, "height": 1000})
+    console.evaluate("node => node.classList.remove('is-dense')")
+    non_dense_heights = page.locator(".fac-console__actions > .btn:visible").evaluate_all(
+        "nodes => nodes.map(node => node.getBoundingClientRect().height)"
+    )
+    assert non_dense_heights and all(height >= 40 for height in non_dense_heights)
+    console.evaluate("node => node.classList.add('is-dense')")
+    page.set_viewport_size({"width": 1440, "height": 1000})
 
     injects = page.get_by_test_id("facilitator-pane-injects")
     responses = page.get_by_test_id("facilitator-pane-responses")

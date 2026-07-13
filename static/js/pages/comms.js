@@ -8,6 +8,7 @@ document.addEventListener('alpine:init', () => {
     commSearch: '',
     directionFilter: 'all',
     selected: null,
+    mobilePane: 'list',
     isF: false,
     showCompose: false,
     showSend: false,
@@ -85,7 +86,22 @@ document.addEventListener('alpine:init', () => {
         }
         this.upsertComm(updated, { preserveOrder: true });
         this.selected = updated;
+        this.mobilePane = 'reader';
+        this.$nextTick(() => {
+          const back = this.$root.querySelector('.comm-mobile-back');
+          if (window.matchMedia('(max-width: 760px)').matches && back) back.focus();
+        });
       }
+    },
+
+    showList() {
+      const selectedId = this.selected && this.selected.id;
+      this.mobilePane = 'list';
+      this.$nextTick(() => {
+        if (selectedId === null || selectedId === undefined) return;
+        const row = this.$root.querySelector(`[data-comm-id="${selectedId}"]`);
+        if (row) row.focus();
+      });
     },
 
     upsertComm(comm, { preserveOrder = false } = {}) {
