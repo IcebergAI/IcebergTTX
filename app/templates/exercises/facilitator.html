@@ -7,7 +7,7 @@
 
 {% block content %}
 <div x-data="facilitatorConsole({{ exercise_id }})"
-     class="fac-console flex flex-col"
+     class="fac-console is-dense flex flex-col"
      data-testid="facilitator-console">
 
   <!-- Command bar. Was a global breadcrumb bar stacked on a ticker; now one row
@@ -177,7 +177,8 @@
                     <div x-show="inj.state === 'pending'" class="flex items-center gap-1.5 shrink-0">
                       <!-- Icon-only: the row is 330px and the title has to win. -->
                       <button @click="toggleSchedule(inj)"
-                              class="btn btn-ghost px-0"
+                              class="fac-console__release-control btn btn-ghost px-0"
+                              data-dense-control
                               :class="scheduleOpen[inj.id] && 'is-open'"
                               :aria-expanded="!!scheduleOpen[inj.id]"
                               aria-label="Schedule an automatic release"
@@ -188,7 +189,8 @@
                         </svg>
                       </button>
                       <button @click="releaseInject(inj)"
-                              class="btn px-2.5 text-[11.5px]"
+                              class="fac-console__release-control btn px-2.5 text-[11.5px]"
+                              data-dense-control
                               :class="isRecommended(inj) ? 'btn-primary' : 'btn-ghost'">
                         Release
                       </button>
@@ -208,9 +210,11 @@
                            class="w-16 h-9 rounded-md ring-rule px-2 text-[11.5px] mono bg-surface" />
                     <span class="mono text-[10.5px] text-faint">min from start</span>
                     <button @click="saveSchedule(inj)"
-                            class="btn btn-ghost px-2.5 text-[11.5px] ml-auto">Set</button>
+                            class="fac-console__release-control btn btn-ghost px-2.5 text-[11.5px] ml-auto"
+                            data-dense-control>Set</button>
                     <button x-show="isScheduled(inj)" @click="cancelSchedule(inj)"
-                            class="btn btn-ghost px-2.5 text-[11.5px] text-crit">Clear</button>
+                            class="fac-console__release-control btn btn-ghost px-2.5 text-[11.5px] text-crit"
+                            data-dense-control>Clear</button>
                   </div>
 
                   <!-- Expected actions (from scenario definition) -->
@@ -380,7 +384,8 @@
                 <template x-for="next in resp._next_injects" :key="next.id">
                   <button @click="releaseInjectById(next.id)"
                           :disabled="!injectById(next.id) || injectById(next.id).state !== 'pending'"
-                          class="btn btn-ghost h-6 px-2.5 text-[11.5px] disabled:opacity-40">
+                          class="fac-console__release-control btn btn-ghost px-2.5 text-[11.5px] disabled:opacity-40"
+                          data-dense-control>
                     <span x-text="(next.group_id ? groupLabel(next.group_id) + ' · ' : '') + next.title"></span>
                   </button>
                 </template>
