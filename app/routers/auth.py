@@ -22,7 +22,7 @@ from app.schemas.auth import (
     UpdateMeRequest,
     UserResponse,
 )
-from app.services import audit_service, mail_service, token_service
+from app.services import audit_service, general_settings_service, mail_service, token_service
 from app.services.auth_service import create_access_token, hash_password, verify_password
 from app.services.background import spawn
 from app.services.exercise_service import enrol_member
@@ -66,7 +66,7 @@ def _require_local_auth() -> None:
 
 def _require_registration_enabled() -> None:
     """Guard self-service registration when it is turned off (#67)."""
-    if not settings.registration_enabled:
+    if not general_settings_service.get_config().registration_enabled:
         audit_service.emit(
             "auth.register",
             result="deny",

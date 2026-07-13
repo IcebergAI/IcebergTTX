@@ -106,13 +106,19 @@ def seed_playwright_users():
 @pytest.fixture(autouse=True)
 def _reset_login_rate_limiter():
     """Isolate the in-memory login/registration limiters between tests (#11, #67)."""
-    from app.services.rate_limit import login_rate_limiter, registration_rate_limiter
+    from app.services.rate_limit import (
+        login_rate_limiter,
+        password_reset_rate_limiter,
+        registration_rate_limiter,
+    )
 
     login_rate_limiter.clear()
     registration_rate_limiter.clear()
+    password_reset_rate_limiter.clear()
     yield
     login_rate_limiter.clear()
     registration_rate_limiter.clear()
+    password_reset_rate_limiter.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -134,6 +140,16 @@ def _reset_mail_config_cache():
     mail_service.set_config(None)
     yield
     mail_service.set_config(None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_general_config_cache():
+    """Keep runtime policy snapshots and limiter thresholds isolated between tests."""
+    from app.services import general_settings_service
+
+    general_settings_service.set_config(None)
+    yield
+    general_settings_service.set_config(None)
 
 
 @pytest.fixture(scope="session", autouse=True)

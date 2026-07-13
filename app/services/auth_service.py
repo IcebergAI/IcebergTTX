@@ -5,6 +5,7 @@ import jwt
 
 from app.config import settings
 from app.schemas.auth import MAX_PASSWORD_BYTES
+from app.services import general_settings_service
 
 
 def hash_password(password: str) -> str:
@@ -29,7 +30,8 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(subject: str, role: str, is_admin: bool = False) -> str:
     now = datetime.now(UTC)
-    expire = now + timedelta(minutes=settings.access_token_expire_minutes)
+    lifetime = general_settings_service.get_config().access_token_expire_minutes
+    expire = now + timedelta(minutes=lifetime)
     # `iat` (issued-at) is required for token revocation (#14): get_current_user
     # rejects tokens whose iat predates the user's token_valid_after cutoff.
     # `is_admin` is a UI convenience only (page/nav gating in ui.py) — API access
