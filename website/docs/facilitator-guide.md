@@ -43,8 +43,8 @@ AI provider configured on the server).
 ![Creating an exercise from a scenario](assets/exercise-create.png){ .shot }
 
 On creation, every inject is **pre-seeded as pending** — targeted injects once per team,
-shared injects once. Nothing is released yet; that is the "pull, not push" model in
-action (see [step 5](#5-release-injects-pull-not-push)).
+shared injects once. Nothing is released yet: you decide what reaches the room and when
+(see [step 5](#5-release-injects)).
 
 ### 3. Enrol participants and teams
 
@@ -65,23 +65,66 @@ The lifecycle is a simple state machine — **Pause** halts new submissions
 (`active → paused`), **Resume** returns to `active`, and **Complete** ends it
 (`→ completed`, terminal).
 
-### 5. Release injects ("pull, not push")
+### 5. Release injects
 
 The facilitator console is a three-pane console: the **inject tree** on the left, the
 **response feed** in the middle, and **participants / AI suggestions** on the right.
 
 ![The facilitator console during a live exercise](assets/facilitator-dark.png){ .shot }
 
-Injects don't fire on a timer — you **Release** each one when the room is ready. Release
-is only allowed while the exercise is `active`, and only for a `pending` inject.
-Participants on the targeted teams receive it instantly over WebSocket.
+**Injects are manual by default.** You press **Release** when the room is ready, and
+participants on the targeted teams receive the inject instantly over WebSocket. Release is
+only allowed while the exercise is `active`, and only for a `pending` inject. The
+Ransomware Response sample is entirely manual, so this guide's walk-through never waits on
+a clock.
 
-When a participant responds, the app resolves which injects are valid **next** steps
-(the selected option's `next_inject_id`, or the node-level one) and surfaces them as
-**Suggested next** buttons on the response card. You review the response, then release the
-branch you want — a human stays in the loop rather than the scenario auto-advancing.
+**Injects can also be scheduled.** An inject with a `release_at_minutes` value auto-releases
+that many minutes after the exercise starts, and the console shows a live **countdown** on
+it. The clock is *pause-aware*: pausing the exercise defers the timer, and resuming re-arms
+it with the remaining offset — a 20-minute inject in an exercise paused for 5 minutes fires
+25 minutes after the start, not 20.
+
+Scheduling never takes the room away from you. A scheduled inject can still be **released
+early**, and its schedule can be **cancelled** outright, from the same control:
+
+- **Set or change** a schedule on any pending inject — the clock icon in the inject tree.
+- **Release early** — the ordinary **Release** button, which cancels the pending timer.
+- **Cancel the schedule** — reverts the inject to manual-only release.
+
+!!! warning "A timer only fires on an inject the team has actually reached"
+    A schedule does not exempt an inject from the progression cursor. If the team has not yet
+    reached that inject when its countdown expires — because they haven't responded to the
+    inject before it — the release is **skipped**, and the timer does **not** re-arm when
+    they catch up. The inject simply stays `pending` for you to release by hand.
+
+    Leave slack in your offsets, and treat a schedule as a convenience that saves you
+    watching a stopwatch rather than a guarantee the inject will appear. See the
+    [scheduled-release recipe](cookbook.md#recipe-scheduled-release-put-an-inject-on-a-clock).
+
+#### Who chooses the branch
+
+Two different decisions, and they belong to two different people:
+
+- **The team chooses the path.** The option they select advances their **progression
+  cursor** to exactly one next node. That is the whole point — their decisions have to carry
+  consequences.
+- **You choose the pace.** You review the response and release that inject when the room is
+  ready — now, later, or not at all.
+
+What you **cannot** do is overrule the choice. The response card surfaces the team's
+resolved next step as a **Suggested next** button; releasing the branch they did *not* pick
+is rejected with `409 Inject is not the current branch for its group`.
+
+So the scenario never picks a branch on its own — the route through the tree is theirs, and
+the pace is yours. The one thing that *can* reach participants without you is a **scheduled
+inject** (above): its countdown fires by itself, but only on a node the team's cursor has
+already reached. A timer never chooses a branch, and never jumps ahead of the room.
 
 ![Reviewing a response and its suggested next branch](assets/inject-release.png){ .shot }
+
+!!! note "One response settles the branch for the whole team"
+    The cursor is per team, not per person. The first response commits the team to that
+    branch, and the alternatives can no longer be released to them.
 
 ### 6. Monitor responses and AI assessment
 

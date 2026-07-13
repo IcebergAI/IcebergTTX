@@ -1,8 +1,9 @@
 from httpx import AsyncClient
 from httpx_ws import aconnect_ws
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.exercise import Exercise
+from app.models.exercise import Exercise, ExerciseProgress
 from app.models.user import User
 from app.schemas.scenario_json import InjectNode, InjectOption, ScenarioDefinition
 
@@ -614,3 +615,102 @@ async def test_ws_broadcasts_response_to_facilitator(
 
     assert msg["type"] == "response_submitted"
     assert msg["payload"]["response"]["inject_id"] == inject_id
+
+
+async def test_unlinked_inject_is_releasable_only_before_the_first_response(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+):
+    """An orphan node has a release window that closes at the FIRST response anywhere.
+
+    release_is_allowed() lets a node nothing links to through while no cursor has
+    advanced, but bails once *any* cursor holds a current_inject_id -- and only the
+    responding team's cursor ever advances (resolve_response_progression scopes its
+    UPDATE to that group). So one team answering shuts the window for every team,
+    including teams that have not responded at all.
+
+    Two teams, and only it_ops responds: that is what discriminates the real `any`
+    gate from an `all` one, under which legal's untouched cursor would keep the
+    orphan releasable. The cookbook's "reachability is not required" recipe depends
+    on this, so pin both ends of it.
+    """
+    from app.models.exercise import ExerciseState
+    from app.services.exercise_service import create_exercise, enrol_member, transition_state
+    from app.services.scenario_service import create_scenario
+
+    scenario = await create_scenario(
+        session,
+        definition=ScenarioDefinition(
+            title="Orphan window",
+            participant_teams=[
+                {"id": "it_ops", "label": "IT Ops"},
+                # never responds -- its cursor stays un-advanced for the whole test
+                {"id": "legal", "label": "Legal"},
+            ],
+            injects=[
+                InjectNode(id="start", title="Start", content="c", target_teams=["it_ops"]),
+                # linked to by nothing — the cookbook's `legal_task` shape
+                InjectNode(id="orphan", title="Orphan", content="c", target_teams=["it_ops"]),
+                InjectNode(id="spare", title="Spare", content="c", target_teams=["it_ops"]),
+            ],
+            start_inject_id="start",
+        ),
+        created_by=facilitator.id,
+    )
+    exercise = await create_exercise(
+        session, title="Orphan window", scenario_id=scenario.id, created_by=facilitator.id
+    )
+    await enrol_member(session, exercise=exercise, user_id=participant.id, group_id="it_ops")
+    await transition_state(session, exercise, ExerciseState.active)
+
+    headers = {"Authorization": f"Bearer {facilitator_token}"}
+    injects = (
+        await client.get(f"/api/exercises/{exercise.id}/injects", headers=headers)
+    ).json()
+    by_node = {inject["scenario_node_id"]: inject for inject in injects}
+
+    # Before any response: an orphan is releasable.
+    assert (
+        await client.post(
+            f"/api/exercises/{exercise.id}/injects/{by_node['orphan']['id']}/release",
+            headers=headers,
+        )
+    ).status_code == 200
+
+    # Advance a cursor by answering the start node.
+    await client.post(
+        f"/api/exercises/{exercise.id}/injects/{by_node['start']['id']}/release",
+        headers=headers,
+    )
+    assert (
+        await _submit(
+            client,
+            participant_token,
+            exercise.id,
+            by_node["start"]["id"],
+            selected_option=None,
+        )
+    ).status_code == 201
+
+    # Only it_ops' cursor advanced. legal never responded, so its cursor still holds no
+    # current_inject_id -- an `all` gate would still let the orphan through here.
+    cursors = (
+        await session.exec(
+            select(ExerciseProgress).where(ExerciseProgress.exercise_id == exercise.id)
+        )
+    ).all()
+    advanced = {c.group_id: c.current_inject_id is not None for c in cursors}
+    assert advanced["it_ops"] is True
+    assert advanced["legal"] is False
+
+    # The window is shut regardless: a second orphan is refused like any off-cursor node.
+    r = await client.post(
+        f"/api/exercises/{exercise.id}/injects/{by_node['spare']['id']}/release",
+        headers=headers,
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Inject is not the current branch for its group"

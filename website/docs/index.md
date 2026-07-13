@@ -55,8 +55,9 @@ ships with Docker Compose and Kubernetes manifests.
 
     ---
 
-    The facilitator releases injects one at a time; participants receive them
-    instantly via WebSocket and submit a stance plus free-text reasoning.
+    The facilitator releases injects one at a time — or puts them on a pause-aware
+    countdown — and participants receive them instantly via WebSocket, then submit a
+    stance plus free-text reasoning.
 
 -   :material-forum: __Team comment threads__
 
@@ -97,8 +98,8 @@ One tool across the whole exercise lifecycle — **prepare** a branching scenari
 **run** the live session, and **learn** from the after-action review. The
 [facilitator guide](facilitator-guide.md) walks it end to end.
 
-The **facilitator console** — a live exercise with a team-grouped inject tree,
-one-at-a-time release, and the participant response feed.
+The **facilitator console** — a live exercise with a team-grouped inject tree, release
+controls (manual, or a scheduled countdown), and the participant response feed.
 
 ![Facilitator console in dark mode](assets/facilitator-dark.png){ .shot }
 
@@ -125,12 +126,12 @@ paste-ready scenario patterns from the **[cookbook](cookbook.md)**.
 
 | Role | What they do |
 |------|--------------|
-| **Facilitator** | Creates/imports scenarios, starts exercises, enrols participants, controls the inject feed and branch selection, injects inbound comms, exports transcripts. |
-| **Participant** | Receives injects for their team, posts team comments, submits a stance + free-text reasoning. Sees only what is assigned to their team. |
+| **Facilitator** | Creates/imports scenarios, starts exercises, enrols participants, controls the **pace** of the inject feed — releasing each inject, or scheduling it — injects inbound comms, exports transcripts. |
+| **Participant** | Receives injects for their team, posts team comments, submits a stance + free-text reasoning. Their chosen stance **selects the branch** the team takes next. Sees only what is assigned to their team. |
 | **Observer** | Read-only. Sees all injects but cannot respond — for senior stakeholders, auditors, or evaluators. |
 
-Self-registration always creates a **participant**; the facilitator role and admin
-flag are assigned out-of-band (seeded or admin-managed).
+Self-registration creates a **participant** (and can be disabled entirely); the
+facilitator role and admin flag are assigned out-of-band (seeded or admin-managed).
 
 ## Next steps
 

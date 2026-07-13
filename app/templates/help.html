@@ -35,7 +35,7 @@
         <div class="flex items-center gap-2 mb-2">
           <span class="pill" style="background: oklch(0.74 0.14 70 / .12); color: var(--accent-d); box-shadow: inset 0 0 0 1px oklch(0.74 0.14 70 / .3);">Facilitator</span>
         </div>
-        <p class="text-[13.5px] text-ink-soft leading-relaxed">Runs the exercise. Creates and imports scenarios, starts exercises, adds participants, and controls the inject feed — deciding when each inject is released and which branch to follow. Can inject simulated inbound communications, view all participant responses and team comments, and export transcripts.</p>
+        <p class="text-[13.5px] text-ink-soft leading-relaxed">Runs the exercise. Creates and imports scenarios, starts exercises, adds participants, and controls the <em>pace</em> of the inject feed — deciding when each inject is released, or putting it on a countdown. (Which branch comes next is settled by the participants' own choice, not the facilitator's.) Can inject simulated inbound communications, view all participant responses and team comments, and export transcripts.</p>
       </div>
       <div class="paper ring-rule rounded-lg p-5">
         <div class="flex items-center gap-2 mb-2">
@@ -75,7 +75,7 @@
           <div class="mono text-[13px] font-semibold text-faint shrink-0 w-5 pt-0.5">2</div>
           <div>
             <div class="text-[14px] font-semibold mb-1">Create an exercise</div>
-            <p class="text-[13.5px] text-ink-soft leading-relaxed">Go to <strong>Exercises → New exercise</strong>, give it a title, and select a scenario. Optionally enable <strong>LLM assessment</strong> to have Claude evaluate each response and suggest follow-up injects (requires <code class="mono text-[12.5px]">ANTHROPIC_API_KEY</code> in your <code class="mono text-[12.5px]">.env</code>).</p>
+            <p class="text-[13.5px] text-ink-soft leading-relaxed">Go to <strong>Exercises → New exercise</strong>, give it a title, and select a scenario. Optionally enable <strong>AI assistance</strong> to have the configured model evaluate each response and suggest follow-up injects (needs an AI provider set up on the server via <code class="mono text-[12.5px]">LLM_PROVIDER</code> — Anthropic, Amazon Bedrock, OpenAI, Ollama, or Gemini).</p>
           </div>
         </div>
       </div>
@@ -95,7 +95,7 @@
           <div class="mono text-[13px] font-semibold text-faint shrink-0 w-5 pt-0.5">4</div>
           <div>
             <div class="text-[14px] font-semibold mb-1">Start the exercise and release injects</div>
-            <p class="text-[13.5px] text-ink-soft leading-relaxed">Hit <strong>Start</strong> from the exercises list or the facilitator console. Injects appear in the left pane as <strong>pending</strong> nodes. Press <strong>Release</strong> to push an inject to participants — they'll receive it instantly via WebSocket. Once they respond, review the responses and team comments in the middle pane and choose which branch to release next. You can <strong>Pause</strong> the exercise at any point to halt new submissions.</p>
+            <p class="text-[13.5px] text-ink-soft leading-relaxed">Hit <strong>Start</strong> from the exercises list or the facilitator console. Injects appear in the left pane as <strong>pending</strong> nodes. Press <strong>Release</strong> to push an inject to participants — they'll receive it instantly via WebSocket. An inject with <code class="mono text-[12.5px]">release_at_minutes</code> instead auto-releases on a countdown once the team has reached it, which you can still pre-empt with <strong>Release</strong> or cancel from the clock icon — but if the team has not reached that inject when its countdown expires, the release is skipped and you release it by hand. Once participants respond, review the responses and team comments in the middle pane: the option the team selected settles <em>which</em> branch follows, and you decide whether and when to release it. Releasing the branch they did not pick is rejected. <strong>Pause</strong> halts new submissions at any point, and defers any pending release timers.</p>
           </div>
         </div>
       </div>
@@ -169,8 +169,7 @@
       "external_entity": "NCSC",
       "subject": "Ransomware advisory",
       "body": "We have been made aware of a campaign targeting...",
-      "delay_seconds": 120,
-      "visible_to_teams": ["it_ops"]
+      "delay_after_release_seconds": 120
     }
   ]
 }</pre>
@@ -195,7 +194,7 @@
       </div>
       <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
         <div class="smallcaps text-muted pt-0.5">triggers_communications</div>
-        <div class="text-ink-soft">Messages automatically injected into the comms inbox when this inject is released. <code class="mono text-[12px]">delay_seconds</code> staggers delivery.</div>
+        <div class="text-ink-soft">Messages automatically injected into the comms inbox when this inject is released. Triggered <code class="mono text-[12px]">inbound</code> messages are visible to all teams; triggered <code class="mono text-[12px]">outbound</code> messages are facilitator-visible because no participant sender or recipient teams are attached. <code class="mono text-[12px]">delay_after_release_seconds</code> staggers delivery. You set only <code class="mono text-[12px]">external_entity</code>, <code class="mono text-[12px]">direction</code>, <code class="mono text-[12px]">subject</code>, <code class="mono text-[12px]">body</code> and the delay — the server fills in the rest.</div>
       </div>
     </div>
   </section>
@@ -205,11 +204,11 @@
     <div class="section-title mb-4">
       <h2 class="smallcaps text-muted">LLM assessment</h2>
     </div>
-    <p class="text-[13.5px] text-ink-soft leading-relaxed mb-3">When enabled on an exercise, Claude evaluates each participant response and produces:</p>
+    <p class="text-[13.5px] text-ink-soft leading-relaxed mb-3">When enabled on an exercise, the configured AI model evaluates each participant response and produces:</p>
     <ul class="space-y-2 mb-4">
       <li class="flex items-start gap-2 text-[13.5px] text-ink-soft">
         <span class="dot mt-1.5 shrink-0" style="background: var(--accent-d);"></span>
-        A <strong>decision quality</strong> rating — <em>strong</em>, <em>acceptable</em>, or <em>poor</em>
+        A <strong>decision quality</strong> rating — <em>good</em>, <em>adequate</em>, or <em>poor</em>
       </li>
       <li class="flex items-start gap-2 text-[13.5px] text-ink-soft">
         <span class="dot mt-1.5 shrink-0" style="background: var(--accent-d);"></span>
@@ -220,7 +219,7 @@
         A suggested <strong>follow-up inject</strong> the facilitator can approve and queue
       </li>
     </ul>
-    <p class="text-[13.5px] text-ink-soft leading-relaxed">Set <code class="mono text-[12.5px]">ANTHROPIC_API_KEY</code> in your <code class="mono text-[12.5px]">.env</code> file to enable. Assessments appear in the AI assessment column of each response card in the facilitator console, and in the right pane's AI suggestions widget.</p>
+    <p class="text-[13.5px] text-ink-soft leading-relaxed">The provider is chosen on the server with <code class="mono text-[12.5px]">LLM_PROVIDER</code> — Anthropic, Amazon Bedrock, OpenAI, Ollama, or Gemini — each with its own credential and model settings (see <code class="mono text-[12.5px]">.env.example</code>). Assessments appear in the AI assessment column of each response card in the facilitator console, and in the right pane's AI suggestions widget. The <strong>Flagged</strong> filter surfaces the responses rated <em>poor</em>.</p>
   </section>
 
   <!-- Tips -->

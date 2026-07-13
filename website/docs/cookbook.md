@@ -18,8 +18,9 @@ an existing inject. Teams are optional, but if you declare `participant_teams`, 
 
 !!! tip "Check before you run"
     The scenario builder's readiness pane validates as you type, and the detail page
-    shows the same sidebar. Programmatically, `POST /api/scenarios/validate` returns
-    `{ "valid": bool, "errors": [...] }`.
+    shows the same sidebar. To re-check a scenario you have already saved,
+    `GET /api/scenarios/{id}/validate` (facilitator) returns `{"valid": true, "errors": []}`,
+    or `valid: false` with the validation error when it fails.
 
 ## Recipe: a linear drill
 
@@ -94,10 +95,14 @@ form a **cycle** (the validator rejects loops across both option and node-level 
 }
 ```
 
-**What the facilitator sees** — when a participant selects an option, the console
-resolves the matching `next_inject_id` and surfaces it as a **Suggested next** button on
-the response card. This is the "pull, not push" model: you review the response, then
-release the branch. Set an option's `next_inject_id` to `null` to make it a dead-end.
+**What the facilitator sees** — when a participant selects an option, the console resolves
+the matching `next_inject_id` and surfaces it as a **Suggested next** button on the response
+card. The team's choice settles *which* branch follows — releasing the one they did not pick
+is rejected with `409 Inject is not the current branch for its group`. What the facilitator
+controls is *whether and when* that branch is released — by hand, or on a countdown if the
+node carries `release_at_minutes` (see [scheduled
+release](#recipe-scheduled-release-put-an-inject-on-a-clock)). No branch is ever selected
+automatically. Set an option's `next_inject_id` to `null` to make it a dead-end.
 
 ## Recipe: team-targeted injects
 
@@ -142,10 +147,17 @@ stay separate.
 `ops_task` reaches only IT Operations; `legal_task` reaches Legal and Communications.
 Participants only ever see injects assigned to their own team.
 
-!!! note "Reachability is not required"
-    `legal_task` above is valid even though nothing links to it — you can release any
-    seeded inject manually. The validator only rejects **dangling references** and
-    **cycles**, not unreached nodes.
+!!! note "Reachability is not required — but an orphan has a release window"
+    `legal_task` above is valid even though nothing links to it: the validator only rejects
+    **dangling references** and **cycles**, not unreached nodes.
+
+    It is releasable by hand, but **only until the first response lands anywhere in the
+    exercise**. That first response advances *one* cursor — the responding team's — and from
+    then on any inject no cursor points at is refused with `409 Inject is not the current
+    branch for its group`. Note how little it takes: **one** team answering **one** inject
+    shuts the window for **every** team, including teams that have not responded at all. So
+    use an unlinked node as an *opening* inject you release up front, not as something to
+    hold in reserve for later.
 
 ## Recipe: triggered communications (delayed press/regulator comms)
 
@@ -177,16 +189,89 @@ inject is released. Use `triggers_communications` on the inject.
 }
 ```
 
-**What the facilitator sees** — releasing `leak` schedules the message; 120 seconds
-later it lands in the communications inbox for all teams and broadcasts over WebSocket.
+**What the facilitator sees** — releasing `leak` schedules this **inbound** message;
+120 seconds later it lands in the communications inbox for all teams and broadcasts over WebSocket.
 `delay_after_release_seconds: 0` delivers immediately.
 
 !!! warning "Authored fields differ from the inbox record"
     On a trigger you set only `external_entity`, `direction` (**exactly `"inbound"` or
     `"outbound"`**), `subject`, `body`, and `delay_after_release_seconds`. You do **not**
-    set `sender` or `visible_to_teams` — the server fills those in, and triggered comms
-    default to **all-team** visibility. To send a team-scoped or same-day message during
-    a live exercise, use **Inject inbound** in the Communications panel instead.
+    set `sender` or `visible_to_teams`. Triggered **inbound** comms default to all-team
+    visibility. Triggered **outbound** comms have no participant sender or recipient-team
+    scope, so they are visible to facilitators rather than participant inboxes. To send a
+    team-scoped or participant-authored message during a live exercise, use the
+    Communications panel instead.
+
+## Recipe: scheduled release (put an inject on a clock)
+
+**Goal** — have an inject fire on its own, so the room feels time pressure without the
+facilitator having to watch a stopwatch. Set `release_at_minutes` on the inject: it
+auto-releases that many minutes after the exercise **starts**.
+
+```json title="scheduled-release.json"
+{
+  "title": "Pressure builds",
+  "participant_teams": [{ "id": "it_ops", "label": "IT Operations" }],
+  "start_inject_id": "detect",
+  "injects": [
+    {
+      "id": "detect",
+      "title": "Anomaly detected",
+      "content": "Your monitoring stack has flagged unusual outbound traffic.",
+      "target_teams": ["it_ops"],
+      "next_inject_id": "escalate"
+    },
+    {
+      "id": "escalate",
+      "title": "It is getting worse",
+      "content": "Thirty minutes in, a second business unit reports the same symptoms.",
+      "target_teams": ["it_ops"],
+      "release_at_minutes": 30
+    }
+  ]
+}
+```
+
+**What the facilitator sees** — `detect` is released by hand as usual. `escalate` shows a
+live **countdown** in the inject tree and, **provided the team has reached it**, releases
+itself 30 minutes after the exercise started. The facilitator can still hit **Release** to
+bring it forward, or cancel the schedule to make it manual again.
+
+!!! warning "A timer only fires on an inject the team has actually reached"
+    This is the part that will catch you out. `release_at_minutes` does not exempt an inject
+    from the progression cursor: an inject can only be released when it is the **current
+    branch for its group**. In the scenario above, the team reaches `escalate` only by
+    responding to `detect`.
+
+    So if nobody has responded to `detect` when the 30-minute mark arrives, the scheduled
+    release is **rejected and silently skipped** — and the timer is **one-shot**, so it does
+    not re-arm when the team catches up later. The inject stays `pending` and you must
+    release it by hand.
+
+    Two practical consequences:
+
+    - **Leave slack.** Pick an offset the team will comfortably have reached by, not the
+      earliest moment the inject *could* make sense.
+    - **Don't rely on it for the critical path.** Treat a schedule as a convenience that
+      saves you watching a stopwatch, not as a guarantee the inject will appear.
+
+    The **start inject** is the one node whose schedule can never be skipped: a cursor points
+    at it from `t=0` and cannot move off it until it has been released and answered.
+
+    An *unreferenced* node (like `legal_task` above) is releasable at the start too — but
+    only until the **first response anywhere in the exercise**, after which it is refused
+    like any other off-cursor node. So it is not a safe thing to schedule.
+
+!!! note "The countdown is pause-aware"
+    The offset is measured in *elapsed exercise time*, not wall-clock time. Pausing the
+    exercise defers the timer; resuming re-arms it with the remaining offset. An inject set
+    to 30 minutes, in an exercise paused for 5, fires 35 minutes after the start.
+
+!!! tip "Scheduling adds no edge to the graph"
+    `release_at_minutes` only controls *when* an inject may release. It adds **no** edge to
+    the scenario graph and takes no part in cycle detection. It also does not change who
+    chooses the branch — that is still settled by the team's response. Omit the field (the
+    default) for manual-only release.
 
 ## Recipe: free-text vs option responses
 

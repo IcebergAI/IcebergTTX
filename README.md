@@ -24,20 +24,26 @@ manifests.
 ## Features
 
 - **Scenario library** — build branching inject trees (or linear chained flows) in the visual scenario builder, or import/export them as JSON
-- **Live exercises** — facilitator releases injects in real time via WebSocket push
+- **Live exercises** — the facilitator releases injects in real time via WebSocket push, and can put an inject on a pause-aware countdown (`release_at_minutes`) that is still cancellable and can be triggered early
+- **Participants choose the path** — a team's selected option settles which branch follows and advances their progression cursor; the facilitator controls whether and when it is released, but cannot overrule the choice
+- **Exercise pacing** — `draft → active → paused → completed`, with pause-aware elapsed clocks; pausing defers pending release timers and resuming re-arms them
 - **Participant responses** — branch decisions require an explicit choice; injects can require that choice alone or choice plus free-text reasoning
 - **Team comment threads** — participants discuss released injects in group-scoped comment threads
-- **Simulated communications** — two-pane inbox/outbox for regulatory, press, and executive comms
+- **Simulated communications** — two-pane inbox/outbox for regulatory, press, and executive comms, with per-user read receipts and an unread badge
 - **LLM assessment** — a pluggable AI backend (Anthropic, Bedrock, OpenAI, Ollama, or Gemini) evaluates participant decisions and suggests follow-up injects
-- **Role-based access** — facilitator, participant, and observer roles (self-registration always creates a participant; elevation is out-of-band)
+- **After-action review** — a merged chronological timeline, a shareable generated report (HTML / Markdown, with an optional AI-drafted executive summary), and facilitator debrief notes
+- **Role-based access** — facilitator, participant, and observer roles (self-registration creates a participant and can be disabled entirely with `REGISTRATION_ENABLED=false`; elevation is out-of-band)
 - **Role preview** — facilitators can view the app as a participant or observer without changing accounts
-- **Security hardening** — enforced SECRET_KEY at startup, Secure cookie + CSRF origin checks, login rate limiting, and structured audit logging with off-host SIEM forwarding (syslog / HTTP / file)
+- **Email flows** *(optional)* — self-service password reset and participant invites over SMTP, feature-flagged on `SMTP_HOST` + `SMTP_FROM`
+- **SSO** *(optional)* — OpenID Connect via Entra, Authentik, Auth0, or Okta, with an optional IdP-group → role allowlist
+- **Egress control** *(optional)* — route outbound LLM / SIEM-HTTP / OIDC traffic through an explicit HTTP proxy (`PROXY_MODE`)
+- **Security hardening** — enforced SECRET_KEY at startup, strict CSP (`script-src 'self'`), Secure cookie + CSRF origin checks, login rate limiting, and structured audit logging with off-host SIEM forwarding (syslog / HTTP / file)
 - **Sample templates** — optional bundled scenarios can be loaded from Settings; the database stays empty by default
 - **Export** — full exercise transcript (JSON) or responses table (CSV)
 
 ## Screenshots
 
-The hero above is the **facilitator console** — a live exercise with a team-grouped inject tree, one-at-a-time release, and participant responses.
+The hero above is the **facilitator console** — a live exercise with a team-grouped inject tree, release controls (manual, or a scheduled countdown), and participant responses.
 
 | Command center | Scenario inject tree |
 |---|---|
@@ -83,19 +89,34 @@ cp .env.example .env
 #                  for the per-provider key/model/endpoint vars
 # Outside DEV_MODE the app refuses to start if SECRET_KEY is unset/weak, or if the selected
 # LLM_PROVIDER is missing its credentials (set LLM_PROVIDER=none to run without the LLM).
+#
+# Optional (see .env.example for the full list) — note the defaults, two are NOT "off":
+#   REGISTRATION_ENABLED=false   self-registration is ON by default (creating participants);
+#                                set false for an invite-only deployment
+#   PROXY_MODE=explicit          egress defaults to `system`, which HONOURS any ambient
+#                                HTTP(S)_PROXY/NO_PROXY vars; `explicit` routes outbound
+#                                LLM/SIEM-HTTP/OIDC via PROXY_URL, `none` forces direct
+#   SMTP_HOST + SMTP_FROM        off until both are set — enables password reset +
+#                                participant invites (also PUBLIC_BASE_URL, so emailed
+#                                links are absolute)
+#   AUTH_MODE / OIDC_*           no SSO providers are configured by default; add OIDC_*
+#                                for OpenID Connect (Entra, Authentik, Auth0, Okta)
+#   SIEM_*                       off by default — forward audit events off-host
+#                                (syslog / HTTP / file)
 
 # Compile CSS, watch templates/design tokens, and run the development server
 uv run iceberg-ttx-dev
 ```
 
-Open [http://localhost:8000](http://localhost:8000). Self-registration always creates a **participant**; privileged roles are assigned out-of-band. Create your first admin/facilitator with the bootstrap command:
+Open [http://localhost:8000](http://localhost:8000). Self-registration creates a **participant** (and can be turned off entirely with `REGISTRATION_ENABLED=false`); privileged roles are assigned out-of-band. Create your first admin/facilitator with the bootstrap command:
 
 ```bash
-# Creates a global-admin facilitator (prompts for the password if --password is omitted).
-python -m app.bootstrap_admin --email you@example.com --name "You"
+# Creates a global-admin facilitator. The password is read from --password, else the
+# ADMIN_PASSWORD env var, else an interactive prompt — so it needs a TTY if you omit both.
+uv run python -m app.bootstrap_admin --email you@example.com --name "You"
 ```
 
-The command is idempotent — re-run it to promote or re-enable an existing account, add `--reset-password` to set a new password (revokes existing sessions), or `--no-admin` for a plain facilitator without the global-admin flag. In a container, prefix it with `docker compose exec app` or `kubectl exec -n iceberg-ttx deploy/iceberg-ttx-app --` (see the deployment sections below).
+The command is idempotent — re-run it to promote or re-enable an existing account, add `--reset-password` to set a new password (revokes existing sessions), `--role` to pick the role, or `--no-admin` for a plain facilitator without the global-admin flag. It is also installed as the `iceberg-ttx-admin` console script. In a container, prefix it with `docker compose exec app` or `kubectl exec -it -n iceberg-ttx deploy/iceberg-ttx-app --` (the `-it` matters — without a TTY the password prompt has nothing to read; see the deployment sections below).
 
 As a facilitator, create a scenario and exercise. To try the app quickly, open Settings and load a sample scenario or demo exercise. In-app help is available at [/help](http://localhost:8000/help).
 
@@ -111,7 +132,7 @@ cp .env.example .env
 # Build and start
 docker compose up -d
 
-# Check all three services are healthy
+# db, app and caddy should be healthy (caddy-init is one-shot and exits)
 docker compose ps
 ```
 
@@ -163,8 +184,9 @@ kubectl rollout status deployment/caddy -n iceberg-ttx
 # Confine east-west traffic (requires a NetworkPolicy-enforcing CNI):
 kubectl apply -f k8s/networkpolicy.yaml
 
-# Create the first admin account (idempotent):
-kubectl exec -n iceberg-ttx deploy/iceberg-ttx-app -- \
+# Create the first admin account (idempotent). -it is required: with no --password and
+# no ADMIN_PASSWORD, the tool prompts for one and needs a TTY to read it.
+kubectl exec -it -n iceberg-ttx deploy/iceberg-ttx-app -- \
     python -m app.bootstrap_admin --email you@example.com --name "You"
 ```
 
@@ -172,9 +194,9 @@ kubectl exec -n iceberg-ttx deploy/iceberg-ttx-app -- \
 >
 > **Origin checks**: browser WebSocket auth verifies the upgrade's `Origin` against the request `Host` (plus `TRUSTED_ORIGINS`). This works out of the box because every hop preserves `Host` — but if you configure the Ingress or proxy chain to rewrite it, set `TRUSTED_ORIGINS` in `k8s/configmap.yaml` to your public hostname so live updates keep working.
 >
-> **Pod hardening**: all three workloads run non-root under a PSS-`restricted`-style `securityContext` (no privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp; app + init containers use a read-only root filesystem). The Postgres StatefulSet runs as uid 999 with `fsGroup: 999`, which needs a StorageClass that honours `fsGroup`.
+> **Pod hardening**: every workload runs non-root under a PSS-`restricted`-style `securityContext` (no privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp), and every container uses a read-only root filesystem — app, init, Caddy, Postgres, and the backup CronJob alike. The Postgres StatefulSet runs as uid 999 with `fsGroup: 999`, which needs a StorageClass that honours `fsGroup`.
 
-> **Note**: The app must run as a single replica (`replicas: 1`) until the in-memory WebSocket manager is replaced with a distributed backend (e.g. Redis pub/sub). The manifests enforce this with `strategy: Recreate`.
+> **Note**: The app must run as a single replica (`replicas: 1`); the manifests enforce it with `strategy: Recreate`. Every piece of cross-request state lives in the **process**, so a second replica would not share any of it: the **WebSocket manager** (needs a shared bus, e.g. Redis pub/sub), **scheduled inject release** and **delayed triggered comms** (in-process `asyncio` tasks — need a task queue such as Celery or ARQ), the **login/registration/reset rate limiters** (per-process counters, so the effective limits would multiply by the replica count), the **SIEM and proxy config caches** (an admin's change would not reach the other replica), and **in-flight LLM assessments**. See the [deployment docs](https://icebergai.github.io/IcebergTTX/deployment/) for the full table.
 
 ## Attachment reconciliation
 
@@ -304,6 +326,19 @@ sidecar to run.
 Seed the defaults from the `SIEM_*` env vars (see `.env.example`); routing is then
 edited live from `/admin/audit`. In Kubernetes the non-secret routing lives in
 `k8s/configmap.yaml` and the token in `k8s/secrets.yaml`.
+
+### Outbound proxy
+
+In an egress-restricted network, the app's outbound HTTP calls — the **LLM** provider, the
+**SIEM `http`** sink, and **OIDC** — can be routed through a forward proxy. Set
+`PROXY_MODE` to `system` (honour the standard `HTTPS_PROXY`/`NO_PROXY` vars, the default),
+`none` (bypass any ambient proxy), or `explicit` (use `PROXY_URL`, with optional
+`PROXY_USERNAME`/`PROXY_PASSWORD` and a `PROXY_NO_PROXY` bypass list). Credentials are
+env-only and never returned by the API. Admins can edit the routing live and run a
+connectivity check per target at **`/admin/proxy`**.
+
+Two egress paths deliberately **bypass** the proxy because they are raw sockets, not HTTP:
+the `syslog` SIEM sink and SMTP mail delivery.
 
 **Example alert rule** (brute-force detection, ties to the login rate limiter
 #11) — Splunk SPL over the shipped events:
@@ -447,6 +482,35 @@ slash) so the callback URL matches what you register with the IdP.
    # OIDC_OKTA_ROLE_MAP=ttx-facilitators=facilitator
    ```
 
+## Email (password reset & invites)
+
+Email is **optional and off by default**. It switches on only when both `SMTP_HOST` and
+`SMTP_FROM` are set; until then the email-dependent endpoints return 404 and their UI entry
+points stay hidden.
+
+```bash
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_FROM="IcebergTTX <noreply@example.com>"
+SMTP_USERNAME=<username>          # optional
+SMTP_PASSWORD=<password>          # optional
+SMTP_STARTTLS=true                # or SMTP_TLS=true for implicit TLS
+PUBLIC_BASE_URL=https://ttx.example.com   # so emailed links are absolute
+```
+
+With it enabled you get two flows:
+
+- **Self-service password reset** — `/forgot-password`. Tokens are single-use, expiring, and
+  stored **hashed**; only the raw token is emailed. Completing a reset revokes existing
+  sessions. The request endpoint always returns 200 and sends off the response path, so it
+  cannot be used to enumerate accounts.
+- **Participant invites** — an admin invites by email from the Users admin; the invite
+  pre-binds the team and exercise, works even while `REGISTRATION_ENABLED=false`, and the
+  accepted account takes its email from the token rather than the client.
+
+SMTP is a raw socket, so — like the `syslog` SIEM sink — it goes **direct** and is not
+routed through the outbound HTTP proxy.
+
 ## Running Tests
 
 ```bash
@@ -472,32 +536,43 @@ uv run tailwindcss -i static/css/input.css -o static/css/output.css --minify
 
 ```
 app/
-├── main.py          # App factory + lifespan (settings validation, middleware)
+├── main.py          # App factory + lifespan (settings validation, migrations, middleware)
 ├── config.py        # Settings (pydantic-settings, reads .env) + startup validation
-├── middleware.py    # Audit request context + CSRF origin checks
-├── database.py      # Async Postgres engine + get_session dependency
+├── middleware.py    # Audit request context + security headers + CSRF origin checks
+├── database.py      # Async Postgres engine + get_session dependency + run_migrations
 ├── dependencies.py  # FastAPI dependencies (auth, role guards)
-├── models/          # SQLModel table definitions (incl. AuditEvent, AuditSettings)
-├── schemas/         # Pydantic request/response schemas
-├── routers/         # FastAPI routers (one per resource, incl. audit) + ui.py (Jinja2 pages)
-├── services/        # Business logic (auth, scenario, exercise, inject, inject_comment, response, comms, llm, ws_manager, access_control, audit_service, siem_service, audit_settings_service, rate_limit)
+├── bootstrap_admin.py  # CLI to create/promote the first admin facilitator
+├── models/          # SQLModel table definitions (incl. AuditEvent, AuditSettings,
+│                    #   ProxySettings, ExecutiveSummary, AuthToken)
+├── schemas/         # Pydantic request/response schemas (incl. the scenario JSON schema)
+├── routers/         # FastAPI routers (one per resource, incl. audit, proxy, oidc, ws)
+│                    #   + ui.py (Jinja2 pages)
+├── services/        # Business logic — auth, scenario, exercise, inject, inject_comment,
+│                    #   response, progression, communication, schedule (timed release),
+│                    #   report, timeline, csv_export, llm/ + oidc/ provider adapters,
+│                    #   mail, token, proxy, siem, audit, rate_limit, ws_manager,
+│                    #   access_control, role_preview, sample, background
 ├── samples/         # Bundled quick-start scenario templates (loaded only on demand)
 └── templates/       # Jinja2 HTML templates
-    ├── base.html            # App shell (dark rail + breadcrumb topbar), shared JS helpers
+    ├── base.html            # App shell (dark rail + breadcrumb topbar)
     ├── dashboard.html       # Command center
-    ├── help.html            # In-app help & documentation
+    ├── help.html            # In-app help & scenario JSON documentation
     ├── settings.html        # Profile, theme, role preview, and sample loader
-    ├── auth/                # login.html, register.html
+    ├── auth/                # login, register, forgot_password, reset_password, accept_invite
     ├── scenarios/           # list, detail, editor
-    ├── exercises/           # list, facilitator console, participant view
-    └── communications/      # inbox
+    ├── exercises/           # list, facilitator console, participant view, review, report
+    ├── communications/      # inbox, index
+    └── admin/               # audit trail, outbound proxy, users
+alembic/             # Migration env.py + versions/ (schema is Alembic-managed)
 tests/               # Pytest test suite (conftest.py + one file per resource)
-static/css/          # input.css + iceberg.css (shared design system) → output.css (Tailwind CLI compiled)
+static/css/          # input.css + iceberg.css (shared design system) → output.css (Tailwind CLI)
+static/js/           # theme-boot + app runtime + pages/*.js + the vendored Alpine CSP build
 static/fonts/        # Self-hosted Archivo · JetBrains Mono · Spectral (woff2) + fonts.css
 static/img/          # Iceberg brand marks (SVG)
 docs/                # README screenshots
+website/             # Public documentation site (zensical)
 Dockerfile           # Multi-stage build (Tailwind compile + Python runtime)
-docker-compose.yml   # app + postgres:17 + caddy (auto-HTTPS, non-root)
+docker-compose.yml   # db + app + caddy-init + caddy (auto-HTTPS, non-root)
 docker/Caddyfile     # Caddy reverse proxy (automatic HTTPS) + static serving
 k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, caddy)
 ```
@@ -507,23 +582,31 @@ k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, 
 1. **Create a scenario** — Scenarios → New, or import a JSON file
 2. **Create an exercise** — Exercises → New, select a scenario, optionally enable LLM
 3. **Enrol participants** — Facilitator console → Participants panel, search and add users
-4. **Start and release injects** — Hit Start, then Release each inject when ready
-5. **Review responses** — Middle pane; choose which branch to release next
-6. **Complete and export** — Complete button, then export transcript/responses from the right pane
+4. **Start and release injects** — Hit Start, then Release each inject when ready. An inject
+   carrying `release_at_minutes` auto-releases on a pause-aware countdown once the team has
+   reached it; you can still release it early or cancel the schedule
+5. **Review responses** — Middle pane. The team's selected option settles *which* branch
+   follows; you decide whether and when to release it (the branch they didn't pick is
+   rejected with a 409)
+6. **Pause / resume** — Pause halts new submissions and defers pending release timers
+7. **Complete, review and export** — Complete, then use the review timeline, the generated
+   report, or export the transcript (JSON) / responses (CSV)
 
-See [/help](/help) for full documentation including the scenario JSON schema.
+See [/help](/help) for full documentation including the scenario JSON schema, or the
+[documentation site](https://icebergai.github.io/IcebergTTX/) for the facilitator guide and
+scenario cookbook.
 
 ## Versioning & Releases
 
 IcebergTTX follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 The current release line is **`0.x` (pre-stable / beta)** — interfaces may change
-before `1.0.0`. Pre-releases carry a suffix (`vX.Y.Z-beta.N`); the first public
-release is **`v0.1.0-beta.1`**.
+before `1.0.0`. Pre-releases carry a suffix (`vX.Y.Z-beta.N`); the latest release is
+**`v0.1.0-beta.2`**.
 
 Container images are published to **GitHub Container Registry**:
 
 ```bash
-docker pull ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.1
+docker pull ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.2
 ```
 
 Each release image ships an SBOM, a signed **SLSA build-provenance** attestation, and a
