@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -170,6 +171,23 @@ app.add_middleware(AuditContextMiddleware)
 @app.exception_handler(UIRedirect)
 async def ui_redirect_handler(request: Request, exc: UIRedirect) -> RedirectResponse:
     return RedirectResponse(exc.url)
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Return useful validation locations without reflecting attacker-controlled values.
+
+    FastAPI includes each rejected ``input`` in its default 422 response. That can
+    reflect passwords, tokens, or other secrets supplied to forbidden fields, so
+    retain the structured error while removing raw inputs from every entry.
+    """
+    errors = [
+        {key: value for key, value in error.items() if key != "input"}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 
 @app.exception_handler(Exception)

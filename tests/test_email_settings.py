@@ -66,6 +66,7 @@ async def test_email_api_rejects_password(client: AsyncClient, admin_token: str)
     )
     assert response.status_code == 422
     assert "must-not-enter-the-app" not in response.text
+    assert response.json()["detail"][0]["loc"][-1] == "smtp_password"
 
 
 async def test_email_api_rejects_conflicting_tls(client: AsyncClient, admin_token: str):
