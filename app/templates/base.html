@@ -26,6 +26,9 @@
     <path d="M12 3.5a13 13 0 0 1 0 17a13 13 0 0 1 0-17z" />
   {%- elif name == 'email' -%}
     <rect x="3" y="5.5" width="18" height="13" rx="2" /><path d="m3.75 7 8.25 6 8.25-6" />
+  {%- elif name == 'llm' -%}
+    <path d="M12 3.5 13.7 8l4.8 1.7-4.8 1.7-1.7 4.6-1.7-4.6-4.8-1.7L10.3 8z" />
+    <path d="m18 15 .8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z" />
   {%- elif name == 'settings' -%}
     <circle cx="12" cy="12" r="3" />
     <path d="M12 2.5v2.2M12 19.3v2.2M21.5 12h-2.2M4.7 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3" />
@@ -198,6 +201,9 @@
           </a>
           <a href="/admin/settings" class="rail-link" :class="isActive('/admin/settings') && 'is-active'">
             {{ rail_icon('settings') }}<span class="rail-link-label">General</span>
+          </a>
+          <a href="/admin/llm" class="rail-link" :class="isActive('/admin/llm') && 'is-active'">
+            {{ rail_icon('llm') }}<span class="rail-link-label">AI provider</span>
           </a>
         </div>
       </nav>

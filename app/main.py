@@ -27,6 +27,7 @@ from app.models import (  # noqa: F401
     general_settings,
     inject,
     inject_comment,
+    llm_settings,
     proxy_settings,
     report_summary,
     response,
@@ -45,6 +46,7 @@ from app.routers import (
     health,
     inject_comments,
     injects,
+    llm,
     oidc,
     responses,
     scenarios,
@@ -134,6 +136,20 @@ async def _load_general_config() -> None:
         logger.exception("failed to load general config; using environment defaults")
 
 
+async def _load_llm_config() -> None:
+    """Load runtime LLM routing; environment values remain the pre-load fallback."""
+    try:
+        from sqlmodel.ext.asyncio.session import AsyncSession
+
+        from app.database import engine
+        from app.services import llm_settings_service
+
+        async with AsyncSession(engine) as session:
+            await llm_settings_service.refresh_cache(session)
+    except Exception:
+        logger.exception("failed to load LLM config; using environment defaults")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
@@ -146,6 +162,7 @@ async def lifespan(app: FastAPI):
     await _load_siem_config()
     await _load_email_config()
     await _load_general_config()
+    await _load_llm_config()
     # Register enabled OIDC providers with Authlib (#25). Idempotent; the routes
     # also register lazily so this is a no-op fast path under the test transport.
     from app.services.oidc import service as oidc_service
@@ -233,6 +250,7 @@ app.include_router(oidc.router, prefix="/api")
 app.include_router(audit_router.router, prefix="/api")
 app.include_router(email_router.router, prefix="/api")
 app.include_router(general.router, prefix="/api")
+app.include_router(llm.router, prefix="/api")
 app.include_router(proxy_router.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(scenarios.router, prefix="/api")

@@ -292,3 +292,8 @@ def admin_email_page(request: Request, user: AdminUser):
 @router.get("/admin/settings", response_class=HTMLResponse)
 def admin_general_settings_page(request: Request, user: AdminUser):
     return templates.TemplateResponse(request, "admin/general.html", {"user": user})
+
+
+@router.get("/admin/llm", response_class=HTMLResponse)
+def admin_llm_settings_page(request: Request, user: AdminUser):
+    return templates.TemplateResponse(request, "admin/llm.html", {"user": user})

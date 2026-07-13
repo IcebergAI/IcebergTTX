@@ -125,10 +125,13 @@ def _reset_login_rate_limiter():
 def _reset_llm_provider_cache():
     """Drop the cached active AI provider so tests that monkeypatch LLM_PROVIDER /
     settings see a freshly-built provider (#26)."""
+    from app.services import llm_settings_service
     from app.services.llm.service import reset_provider_cache
 
+    llm_settings_service.set_config(None)
     reset_provider_cache()
     yield
+    llm_settings_service.set_config(None)
     reset_provider_cache()
 
 
