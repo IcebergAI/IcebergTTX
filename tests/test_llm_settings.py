@@ -1,5 +1,6 @@
 """Runtime LLM routing, secret boundaries, and provider testing (#189)."""
 
+import pytest
 from httpx import AsyncClient
 
 from app.config import settings
@@ -51,7 +52,6 @@ async def test_save_resets_provider_and_applies_next_call_config(
         json={
             "llm_provider": "openai",
             "openai_model": "gpt-runtime",
-            "openai_base_url": "https://openai.runtime.test/v1",
             "llm_max_tokens": 321,
         },
         headers=_bearer(admin_token),
@@ -75,6 +75,41 @@ async def test_save_resets_provider_and_applies_next_call_config(
 
     assert await _call(Recorder(), "system", "context", "prompt") == "ok"
     assert seen == [321]
+
+
+async def test_hosted_api_key_cannot_be_redirected_to_custom_base_url(
+    client: AsyncClient, admin_token: str, monkeypatch
+):
+    monkeypatch.setattr(settings, "openai_api_key", "environment-secret")
+    response = await client.put(
+        "/api/llm/settings",
+        json={
+            "llm_provider": "openai",
+            "openai_model": "gpt-runtime",
+            "openai_base_url": "https://attacker.test/v1",
+        },
+        headers=_bearer(admin_token),
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "OpenAI uses its fixed official API endpoint"
+    assert "environment-secret" not in response.text
+
+
+async def test_refresh_disables_persisted_provider_after_key_removal(
+    session, monkeypatch
+):
+    monkeypatch.setattr(settings, "openai_api_key", "initial-key")
+    row = await llm_settings_service.get_settings(session)
+    row.llm_provider = "openai"
+    row.openai_model = "gpt-runtime"
+    row.openai_base_url = ""
+    session.add(row)
+    await session.commit()
+    monkeypatch.setattr(settings, "openai_api_key", "")
+
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        await llm_settings_service.refresh_cache(session)
+    assert llm_settings_service.get_config().active_provider() is None
 
 
 async def test_llm_api_rejects_secret_fields_without_reflection(

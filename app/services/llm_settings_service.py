@@ -1,6 +1,6 @@
 """Singleton LLM routing settings and frozen runtime provider configuration."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -143,14 +143,39 @@ def validate_selection(config: LLMRuntimeConfig) -> None:
         raise ValueError(f"{key.upper()}_API_KEY is not set in the environment")
     if key == "bedrock" and not provider.aws_region.strip():
         raise ValueError("BEDROCK_AWS_REGION must be set before selecting Bedrock")
+    if key == "openai" and config.openai_base_url.rstrip("/") not in {
+        "",
+        "https://api.openai.com/v1",
+    }:
+        raise ValueError("OpenAI uses its fixed official API endpoint")
+    if key == "gemini" and config.gemini_base_url.rstrip("/") != (
+        GEMINI_OPENAI_BASE_URL.rstrip("/")
+    ):
+        raise ValueError("Gemini uses its fixed official API endpoint")
+    if key == "ollama":
+        approved_ollama_urls = {
+            OLLAMA_DEFAULT_BASE_URL.rstrip("/"),
+            (settings.ollama_base_url or OLLAMA_DEFAULT_BASE_URL).rstrip("/"),
+        }
+        if config.ollama_base_url.rstrip("/") not in approved_ollama_urls:
+            raise ValueError(
+                "Ollama base URL must match the operator-approved environment endpoint"
+            )
 
 
 async def get_settings(session: AsyncSession) -> LLMSettings:
     row = await session.get(LLMSettings, _SINGLETON_ID)
     if row is None:
+        seed = _env_config()
+        try:
+            validate_selection(seed)
+        except ValueError:
+            # A missing environment credential must never make the default hosted
+            # provider active. Seed a visible, safe disabled policy instead.
+            seed = replace(seed, llm_provider="none")
         row = LLMSettings(
             id=_SINGLETON_ID,
-            **{field: getattr(settings, field) for field in EDITABLE_FIELDS},
+            **{field: getattr(seed, field) for field in EDITABLE_FIELDS},
         )
         session.add(row)
         await session.commit()
@@ -186,7 +211,18 @@ async def update_settings(session: AsyncSession, changes: dict[str, Any]) -> LLM
 
 
 async def refresh_cache(session: AsyncSession) -> None:
-    set_config(_to_config(await get_settings(session)))
+    config = _to_config(await get_settings(session))
+    try:
+        validate_selection(config)
+    except ValueError:
+        # Keep the persisted selection visible for remediation, but install a
+        # disabled runtime snapshot before surfacing the startup validation error.
+        set_config(replace(config, llm_provider="none"))
+        from app.services.llm.service import reset_provider_cache
+
+        reset_provider_cache()
+        raise
+    set_config(config)
     from app.services.llm.service import reset_provider_cache
 
     reset_provider_cache()

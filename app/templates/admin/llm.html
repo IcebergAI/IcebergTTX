@@ -75,9 +75,11 @@
                  class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
         </div>
         <div>
-          <label class="block smallcaps text-muted mb-1" for="openai-base-url">Base URL override</label>
-          <input id="openai-base-url" type="url" x-model="cfg.openai_base_url" placeholder="SDK default"
-                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+          <label class="block smallcaps text-muted mb-1" for="openai-base-url">API endpoint</label>
+          <input id="openai-base-url" type="url" x-model="cfg.openai_base_url" readonly
+                 placeholder="https://api.openai.com/v1"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono opacity-70" />
+          <p class="text-[11.5px] text-faint mt-1">Fixed to the official endpoint so the environment API key cannot be redirected.</p>
         </div>
         <div class="well p-3 text-[12.5px] md:col-span-2">
           <span class="mono">OPENAI_API_KEY</span>
@@ -107,8 +109,9 @@
         </div>
         <div>
           <label class="block smallcaps text-muted mb-1" for="gemini-base-url">Base URL</label>
-          <input id="gemini-base-url" type="url" x-model="cfg.gemini_base_url"
-                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+          <input id="gemini-base-url" type="url" x-model="cfg.gemini_base_url" readonly
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono opacity-70" />
+          <p class="text-[11.5px] text-faint mt-1">Fixed to Google's official OpenAI-compatible endpoint.</p>
         </div>
         <div class="well p-3 text-[12.5px] md:col-span-2">
           <span class="mono">GEMINI_API_KEY</span>
