@@ -22,6 +22,7 @@ from app.models.user import UserRole
 
 if TYPE_CHECKING:
     from app.models.exercise import Exercise, ExerciseMember
+    from app.models.report_summary import ExecutiveSummary
 
 
 class UserPublic(BaseModel):
@@ -121,6 +122,16 @@ class ExecutiveSummaryPublic(BaseModel):
     llm_model: str
     edited: bool
     generated_at: str
+
+    @classmethod
+    def from_model(cls, summary: ExecutiveSummary) -> ExecutiveSummaryPublic:
+        return cls(
+            exercise_id=summary.exercise_id,
+            summary_text=summary.summary_text,
+            llm_model=summary.llm_model,
+            edited=summary.edited,
+            generated_at=summary.generated_at.isoformat(),
+        )
 
 
 class ReportSummaryState(BaseModel):

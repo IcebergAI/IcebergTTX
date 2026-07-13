@@ -88,7 +88,7 @@ def test_unknown_provider_key_rejected_even_in_dev_mode():
         validate_settings(_settings(llm_provider="bogus"))
 
 
-def test_missing_api_key_rejected_in_production():
+def test_missing_api_key_is_deferred_to_runtime_save_validation():
     s = Settings(
         dev_mode=False,
         secret_key="x" * 40,
@@ -96,11 +96,10 @@ def test_missing_api_key_rejected_in_production():
         llm_provider="openai",
         openai_api_key="",
     )
-    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
-        validate_settings(s)
+    validate_settings(s)
 
 
-def test_bedrock_requires_region_in_production():
+def test_missing_bedrock_region_is_deferred_to_runtime_save_validation():
     s = Settings(
         dev_mode=False,
         secret_key="x" * 40,
@@ -108,8 +107,7 @@ def test_bedrock_requires_region_in_production():
         llm_provider="bedrock",
         bedrock_aws_region="",
     )
-    with pytest.raises(RuntimeError, match="BEDROCK_AWS_REGION"):
-        validate_settings(s)
+    validate_settings(s)
 
 
 def test_ollama_needs_no_credentials_in_production():
@@ -160,8 +158,8 @@ async def test_anthropic_adapter_parses_content_text(monkeypatch):
 
     assert out == "hello"
     kwargs = client.messages.create.call_args.kwargs
-    # Direct API path carries the prompt-caching header + cache_control block.
-    assert kwargs["extra_headers"]["anthropic-beta"] == "prompt-caching-2024-07-31"
+    # Direct API caching is generally available; no retired beta header is sent.
+    assert "extra_headers" not in kwargs
     assert kwargs["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
 

@@ -493,6 +493,18 @@ histories, and token-lifetime changes affect newly issued tokens only.
 Security-sensitive process settings such as `SECRET_KEY`, `TRUSTED_ORIGINS`, `DEV_MODE`, and
 cookie security are deliberately not exposed by this page or API.
 
+## AI provider settings
+
+The non-secret `LLM_*`, model, endpoint, and Bedrock-region values seed the singleton shown at
+**`/admin/llm`**. After first startup the database row is authoritative, and a saved provider/model
+is used on the next LLM call without a restart. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and
+`GEMINI_API_KEY` remain environment-only; the page exposes only set/not-set booleans and refuses
+to activate a hosted provider whose key is absent. The provider test sends one minimal,
+server-authored completion and returns only `ok` or a safe exception class.
+OpenAI and Gemini are pinned to their official API endpoints so an administrator cannot redirect
+an environment API key. Ollama may use only the operator-approved environment endpoint (or the
+loopback default), preventing the runtime test and LLM pipeline from becoming arbitrary SSRF paths.
+
 ## Email (password reset & invites)
 
 Email is **optional and off by default**. On first startup, the non-secret `SMTP_*` values

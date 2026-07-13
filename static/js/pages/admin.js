@@ -248,4 +248,57 @@ document.addEventListener('alpine:init', () => {
       if (resp && resp.ok) await this.loadSettings();
     },
   }));
+
+  Alpine.data('adminLlm', () => ({
+    cfg: {
+      llm_provider: 'none', llm_max_tokens: 600,
+      anthropic_model: '', bedrock_model: '', bedrock_aws_region: '',
+      openai_model: '', openai_base_url: '', ollama_model: '', ollama_base_url: '',
+      gemini_model: '', gemini_base_url: '',
+    },
+    keys: { anthropic: false, openai: false, gemini: false },
+    saving: false,
+    testing: false,
+    message: '',
+
+    async init() { await this.loadSettings(); },
+    keyStatus(key) { return this.keys[key] ? 'set' : 'not set'; },
+    keyClass(key) { return this.keys[key] ? 'text-ok' : 'text-crit'; },
+
+    async loadSettings() {
+      const resp = await apiFetch('/llm/settings');
+      const data = await readJson(resp, null);
+      if (!data) return;
+      for (const key of Object.keys(this.cfg)) {
+        if (data[key] !== undefined) this.cfg[key] = data[key];
+      }
+      this.keys = data.api_keys_set || this.keys;
+    },
+
+    async save() {
+      this.saving = true;
+      this.message = '';
+      const resp = await apiFetch('/llm/settings', {
+        method: 'PUT', body: JSON.stringify(this.cfg),
+      });
+      const data = await readJson(resp, null);
+      this.saving = false;
+      if (resp && resp.ok) {
+        this.message = 'AI settings saved.';
+        await this.loadSettings();
+      } else {
+        const detail = data && typeof data.detail === 'string' ? data.detail : 'Could not save.';
+        this.message = detail;
+      }
+    },
+
+    async runTest() {
+      this.testing = true;
+      this.message = '';
+      const resp = await apiFetch('/llm/test', { method: 'POST' });
+      const data = await readJson(resp, null);
+      this.testing = false;
+      this.message = data && data.result ? data.result : 'error: request failed';
+    },
+  }));
 });

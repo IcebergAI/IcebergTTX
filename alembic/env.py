@@ -27,6 +27,7 @@ from app.models import (  # noqa: F401
     general_settings,
     inject,
     inject_comment,
+    llm_settings,
     proxy_settings,
     report_summary,
     response,
