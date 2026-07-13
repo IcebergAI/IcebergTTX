@@ -17,7 +17,7 @@ from app.services.access_control import (
     require_operational_mutability,
 )
 from app.services.inject_service import create_inject
-from app.services.llm_service import _suggested_payload
+from app.services.llm_service import suggested_payload
 
 router = APIRouter(prefix="/exercises/{exercise_id}/suggested-injects", tags=["suggested-injects"])
 
@@ -44,7 +44,7 @@ async def list_suggested(exercise_id: int, current_user: FacilitatorDep, session
             select(SuggestedInject).where(SuggestedInject.exercise_id == exercise_id)
         )
     ).all()
-    return [_suggested_payload(s) for s in items]
+    return [suggested_payload(s) for s in items]
 
 
 @router.post("/{suggested_id}/approve", status_code=status.HTTP_201_CREATED)
@@ -141,4 +141,4 @@ async def reject(
     session.add(s)
     await session.commit()
     await session.refresh(s)
-    return _suggested_payload(s)
+    return suggested_payload(s)

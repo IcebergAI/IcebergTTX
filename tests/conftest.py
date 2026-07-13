@@ -60,6 +60,7 @@ llm_service.engine = engine
 from app.models.scenario import Scenario  # noqa: E402
 from app.models.user import User, UserRole  # noqa: E402
 from app.schemas.scenario_json import InjectNode, InjectOption, ScenarioDefinition  # noqa: E402
+from app.services import domain_events  # noqa: E402
 from app.services.auth_service import create_access_token, hash_password  # noqa: E402
 
 
@@ -279,6 +280,18 @@ async def _override_session(session: AsyncSession, client: AsyncClient):
     client.cookies.clear()
     app.dependency_overrides.pop(get_session, None)
     app.dependency_overrides.pop(get_heartbeat_session_factory, None)
+
+    # A committed domain event that nobody dispatched (#212) is a silently dropped frame —
+    # the feature looks broken while the code looks fine. In production get_session drains
+    # it late and warns; here we fail, so the omission is caught by whoever wrote it rather
+    # than by a user wondering why the console stopped updating. Whoever commits the unit
+    # of work is responsible for dispatching it.
+    leaked = domain_events.buffer_for(session).committed
+    assert not leaked, (
+        "committed domain event(s) were never dispatched: "
+        f"{[type(ev).__name__ for ev in leaked]} — the unit of work that committed them "
+        "must call domain_events.dispatch(session)"
+    )
 
 
 @pytest_asyncio.fixture(name="facilitator")

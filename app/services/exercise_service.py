@@ -16,6 +16,7 @@ from app.models.exercise import (
 )
 from app.models.scenario import Scenario
 from app.models.user import User
+from app.services.domain_events import ExerciseStateChanged, dispatch, record
 from app.services.inject_service import seed_injects_from_scenario
 from app.services.progression_service import seed_progression
 from app.services.scenario_service import export_definition
@@ -157,7 +158,18 @@ async def transition_state_with_history(
     )
     session.add(transition)
     try:
+        # Flush first: the frame names the transition, so it needs its id — and the event
+        # must be recorded inside this transaction so a failed commit discards it.
         await session.flush()
+        assert exercise.id is not None
+        record(
+            session,
+            ExerciseStateChanged(
+                exercise_id=exercise.id,
+                transition=transition,
+                action=transition_action(previous_state, new_state),
+            ),
+        )
         await session.commit()
     except Exception:
         await session.rollback()
@@ -165,31 +177,13 @@ async def transition_state_with_history(
 
     updated = await session.get(Exercise, exercise.id, populate_existing=True)
     assert updated is not None
+    # Dispatch here, not in the caller: this function owns the transaction, so it owns the
+    # projection. Leaving it to the caller means every *other* caller (the sample loader,
+    # a test fixture) strands a committed event in the buffer, where the next dispatch on
+    # the same session adopts it and emits a stale frame out of nowhere.
+    await dispatch(session)
     action = transition_action(previous_state, new_state)
     return ExerciseTransitionResult(exercise=updated, transition=transition, action=action)
-
-
-async def broadcast_exercise_state(exercise: Exercise) -> None:
-    """Push a state/timing change to every connected client (#116).
-
-    Carries the full serialised exercise so each client's pause-aware clock stays
-    correct (pause/resume must freeze/continue on participant views too). Sent on every
-    lifecycle transition; there is no per-second traffic — the clock ticks client-side.
-    """
-    from app.schemas.api import ExercisePublic
-    from app.services.ws_manager import manager
-
-    assert exercise.id is not None
-
-    await manager.broadcast_to_exercise(
-        exercise.id,
-        {
-            "type": "exercise_state_change",
-            "exercise_id": exercise.id,
-            "timestamp": datetime.now(UTC).isoformat(),
-            "payload": ExercisePublic.from_model(exercise).model_dump(mode="json"),
-        },
-    )
 
 
 async def scenario_group_ids(session: AsyncSession, exercise: Exercise) -> set[str]:

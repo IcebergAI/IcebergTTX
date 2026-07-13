@@ -11,6 +11,13 @@ from app.database import engine
 from app.schemas.api import AssessmentPublic, ExecutiveSummaryPublic, SuggestedInjectPublic
 from app.services import llm_settings_service
 from app.services.background import spawn
+from app.services.domain_events import (
+    InjectSuggested,
+    ResponseAssessed,
+    SummaryGenerated,
+    dispatch,
+    record,
+)
 from app.services.llm.service import active_provider
 from app.services.team_service import validate_team_ids
 
@@ -183,6 +190,18 @@ async def _assess_response_result(session, response, inject, definition):
         assert assessment.id is not None
         response.assessment_id = assessment.id
         session.add(response)
+        # Recorded only on the create path, inside its transaction. The IntegrityError
+        # branch below rolls back, which discards it — so a replayed pipeline that finds
+        # an existing assessment cannot re-broadcast. That "created" flag used to be the
+        # only thing standing between a retry and a duplicate frame.
+        record(
+            session,
+            ResponseAssessed(
+                exercise_id=inject.exercise_id,
+                response_id=response_id,
+                payload=assessment_payload(assessment),
+            ),
+        )
         await session.commit()
     except IntegrityError:
         await session.rollback()
@@ -200,6 +219,10 @@ async def _assess_response_result(session, response, inject, definition):
         await session.rollback()
         raise
     await session.refresh(assessment)
+    # Dispatch where we commit (#212). Doing it here rather than in the pipeline also keeps
+    # the assessment frame off the critical path of the *suggestion*'s provider call below,
+    # which can take seconds.
+    await dispatch(session)
 
     return assessment, True
 
@@ -258,6 +281,11 @@ async def _suggest_inject_result(session, response, inject, exercise, definition
     )
     session.add(suggested)
     try:
+        await session.flush()
+        record(
+            session,
+            InjectSuggested(exercise_id=exercise.id, suggested=suggested),
+        )
         await session.commit()
     except IntegrityError:
         await session.rollback()
@@ -275,6 +303,7 @@ async def _suggest_inject_result(session, response, inject, exercise, definition
         await session.rollback()
         raise
     await session.refresh(suggested)
+    await dispatch(session)
 
     return suggested, True
 
@@ -319,7 +348,6 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
     from app.models.response import Response
     from app.models.scenario import Scenario
     from app.services.scenario_service import export_definition
-    from app.services.ws_manager import manager
 
     async with AsyncSession(engine, expire_on_commit=False) as session:
         response = await session.get(Response, response_id)
@@ -369,35 +397,12 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
             session, response, inject, definition
         )
 
-        if assessment is not None and assessment_created:
-            await manager.send_to_facilitators(
-                exercise_id,
-                {
-                    "type": "assessment_ready",
-                    "exercise_id": exercise_id,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                    "payload": {
-                        "response_id": response_id,
-                        "assessment": _assessment_payload(assessment),
-                    },
-                },
-            )
 
         node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
         if node and node.free_text_response:
             suggested, suggested_created = await _suggest_inject_result(
                 session, response, inject, exercise, definition
             )
-            if suggested is not None and suggested_created:
-                await manager.send_to_facilitators(
-                    exercise_id,
-                    {
-                        "type": "inject_suggested",
-                        "exercise_id": exercise_id,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                        "payload": _suggested_payload(suggested),
-                    },
-                )
 
 
 def _build_summary_context(report: dict) -> tuple[str, str]:
@@ -459,8 +464,14 @@ async def generate_executive_summary(session, exercise_id: int):
             llm_model=provider.llm_model_label,
         )
     session.add(summary)
+    await session.flush()
+    record(
+        session,
+        SummaryGenerated(exercise_id=exercise_id, payload=summary_payload(summary)),
+    )
     await session.commit()
     await session.refresh(summary)
+    await dispatch(session)
     return summary
 
 
@@ -480,32 +491,20 @@ async def _run_summary_pipeline(exercise_id: int) -> None:
     from sqlmodel.ext.asyncio.session import AsyncSession
 
     from app.models.exercise import Exercise
-    from app.services.ws_manager import manager
 
     async with AsyncSession(engine, expire_on_commit=False) as session:
         exercise = await session.get(Exercise, exercise_id)
         # Gate on the exercise's own AI opt-in too, matching the assessment path.
         if not exercise or not exercise.llm_enabled:
             return
-        summary = await generate_executive_summary(session, exercise_id)
-        if summary is None:
-            return
-        await manager.send_to_facilitators(
-            exercise_id,
-            {
-                "type": "summary_ready",
-                "exercise_id": exercise_id,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "payload": _summary_payload(summary),
-            },
-        )
+        await generate_executive_summary(session, exercise_id)
 
 
-def _summary_payload(s) -> dict:
+def summary_payload(s) -> dict:
     return ExecutiveSummaryPublic.from_model(s).model_dump(mode="json")
 
 
-def _assessment_payload(a) -> dict:
+def assessment_payload(a) -> dict:
     return AssessmentPublic(
         id=a.id,
         response_id=a.response_id,
@@ -517,7 +516,7 @@ def _assessment_payload(a) -> dict:
     ).model_dump(mode="json")
 
 
-def _suggested_payload(s) -> dict:
+def suggested_payload(s) -> dict:
     return SuggestedInjectPublic(
         id=s.id,
         exercise_id=s.exercise_id,

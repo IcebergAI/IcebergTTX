@@ -9,6 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.inject import Inject, InjectState
 from app.models.scenario import Scenario
 from app.schemas.api import InjectPublic
+from app.services.domain_events import InjectReleased, dispatch, record
 from app.services.scenario_service import export_definition
 
 
@@ -111,6 +112,11 @@ async def release_inject(
             status_code=status.HTTP_409_CONFLICT,
             detail="Inject is no longer pending and cannot be released",
         )
+    # Recorded inside the transaction, so the compare-and-swap loser above — which
+    # rolled back — cannot emit a frame or fire triggered comms for a release that
+    # never happened. Both are subscribers to this one event (see ws_projector).
+    assert inject.id is not None
+    record(session, InjectReleased(exercise_id=inject.exercise_id, inject=inject))
     await session.commit()
     # ``inject`` may already be in this session's identity map, so a returned ORM
     # row would retain its old pending attributes with synchronize_session=False.
@@ -124,66 +130,11 @@ async def release_inject(
 
     cancel_inject_schedule(inject.exercise_id, inject.id)
 
-    await _broadcast_inject_released(session, inject)
-    await _trigger_communications(session, inject)
+    await dispatch(session)
     return inject
 
 
-async def _trigger_communications(session: AsyncSession, inject: Inject) -> None:
-    """If the inject's scenario node declares triggered comms, schedule them."""
-    from app.services.communication_service import schedule_triggered_comms
-
-    if not inject.scenario_node_id:
-        return
-
-    from app.services.scenario_service import definition_for_exercise, get_inject_node
-
-    definition = await definition_for_exercise(session, inject.exercise_id)
-    if not definition:
-        return
-
-    node = get_inject_node(definition, inject.scenario_node_id)
-    if node and node.triggers_communications:
-        schedule_triggered_comms(inject, node.triggers_communications, node.id)
-
-
-async def _broadcast_inject_released(session: AsyncSession, inject: Inject) -> None:
-    from app.services.ws_manager import manager
-
-    target_groups = _inject_target_groups(inject)
-    message = {
-        "type": "inject_released",
-        "exercise_id": inject.exercise_id,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "payload": await inject_payload(session, inject),
-    }
-
-    if target_groups:
-        await manager.broadcast_to_groups(inject.exercise_id, target_groups, message)
-    else:
-        await manager.broadcast_to_exercise(inject.exercise_id, message)
-
-
-async def broadcast_inject_updated(session: AsyncSession, inject: Inject) -> None:
-    """Push a metadata change (e.g. edited/cancelled schedule, #116) to facilitators.
-
-    Facilitator-only: participants only ever see *released* injects, so a pending
-    inject's schedule edit is irrelevant to them and stays off their socket.
-    """
-    from app.services.ws_manager import manager
-
-    await manager.send_to_facilitators(
-        inject.exercise_id,
-        {
-            "type": "inject_updated",
-            "exercise_id": inject.exercise_id,
-            "timestamp": datetime.now(UTC).isoformat(),
-            "payload": await inject_payload(session, inject),
-        },
-    )
-
-
-def _inject_target_groups(inject: Inject) -> list[str] | None:
+def inject_target_groups(inject: Inject) -> list[str] | None:
     if inject.group_id:
         return [inject.group_id]
     return inject.target_teams

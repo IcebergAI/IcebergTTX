@@ -21,10 +21,9 @@ from app.services.access_control import (
     require_operational_mutability,
 )
 from app.services.inject_service import get_inject_or_404
-from app.services.llm_service import _assessment_payload, queue_llm_pipeline
+from app.services.llm_service import assessment_payload, queue_llm_pipeline
 from app.services.progression_service import progression_snapshot
 from app.services.response_service import (
-    broadcast_response_submitted,
     response_next_inject_suggestions,
     response_payload,
     response_validation_error,
@@ -122,7 +121,7 @@ async def submit(
 
     group_id = await exercise_group_for_user(session, exercise_id, current_user)
 
-    response, next_injects = await submit_response(
+    response, _next_injects = await submit_response(
         session,
         inject_id=body.inject_id,
         exercise_id=exercise_id,
@@ -131,10 +130,8 @@ async def submit(
         selected_option=body.selected_option,
         group_id=group_id,
     )
-    facilitator_progression = await progression_snapshot(
-        session, exercise_id, include_all_groups=True
-    )
-    await broadcast_response_submitted(response, next_injects, progression=facilitator_progression)
+    # The facilitator frame (response + resolved branch + progression) is projected from
+    # the committed ResponseSubmitted event, dispatched by submit_response itself.
 
     if exercise.llm_enabled:
         assert response.id is not None
@@ -207,4 +204,4 @@ async def get_assessment(
     assessment = await session.get(ResponseAssessment, r.assessment_id)
     if not assessment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found")
-    return _assessment_payload(assessment)
+    return assessment_payload(assessment)

@@ -25,7 +25,6 @@ from app.schemas.api import (
     ExecutiveSummaryPublic,
     ExerciseProgressionPublic,
     ExercisePublic,
-    ExerciseStateChange,
     MemberPublic,
     ReportSummaryState,
     TimelineEvent,
@@ -63,7 +62,6 @@ from app.services.timeline_service import (
     inject_resolution_projection,
     load_exercise_bundle,
 )
-from app.services.ws_manager import manager
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
 logger = logging.getLogger(__name__)
@@ -275,36 +273,10 @@ async def _transition(
         target_id=exercise_id,
     )
 
-    transition = result.transition
-    assert transition.id is not None
-    payload = ExerciseStateChange(
-        transition_id=transition.id,
-        exercise_id=exercise_id,
-        previous_state=transition.from_state,
-        new_state=transition.to_state,
-        state=transition.to_state,
-        actor_id=transition.actor_id,
-        transitioned_at=transition.transitioned_at.isoformat(),
-        started_at=(result.exercise.started_at.isoformat() if result.exercise.started_at else None),
-        ended_at=result.exercise.ended_at.isoformat() if result.exercise.ended_at else None,
-        paused_at=(result.exercise.paused_at.isoformat() if result.exercise.paused_at else None),
-        accumulated_pause_seconds=result.exercise.accumulated_pause_seconds,
-    ).model_dump(mode="json")
-    try:
-        await manager.broadcast_to_exercise(
-            exercise_id,
-            {
-                "type": "exercise_state_change",
-                "exercise_id": exercise_id,
-                "timestamp": transition.transitioned_at.isoformat(),
-                "payload": payload,
-            },
-        )
-    except Exception:
-        # The database transition is already committed and remains authoritative.
-        # One dead socket is handled by ConnectionManager; this guard covers an
-        # unexpected manager failure without misreporting the committed request.
-        logger.exception("failed to broadcast exercise lifecycle transition %d", transition.id)
+    # The canonical exercise_state_change frame is recorded inside the transition's
+    # transaction and dispatched by transition_state_with_history itself (#212), so it has
+    # already gone out by the time we get here. A rolled-back transition raises above and
+    # emits neither projection.
     # Start/resume arm pending timers; pause/complete cancel them. This runs only
     # after the atomic state/history transaction and canonical WS projection.
     if target == ExerciseState.active:

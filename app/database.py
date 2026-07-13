@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -7,6 +8,8 @@ from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def make_async_url(url: str) -> str:
@@ -65,3 +68,17 @@ async def run_migrations() -> None:
 async def get_session() -> AsyncGenerator[AsyncSession]:
     async with AsyncSession(engine, expire_on_commit=False) as session:
         yield session
+        # Safety net (#212): a handler that commits an event but forgets to dispatch it
+        # would otherwise drop the frame silently, which looks like a broken feature
+        # rather than missing wiring. Drain here and say so — late is recoverable, lost
+        # is not. Every handler should still dispatch at the end of its own unit of work;
+        # this only ever fires on a mistake.
+        from app.services.domain_events import buffer_for, dispatch
+
+        if buffer_for(session).committed:
+            logger.warning(
+                "%d committed domain event(s) were never dispatched by the handler; "
+                "draining at session teardown",
+                len(buffer_for(session).committed),
+            )
+            await dispatch(session)

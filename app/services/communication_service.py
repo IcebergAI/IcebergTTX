@@ -13,6 +13,7 @@ from app.models.exercise import ExerciseMember
 from app.models.inject import Inject
 from app.models.user import User
 from app.schemas.api import CommunicationPublic
+from app.services.domain_events import CommunicationCreated, dispatch, record
 from app.services.scenario_service import definition_for_exercise
 
 logger = logging.getLogger(__name__)
@@ -43,8 +44,15 @@ async def create_communication(
         visible_to_teams=visible_to_teams or None,
     )
     session.add(comm)
+    # Flush for the id: the event names the row rather than carrying it, because the
+    # delayed-trigger path below learns its id from INSERT ... RETURNING and never
+    # loads the object.
+    await session.flush()
+    assert comm.id is not None
+    record(session, CommunicationCreated(exercise_id=exercise_id, communication_id=comm.id))
     await session.commit()
     await session.refresh(comm)
+    await dispatch(session)
     return comm
 
 
@@ -290,27 +298,6 @@ async def comm_payload(
     ).model_dump(mode="json")
 
 
-async def broadcast_communication(comm: Communication) -> None:
-    from app.services.ws_manager import manager
-
-    teams = comm.visible_to_teams
-    message = {
-        "type": "communication_received",
-        "exercise_id": comm.exercise_id,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "payload": await comm_payload(comm),
-    }
-    if comm.direction == CommDirection.outbound:
-        if teams:
-            await manager.send_to_facilitators_user_and_groups(
-                comm.exercise_id, comm.sender_id, teams, message
-            )
-        else:
-            await manager.send_to_facilitators_and_user(comm.exercise_id, comm.sender_id, message)
-    elif teams:
-        await manager.broadcast_to_groups(comm.exercise_id, teams, message)
-    else:
-        await manager.broadcast_to_exercise(comm.exercise_id, message)
 
 
 def schedule_triggered_comms(
@@ -346,7 +333,13 @@ async def deliver_triggered_communication(
     body: str,
     trigger_key: str,
 ) -> Communication | None:
-    """Persist and broadcast one logical trigger exactly once."""
+    """Persist one logical trigger exactly once; its frame follows from the commit (#212).
+
+    The restart-safe timer and session are owned by schedule_service (#240) — this only
+    persists and announces. ``on_conflict_do_nothing`` means a replayed trigger returns no
+    id and records nothing, so the de-duplication now suppresses the frame *by
+    construction* rather than by an ``if`` placed after the commit.
+    """
     statement = (
         pg_insert(Communication)
         .values(
@@ -363,11 +356,13 @@ async def deliver_triggered_communication(
         .returning(col(Communication.id))
     )
     comm_id = (await session.exec(statement)).scalar_one_or_none()
+    if comm_id is not None:
+        record(session, CommunicationCreated(exercise_id=exercise_id, communication_id=comm_id))
     await session.commit()
+    await dispatch(session)
     if comm_id is None:
         return None
     comm = await session.get(Communication, comm_id)
     if comm is None:
         raise RuntimeError("Triggered communication was not persisted")
-    await broadcast_communication(comm)
     return comm

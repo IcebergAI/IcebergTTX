@@ -24,10 +24,10 @@ from app.services.access_control import (
     require_inject_visible,
     require_operational_mutability,
 )
+from app.services.domain_events import InjectUpdated, dispatch, record
 from app.services.exercise_service import validate_group_id, validate_team_ids
 from app.services.inject_service import (
     AttachmentMeta,
-    broadcast_inject_updated,
     create_inject,
     get_inject_or_404,
     inject_payload,
@@ -364,6 +364,7 @@ async def update_schedule(
         )
     inject.release_offset_minutes = body.release_offset_minutes
     session.add(inject)
+    record(session, InjectUpdated(exercise_id=exercise_id, inject=inject))
     await session.commit()
     await session.refresh(inject)
 
@@ -379,7 +380,7 @@ async def update_schedule(
         target_id=inject_id,
         reason=f"exercise={exercise_id} offset={body.release_offset_minutes}",
     )
-    await broadcast_inject_updated(session, inject)
+    await dispatch(session)
     return await inject_payload(session, inject)
 
 

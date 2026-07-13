@@ -94,10 +94,17 @@ async def test_stale_inject_release_emits_one_committed_state_change(monkeypatch
         await _persisted_active_exercise()
     )
 
+    # Both side effects of a release are now subscribers to InjectReleased (#212), so patch
+    # the registry rather than the two private functions that used to be called inline.
+    # Patching the module attributes would NOT intercept: the registry captured the
+    # original function objects when ws_projector was imported.
+    from app.services import domain_events, ws_projector  # noqa: F401  (registers subscribers)
+
     broadcast = AsyncMock()
     trigger = AsyncMock()
-    monkeypatch.setattr("app.services.inject_service._broadcast_inject_released", broadcast)
-    monkeypatch.setattr("app.services.inject_service._trigger_communications", trigger)
+    monkeypatch.setitem(
+        domain_events._subscribers, domain_events.InjectReleased, [broadcast, trigger]
+    )
     try:
         async with (
             AsyncSession(engine, expire_on_commit=False) as winner_session,

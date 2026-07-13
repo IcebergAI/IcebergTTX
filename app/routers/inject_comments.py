@@ -19,8 +19,8 @@ from app.services.access_control import (
     require_operational_mutability,
 )
 from app.services.inject_comment_service import (
-    broadcast_inject_comment_created,
     comment_group_for_user,
+    comment_payload,
     create_inject_comment,
 )
 from app.services.inject_service import get_inject_or_404
@@ -36,22 +36,6 @@ class CreateInjectCommentRequest(BaseModel):
     content: str
 
 
-async def _author_name(session: AsyncSession, user_id: int) -> str:
-    user = await session.get(User, user_id)
-    return user.display_name if user else f"User #{user_id}"
-
-
-async def _comment_out(session: AsyncSession, comment: InjectComment) -> dict:
-    return {
-        "id": comment.id,
-        "inject_id": comment.inject_id,
-        "exercise_id": comment.exercise_id,
-        "user_id": comment.user_id,
-        "author_name": await _author_name(session, comment.user_id),
-        "group_id": comment.group_id,
-        "content": comment.content,
-        "created_at": comment.created_at.isoformat(),
-    }
 
 
 async def _can_see_comment(session: AsyncSession, comment: InjectComment, user: User) -> bool:
@@ -83,7 +67,7 @@ async def list_inject_comments(
         )
     ).all()
     return [
-        await _comment_out(session, comment)
+        await comment_payload(session, comment)
         for comment in comments
         if await _can_see_comment(session, comment, current_user)
     ]
@@ -123,7 +107,7 @@ async def create_comment(
             detail="Comments can only be added to released injects",
         )
 
-    comment = await create_inject_comment(
+    _comment, payload = await create_inject_comment(
         session,
         inject_id=inject.id,
         exercise_id=exercise_id,
@@ -131,6 +115,4 @@ async def create_comment(
         group_id=await comment_group_for_user(session, inject, current_user),
         content=content,
     )
-    payload = await _comment_out(session, comment)
-    await broadcast_inject_comment_created(comment, payload)
     return payload

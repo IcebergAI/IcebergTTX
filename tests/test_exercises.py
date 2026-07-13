@@ -22,6 +22,7 @@ from app.models.exercise import (
 from app.models.inject import Inject
 from app.models.user import User, UserRole
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition
+from app.services import domain_events
 from app.services.exercise_service import transition_state
 from app.services.progression_service import inject_audience_contexts
 from app.services.ws_manager import manager
@@ -857,6 +858,43 @@ async def test_commit_failure_rolls_back_transition_and_skips_broadcast(
     assert transitions == []
     broadcast.assert_not_awaited()
     audit_emit.assert_not_called()
+    # …and assert at the seam too, not only at the sink (#212): the event was recorded
+    # inside the failed transaction, so the rollback must have discarded it. Without this,
+    # the test only proves "nothing reached the socket", which a broken registry would also
+    # satisfy. See test_successful_transition_broadcasts_through_manager for the other half.
+    buf = domain_events.buffer_for(session)
+    assert buf.pending == [] and buf.committed == []
+
+
+async def test_successful_transition_broadcasts_through_manager(
+    monkeypatch,
+    session: AsyncSession,
+    facilitator: User,
+    draft_exercise: Exercise,
+):
+    """The tripwire that keeps the rollback test above honest.
+
+    That test asserts a mock on `manager.broadcast_to_exercise` was never awaited. If the
+    event seam ever stopped terminating in `manager`, the mock would simply never be
+    consulted and the assertion would pass *vacuously* — a green test proving nothing. This
+    one fails loudly in exactly that case, so the pair can only both pass if the frame
+    really does travel record -> commit -> dispatch -> manager.
+    """
+    from app.routers.exercises import _transition
+
+    broadcast = AsyncMock()
+    monkeypatch.setattr(manager, "broadcast_to_exercise", broadcast)
+
+    await _transition(draft_exercise.id, facilitator, session, ExerciseState.active)
+
+    broadcast.assert_awaited_once()
+    exercise_id, frame = broadcast.await_args.args
+    assert exercise_id == draft_exercise.id
+    assert frame["type"] == "exercise_state_change"
+    assert frame["payload"]["new_state"] == ExerciseState.active
+    assert frame["payload"]["previous_state"] == ExerciseState.draft
+    # Dispatched, so nothing is left behind for the next unit of work to adopt.
+    assert domain_events.buffer_for(session).committed == []
 
 
 async def test_start_sets_started_at_only_once(

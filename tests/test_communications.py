@@ -67,12 +67,20 @@ async def _inject_comm(
 async def test_node_triggered_comm_is_idempotent_across_group_injects(monkeypatch):
     """Two physical group copies create/broadcast one logical node trigger (#140)."""
     from app.models.inject import Inject
-    from app.services import communication_service
+    from app.services import (  # noqa: F401  (ws_projector registers the subscribers)
+        communication_service,
+        domain_events,
+        ws_projector,
+    )
 
     suffix = uuid4().hex
     user_id = scenario_id = exercise_id = first_inject_id = second_inject_id = None
+    # The comm frame is now a CommunicationCreated subscriber (#212). Patch the registry:
+    # the module attribute is not what dispatch looks up.
     broadcast = AsyncMock()
-    monkeypatch.setattr(communication_service, "broadcast_communication", broadcast)
+    monkeypatch.setitem(
+        domain_events._subscribers, domain_events.CommunicationCreated, [broadcast]
+    )
     try:
         async with AsyncSession(engine, expire_on_commit=False) as seed:
             owner = User(
