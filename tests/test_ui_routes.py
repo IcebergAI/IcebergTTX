@@ -1,6 +1,11 @@
+import html
+import json
+import re
+
 from httpx import AsyncClient
 
 from app.models.exercise import Exercise
+from app.schemas.scenario_json import InjectNode, TriggerComm
 
 
 async def test_facilitator_console_exposes_responsive_pane_contract(
@@ -93,6 +98,38 @@ async def test_shell_marks_main_region_for_soft_navigation(
     # Soft-navigation now lives in the external same-origin runtime (strict CSP, #77).
     assert "/static/js/app.js" in r.text
     assert "dt-navigation-curtain" not in r.text
+
+
+async def test_help_page_scenario_example_matches_the_real_schema(
+    client: AsyncClient, facilitator_token: str
+):
+    """The in-app help's JSON example must parse as the schema it claims to document.
+
+    It previously used `delay_seconds` and a `visible_to_teams` key that TriggerComm does
+    not define. Pydantic ignores unknown keys, so a copied example validated fine and then
+    silently delivered with a 0-second delay and no team scoping — no error anywhere. An
+    unknown-key check, not just a validity check, is what catches that class of bug.
+    """
+    client.cookies.set("access_token", facilitator_token)
+    r = await client.get("/help")
+    assert r.status_code == 200
+
+    examples = [
+        json.loads(html.unescape(block))
+        for block in re.findall(r"<pre[^>]*>(\{.*?\})</pre>", r.text, re.S)
+        if "triggers_communications" in block
+    ]
+    assert examples, "help page no longer shows an inject example with a triggered comm"
+
+    for example in examples:
+        node = InjectNode.model_validate(example)
+        assert not set(example) - set(InjectNode.model_fields)
+        for authored, parsed in zip(
+            example["triggers_communications"], node.triggers_communications, strict=True
+        ):
+            assert not set(authored) - set(TriggerComm.model_fields)
+            # The authored delay must survive parsing, not be silently dropped to 0.
+            assert parsed.delay_after_release_seconds == authored["delay_after_release_seconds"]
 
 
 async def test_authenticated_user_can_load_communications_hub(

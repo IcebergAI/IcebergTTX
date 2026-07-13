@@ -75,7 +75,7 @@
           <div class="mono text-[13px] font-semibold text-faint shrink-0 w-5 pt-0.5">2</div>
           <div>
             <div class="text-[14px] font-semibold mb-1">Create an exercise</div>
-            <p class="text-[13.5px] text-ink-soft leading-relaxed">Go to <strong>Exercises → New exercise</strong>, give it a title, and select a scenario. Optionally enable <strong>LLM assessment</strong> to have Claude evaluate each response and suggest follow-up injects (requires <code class="mono text-[12.5px]">ANTHROPIC_API_KEY</code> in your <code class="mono text-[12.5px]">.env</code>).</p>
+            <p class="text-[13.5px] text-ink-soft leading-relaxed">Go to <strong>Exercises → New exercise</strong>, give it a title, and select a scenario. Optionally enable <strong>AI assistance</strong> to have the configured model evaluate each response and suggest follow-up injects (needs an AI provider set up on the server via <code class="mono text-[12.5px]">LLM_PROVIDER</code> — Anthropic, Amazon Bedrock, OpenAI, Ollama, or Gemini).</p>
           </div>
         </div>
       </div>
@@ -95,7 +95,7 @@
           <div class="mono text-[13px] font-semibold text-faint shrink-0 w-5 pt-0.5">4</div>
           <div>
             <div class="text-[14px] font-semibold mb-1">Start the exercise and release injects</div>
-            <p class="text-[13.5px] text-ink-soft leading-relaxed">Hit <strong>Start</strong> from the exercises list or the facilitator console. Injects appear in the left pane as <strong>pending</strong> nodes. Press <strong>Release</strong> to push an inject to participants — they'll receive it instantly via WebSocket. Once they respond, review the responses and team comments in the middle pane and choose which branch to release next. You can <strong>Pause</strong> the exercise at any point to halt new submissions.</p>
+            <p class="text-[13.5px] text-ink-soft leading-relaxed">Hit <strong>Start</strong> from the exercises list or the facilitator console. Injects appear in the left pane as <strong>pending</strong> nodes. Press <strong>Release</strong> to push an inject to participants — they'll receive it instantly via WebSocket. An inject with <code class="mono text-[12.5px]">release_at_minutes</code> instead auto-releases on a countdown, which you can still pre-empt with <strong>Release</strong> or cancel from the clock icon. Once participants respond, review the responses and team comments in the middle pane and choose which branch to release next — the app suggests the valid branches, but never advances the scenario for you. <strong>Pause</strong> halts new submissions at any point, and defers any pending release timers.</p>
           </div>
         </div>
       </div>
