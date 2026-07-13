@@ -278,6 +278,12 @@ function connectExerciseWs(exerciseId, component, { viewParams = false, onMessag
   component.ws = ws;
 
   ws.onopen = () => {
+    // A component may switch exercises while this socket is still opening.
+    // Never let the superseded connection install timers or receive events.
+    if (component.ws !== ws) {
+      ws.close();
+      return;
+    }
     component.wsConnected = true;
     component.pingInterval = setInterval(() => {
       if (component.ws && component.ws.readyState === WebSocket.OPEN)
@@ -286,6 +292,7 @@ function connectExerciseWs(exerciseId, component, { viewParams = false, onMessag
   };
 
   ws.onclose = (ev) => {
+    if (component.ws !== ws) return;
     component.wsConnected = false;
     clearInterval(component.pingInterval);
     component.pingInterval = null;
@@ -298,6 +305,7 @@ function connectExerciseWs(exerciseId, component, { viewParams = false, onMessag
 
   if (onMessage) {
     ws.onmessage = (ev) => {
+      if (component.ws !== ws) return;
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
       onMessage(msg);
@@ -384,6 +392,13 @@ document.addEventListener('alpine:init', () => {
     unread: 0,
     currentPath: window.location.pathname,
     mobileNavOpen: false,
+    // Shell-level socket keeps the unread badge live on every route (#207).
+    ws: null,
+    wsConnected: false,
+    wsExerciseId: null,
+    pingInterval: null,
+    reconnectTimeout: null,
+    destroyed: false,
 
     async init() {
       document.addEventListener('dt:soft-navigated', (event) => {
@@ -397,8 +412,8 @@ document.addEventListener('alpine:init', () => {
         await this.refreshExercises();
         this.refreshUnread();
       });
-      // The inbox announces every comm it receives or reads, so the rail badge
-      // stays honest without polling.
+      // Inbox actions announce local changes; the shell socket below covers
+      // messages received while any other route is open.
       document.addEventListener('dt:comms-changed', () => {
         this.refreshUnread();
       });
@@ -433,6 +448,30 @@ document.addEventListener('alpine:init', () => {
       if (!er || !er.ok) return;
       const exs = await readJson(er, []);
       this.liveExercises = exs.filter(e => e.state === 'active');
+      this.syncExerciseWs();
+    },
+
+    syncExerciseWs() {
+      const id = this.currentExerciseId;
+      if (id === this.wsExerciseId && this.ws) return;
+
+      if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+      if (this.pingInterval) clearInterval(this.pingInterval);
+      this.reconnectTimeout = null;
+      this.pingInterval = null;
+      const previous = this.ws;
+      this.ws = null;
+      this.wsConnected = false;
+      this.wsExerciseId = id;
+      if (previous) previous.close();
+      if (!id || this.destroyed) return;
+
+      connectExerciseWs(id, this, {
+        viewParams: true,
+        onMessage: (msg) => {
+          if (msg.type === 'communication_received') this.refreshUnread();
+        },
+      });
     },
 
     // Unread comms for the exercise the rail is currently pointed at. Scoped
@@ -452,7 +491,19 @@ document.addEventListener('alpine:init', () => {
     selectExercise(id) {
       this.selectedId = id;
       setPreferenceCookie('dt_current_exercise', id);
+      this.syncExerciseWs();
       this.refreshUnread();
+    },
+
+    destroy() {
+      this.destroyed = true;
+      if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+      if (this.pingInterval) clearInterval(this.pingInterval);
+      this.reconnectTimeout = null;
+      this.pingInterval = null;
+      const ws = this.ws;
+      this.ws = null;
+      if (ws) ws.close();
     },
 
     get initials() {
