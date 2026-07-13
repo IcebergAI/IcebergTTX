@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import logging
 from datetime import UTC, datetime, timedelta
@@ -1004,3 +1006,140 @@ async def test_participant_member_is_read_only(
     assert (
         await client.put(f"/api/exercises/{eid}", json={"title": "nope"}, headers=h)
     ).status_code == 403
+
+
+async def test_all_projections_share_authoritative_inject_resolution(
+    client: AsyncClient,
+    facilitator: User,
+    facilitator_token: str,
+    second_facilitator: User,
+    session: AsyncSession,
+):
+    """JSON, CSV, report, and timeline agree through partial shared resolution."""
+    from app.services.auth_service import create_access_token, hash_password
+    from app.services.exercise_service import create_exercise, enrol_member
+    from app.services.scenario_service import create_scenario
+
+    unassigned = User(
+        email="unassigned-resolution@example.com",
+        display_name="Unassigned Participant",
+        hashed_password=hash_password("password1234"),
+        role=UserRole.participant,
+        team=None,
+    )
+    legal = User(
+        email="legal-resolution@example.com",
+        display_name="Legal Participant",
+        hashed_password=hash_password("password1234"),
+        role=UserRole.participant,
+        team="legal",
+    )
+    observer = User(
+        email="observer-resolution@example.com",
+        display_name="Observer",
+        hashed_password=hash_password("password1234"),
+        role=UserRole.observer,
+        team=None,
+    )
+    session.add_all([unassigned, legal, observer])
+    await session.commit()
+    for user in (unassigned, legal, observer):
+        await session.refresh(user)
+
+    scenario = await create_scenario(
+        session,
+        definition=ScenarioDefinition(
+            title="Shared resolution authority",
+            participant_teams=[{"id": "legal", "label": "Legal"}],
+            injects=[InjectNode(id="all_hands", title="All hands", content="Respond")],
+            start_inject_id="all_hands",
+        ),
+        created_by=facilitator.id,
+    )
+    exercise = await create_exercise(
+        session,
+        title="Shared resolution authority",
+        scenario_id=scenario.id,
+        created_by=facilitator.id,
+    )
+    assert unassigned.id and legal.id and observer.id and second_facilitator.id
+    await enrol_member(session, exercise=exercise, user_id=unassigned.id)
+    await enrol_member(session, exercise=exercise, user_id=legal.id, group_id="legal")
+    # These contexts can never submit participant responses and must not count.
+    await enrol_member(session, exercise=exercise, user_id=observer.id)
+    await enrol_member(
+        session, exercise=exercise, user_id=second_facilitator.id, group_id="legal"
+    )
+    await transition_state(session, exercise, ExerciseState.active)
+
+    owner = _bearer(facilitator_token)
+    injects = (
+        await client.get(f"/api/exercises/{exercise.id}/injects", headers=owner)
+    ).json()
+    inject_id = injects[0]["id"]
+    assert injects[0]["group_id"] is None
+    assert (
+        await client.post(
+            f"/api/exercises/{exercise.id}/injects/{inject_id}/release", headers=owner
+        )
+    ).status_code == 200
+
+    async def submit(user: User, content: str) -> None:
+        token = create_access_token(subject=user.email, role=user.role.value)
+        response = await client.post(
+            f"/api/exercises/{exercise.id}/responses",
+            json={"inject_id": inject_id, "content": content},
+            headers=_bearer(token),
+        )
+        assert response.status_code == 201, response.text
+
+    async def projections() -> tuple[dict, dict, list[dict], dict]:
+        exported = (
+            await client.get(f"/api/exercises/{exercise.id}/export", headers=owner)
+        ).json()
+        report = (
+            await client.get(f"/api/exercises/{exercise.id}/report", headers=owner)
+        ).json()
+        timeline = (
+            await client.get(f"/api/exercises/{exercise.id}/timeline", headers=owner)
+        ).json()
+        csv_response = await client.get(
+            f"/api/exercises/{exercise.id}/export.csv", headers=owner
+        )
+        csv_rows = list(csv.DictReader(io.StringIO(csv_response.text)))
+        assert csv_rows
+        assert len({row["inject_state"] for row in csv_rows}) == 1
+        csv_row = csv_rows[0]
+        export_row = next(row for row in exported["injects"] if row["id"] == inject_id)
+        report_row = next(
+            row for row in report["injects"] if row["scenario_node_id"] == "all_hands"
+        )
+        return export_row, report_row, timeline, csv_row
+
+    await submit(unassigned, "unassigned complete")
+    export_row, report_row, timeline, csv_row = await projections()
+    assert export_row["state"] == "released"
+    assert csv_row["inject_state"] == "released"
+    assert {row["group_id"] for row in export_row["resolutions"]} == {None}
+    assert {row["group_id"] for row in report_row["resolutions"]} == {None}
+    assert {
+        event["group_id"]
+        for event in timeline
+        if event["kind"] == "inject_resolved"
+    } == {None}
+    assert {row["group_id"] for row in json.loads(csv_row["inject_resolutions"])} == {
+        None
+    }
+
+    await submit(legal, "legal complete")
+    export_row, report_row, timeline, csv_row = await projections()
+    expected = {None, "legal"}
+    assert export_row["state"] == "resolved"
+    assert csv_row["inject_state"] == "resolved"
+    assert {row["group_id"] for row in export_row["resolutions"]} == expected
+    assert {row["group_id"] for row in report_row["resolutions"]} == expected
+    assert {
+        event["group_id"]
+        for event in timeline
+        if event["kind"] == "inject_resolved"
+    } == expected

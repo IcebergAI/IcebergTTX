@@ -11,18 +11,11 @@ collapse them gracefully.
 
 from datetime import datetime
 
-from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.assessment import ResponseAssessment
-from app.models.communication import Communication
-from app.models.exercise import Exercise, ExerciseMember
-from app.models.inject import Inject, InjectProgress
-from app.models.report_summary import ExecutiveSummary
-from app.models.response import Response
-from app.models.scenario import Scenario
-from app.models.user import User, UserRole
-from app.services.scenario_service import export_definition
+from app.models.inject import InjectProgress
+from app.models.user import UserRole
+from app.services.timeline_service import ExerciseBundle, load_exercise_bundle
 
 
 def _fmt(dt: datetime | None) -> str | None:
@@ -40,30 +33,32 @@ def _duration(started: datetime | None, ended: datetime | None) -> str | None:
     return f"{h}h {m:02d}m" if h else f"{m}m"
 
 
-async def build_report(session: AsyncSession, exercise_id: int) -> dict | None:
+async def build_report(
+    session: AsyncSession,
+    exercise_id: int,
+    *,
+    bundle: ExerciseBundle | None = None,
+) -> dict | None:
     """Assemble the structured after-action report for ``exercise_id``.
 
     Returns ``None`` if the exercise is missing. Caller must have checked ownership.
     """
-    exercise = await session.get(Exercise, exercise_id)
-    if exercise is None:
+    bundle = bundle or await load_exercise_bundle(session, exercise_id)
+    if bundle is None:
         return None
-
-    scenario = await session.get(Scenario, exercise.scenario_id)
-    definition = export_definition(scenario) if scenario else None
+    exercise = bundle.exercise
+    scenario = bundle.scenario
+    definition = bundle.definition
 
     # Name resolution for released_by / response authors.
-    users = (await session.exec(select(User))).all()
-    user_name = {u.id: (u.display_name or u.email) for u in users}
+    user_name = {u.id: (u.display_name or u.email) for u in bundle.users}
 
     def name(uid: int | None) -> str:
         if uid is None:
             return "system"
         return user_name.get(uid, f"User #{uid}")
 
-    members = (
-        await session.exec(select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id))
-    ).all()
+    members = bundle.members
 
     role_counts = {role: 0 for role in UserRole}
     for member in members:
@@ -85,36 +80,23 @@ async def build_report(session: AsyncSession, exercise_id: int) -> dict | None:
             unassigned_participant_count += 1
 
     # Released injects, ordered as released, each with its responses + decision quality.
-    injects = (
-        await session.exec(
-            select(Inject)
-            .where(Inject.exercise_id == exercise_id, col(Inject.released_at).is_not(None))
-            .order_by(col(Inject.released_at))
-        )
-    ).all()
-    responses = (
-        await session.exec(select(Response).where(Response.exercise_id == exercise_id))
-    ).all()
-    quality = {}
-    if responses:
-        assessments = (
-            await session.exec(
-                select(ResponseAssessment).where(
-                    col(ResponseAssessment.response_id).in_([r.id for r in responses])
-                )
-            )
-        ).all()
-        quality = {a.response_id: a for a in assessments}
+    def released_at(inject) -> datetime:  # noqa: ANN001
+        assert inject.released_at is not None
+        return inject.released_at
+
+    injects = sorted(
+        (inject for inject in bundle.injects if inject.released_at is not None),
+        key=released_at,
+    )
+    responses = bundle.responses
+    quality = {assessment.response_id: assessment for assessment in bundle.assessments}
 
     responses_by_inject: dict[int, list] = {}
     for r in responses:
         responses_by_inject.setdefault(r.inject_id, []).append(r)
 
-    resolution_rows = (
-        await session.exec(select(InjectProgress).where(InjectProgress.exercise_id == exercise_id))
-    ).all()
     resolutions_by_inject: dict[int, list[InjectProgress]] = {}
-    for resolution in resolution_rows:
+    for resolution in bundle.resolutions:
         resolutions_by_inject.setdefault(resolution.inject_id, []).append(resolution)
 
     inject_rows = []
@@ -157,13 +139,7 @@ async def build_report(session: AsyncSession, exercise_id: int) -> dict | None:
             }
         )
 
-    comms = (
-        await session.exec(
-            select(Communication)
-            .where(Communication.exercise_id == exercise_id)
-            .order_by(col(Communication.sent_at))
-        )
-    ).all()
+    comms = sorted(bundle.communications, key=lambda communication: communication.sent_at)
     comm_rows = [
         {
             "direction": c.direction,
@@ -177,11 +153,7 @@ async def build_report(session: AsyncSession, exercise_id: int) -> dict | None:
         for c in comms
     ]
 
-    summary_row = (
-        await session.exec(
-            select(ExecutiveSummary).where(ExecutiveSummary.exercise_id == exercise_id)
-        )
-    ).first()
+    summary_row = bundle.summary
     summary = (
         {
             "summary_text": summary_row.summary_text,

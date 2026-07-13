@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import logging
 from typing import Annotated
 
@@ -56,7 +57,12 @@ from app.services.schedule_service import (
     cancel_exercise_schedules,
     schedule_exercise_injects,
 )
-from app.services.timeline_service import build_timeline
+from app.services.timeline_service import (
+    ExerciseBundle,
+    build_timeline,
+    inject_resolution_projection,
+    load_exercise_bundle,
+)
 from app.services.ws_manager import manager
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
@@ -408,17 +414,32 @@ async def delete_member(
 # explicit and stays consistent across the JSON and CSV exports.
 
 
-def _export_inject_row(i: Inject) -> dict:
+def _export_inject_row(i: Inject, bundle: ExerciseBundle) -> dict:
+    resolution = inject_resolution_projection(bundle, i)
     return {
         "id": i.id,
         "scenario_node_id": i.scenario_node_id,
         "title": i.title,
-        "state": i.state,
+        "state": resolution["state"],
         "group_id": i.group_id,
         "released_at": i.released_at.isoformat() if i.released_at else None,
-        "resolved_at": i.resolved_at.isoformat() if i.resolved_at else None,
-        "resolved_by": i.resolved_by,
-        "resolution_reason": i.resolution_reason,
+        "resolved_at": (
+            resolution["resolved_at"].isoformat()
+            if resolution["resolved_at"]
+            else None
+        ),
+        "resolved_by": resolution["resolved_by"],
+        "resolution_reason": resolution["resolution_reason"],
+        "resolutions": [
+            {
+                "group_id": row.group_id,
+                "state": row.state,
+                "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+                "resolved_by": row.resolved_by,
+                "resolution_reason": row.resolution_reason,
+            }
+            for row in resolution["resolutions"]
+        ],
     }
 
 
@@ -447,17 +468,9 @@ def _export_comment_row(c: InjectComment) -> dict:
 
 async def _build_export(session: AsyncSession, exercise_id: int, current_user: User) -> dict:
     ex = await require_exercise_owner(session, exercise_id, current_user)
-    injects = (await session.exec(select(Inject).where(Inject.exercise_id == exercise_id))).all()
-    responses = (
-        await session.exec(select(Response).where(Response.exercise_id == exercise_id))
-    ).all()
-    comments = (
-        await session.exec(select(InjectComment).where(InjectComment.exercise_id == exercise_id))
-    ).all()
-    members = (
-        await session.exec(select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id))
-    ).all()
-    definition = await get_scenario_definition(session, ex.scenario_id)
+    bundle = await load_exercise_bundle(session, exercise_id)
+    assert bundle is not None
+    definition = bundle.definition
     return {
         "exercise": _exercise_out(ex),
         # Debrief notes (#112) — owner-only export path, so safe to include here even
@@ -466,10 +479,10 @@ async def _build_export(session: AsyncSession, exercise_id: int, current_user: U
             "scenario_debrief_notes": definition.debrief_notes if definition else None,
             "debrief_notes": ex.debrief_notes,
         },
-        "members": [_member_out(m) for m in members],
-        "injects": [_export_inject_row(i) for i in injects],
-        "responses": [_export_response_row(r) for r in responses],
-        "inject_comments": [_export_comment_row(c) for c in comments],
+        "members": [_member_out(member) for member in bundle.members],
+        "injects": [_export_inject_row(inject, bundle) for inject in bundle.injects],
+        "responses": [_export_response_row(response) for response in bundle.responses],
+        "inject_comments": [_export_comment_row(comment) for comment in bundle.comments],
     }
 
 
@@ -622,15 +635,27 @@ async def export_csv(exercise_id: int, current_user: FacilitatorDep, session: Se
     )
     buf = io.StringIO()
     writer = csv.writer(buf)
-    cols = ["inject_id", "inject_title", "user_id", "selected_option", "content", "submitted_at"]
+    cols = [
+        "inject_id",
+        "inject_title",
+        "inject_state",
+        "inject_resolutions",
+        "user_id",
+        "selected_option",
+        "content",
+        "submitted_at",
+    ]
     writer.writerow(spreadsheet_safe_row(cols))
-    inject_map = {i["id"]: i["title"] for i in data["injects"]}
+    inject_map = {inject["id"]: inject for inject in data["injects"]}
     for r in data["responses"]:
+        inject = inject_map.get(r["inject_id"], {})
         writer.writerow(
             spreadsheet_safe_row(
                 [
                     r["inject_id"],
-                    inject_map.get(r["inject_id"], ""),
+                    inject.get("title", ""),
+                    inject.get("state", ""),
+                    json.dumps(inject.get("resolutions", []), separators=(",", ":")),
                     r["user_id"],
                     r["selected_option"] or "",
                     r["content"],
