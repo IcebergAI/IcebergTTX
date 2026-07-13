@@ -12,15 +12,22 @@ single host, and **Kubernetes** manifests for a cluster. Both front the app with
 **Caddy**; the only difference is where TLS is terminated.
 
 !!! info "Single-replica constraint"
-    The app must run as a **single replica**. Three subsystems hold per-process state
-    in memory and would each need a distributed backend before it can scale out:
+    The app must run as a **single replica**, and the Kubernetes manifests enforce it with
+    `replicas: 1` and `strategy: Recreate`. This is not one limitation but several — every
+    piece of cross-request state the app keeps lives in the **process**, so a second replica
+    would not share it:
 
-    - the **WebSocket manager** (needs a shared bus, e.g. Redis pub/sub);
-    - **scheduled inject release** (in-process timers — needs a task queue such as
-      Celery or ARQ);
-    - the **login/registration rate limiter** (needs a shared store).
+    | In-memory state | What a second replica would break | Needs |
+    |---|---|---|
+    | **WebSocket manager** | Clients connected to replica A never see events raised on replica B | A shared bus (e.g. Redis pub/sub) |
+    | **Scheduled inject release** | Timers are `asyncio` tasks armed in one process; a restart or a second replica loses or duplicates them | A task queue (Celery, ARQ) |
+    | **Delayed triggered comms** | Same — `triggers_communications` fires via an in-process delayed task, so a delivery in flight is lost on restart | A task queue |
+    | **Login / registration / reset rate limiters** | Attempt counters are per process, so the effective limit multiplies by the replica count | A shared store |
+    | **SIEM and proxy config caches** | An admin's change on replica A leaves replica B forwarding to the old sink, or egressing via the old proxy | Cache invalidation across replicas |
+    | **In-flight LLM assessments** | Best-effort background tasks, tracked per process | A task queue |
 
-    The Kubernetes manifests enforce this with `replicas: 1` and `strategy: Recreate`.
+    `rehydrate_schedules()` re-arms pending release timers on startup, but only for a
+    **single-process** restart — it is not a substitute for any of the above.
 
 ## Docker Compose
 

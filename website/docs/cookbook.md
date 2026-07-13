@@ -145,10 +145,15 @@ stay separate.
 `ops_task` reaches only IT Operations; `legal_task` reaches Legal and Communications.
 Participants only ever see injects assigned to their own team.
 
-!!! note "Reachability is not required"
-    `legal_task` above is valid even though nothing links to it — you can release any
-    seeded inject manually. The validator only rejects **dangling references** and
-    **cycles**, not unreached nodes.
+!!! note "Reachability is not required — but an orphan has a release window"
+    `legal_task` above is valid even though nothing links to it: the validator only rejects
+    **dangling references** and **cycles**, not unreached nodes.
+
+    It is releasable by hand, but **only until the first response lands anywhere in the
+    exercise**. After that, every team has a progression cursor sitting on a real node, and
+    an inject no cursor points at is refused with `409 Inject is not the current branch for
+    its group`. So use an unlinked node as an *opening* inject you release up front, not as
+    something to hold in reserve for later.
 
 ## Recipe: triggered communications (delayed press/regulator comms)
 
@@ -244,8 +249,12 @@ bring it forward, or cancel the schedule to make it manual again.
     - **Don't rely on it for the critical path.** Treat a schedule as a convenience that
       saves you watching a stopwatch, not as a guarantee the inject will appear.
 
-    The start inject is the one node always reachable from `t=0`, so scheduling *it* is
-    the only case that cannot be skipped.
+    The **start inject** is the one node whose schedule can never be skipped: a cursor points
+    at it from `t=0` and cannot move off it until it has been released and answered.
+
+    An *unreferenced* node (like `legal_task` above) is releasable at the start too — but
+    only until the **first response anywhere in the exercise**, after which it is refused
+    like any other off-cursor node. So it is not a safe thing to schedule.
 
 !!! note "The countdown is pause-aware"
     The offset is measured in *elapsed exercise time*, not wall-clock time. Pausing the

@@ -126,12 +126,12 @@ paste-ready scenario patterns from the **[cookbook](cookbook.md)**.
 
 | Role | What they do |
 |------|--------------|
-| **Facilitator** | Creates/imports scenarios, starts exercises, enrols participants, controls the inject feed and branch selection, injects inbound comms, exports transcripts. |
-| **Participant** | Receives injects for their team, posts team comments, submits a stance + free-text reasoning. Sees only what is assigned to their team. |
+| **Facilitator** | Creates/imports scenarios, starts exercises, enrols participants, controls the **pace** of the inject feed — releasing each inject, or scheduling it — injects inbound comms, exports transcripts. |
+| **Participant** | Receives injects for their team, posts team comments, submits a stance + free-text reasoning. Their chosen stance **selects the branch** the team takes next. Sees only what is assigned to their team. |
 | **Observer** | Read-only. Sees all injects but cannot respond — for senior stakeholders, auditors, or evaluators. |
 
-Self-registration always creates a **participant**; the facilitator role and admin
-flag are assigned out-of-band (seeded or admin-managed).
+Self-registration creates a **participant** (and can be disabled entirely); the
+facilitator role and admin flag are assigned out-of-band (seeded or admin-managed).
 
 ## Next steps
 

@@ -614,3 +614,80 @@ async def test_ws_broadcasts_response_to_facilitator(
 
     assert msg["type"] == "response_submitted"
     assert msg["payload"]["response"]["inject_id"] == inject_id
+
+
+async def test_unlinked_inject_is_releasable_only_before_the_first_response(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+):
+    """An orphan node has a release window that closes at the first response.
+
+    release_is_allowed() lets a node nothing links to through while no cursor has
+    advanced, but bails once any cursor holds a current_inject_id. The cookbook's
+    "reachability is not required" recipe depends on this, so pin both ends of it.
+    """
+    from app.models.exercise import ExerciseState
+    from app.services.exercise_service import create_exercise, enrol_member, transition_state
+    from app.services.scenario_service import create_scenario
+
+    scenario = await create_scenario(
+        session,
+        definition=ScenarioDefinition(
+            title="Orphan window",
+            participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+            injects=[
+                InjectNode(id="start", title="Start", content="c", target_teams=["it_ops"]),
+                # linked to by nothing — the cookbook's `legal_task` shape
+                InjectNode(id="orphan", title="Orphan", content="c", target_teams=["it_ops"]),
+                InjectNode(id="spare", title="Spare", content="c", target_teams=["it_ops"]),
+            ],
+            start_inject_id="start",
+        ),
+        created_by=facilitator.id,
+    )
+    exercise = await create_exercise(
+        session, title="Orphan window", scenario_id=scenario.id, created_by=facilitator.id
+    )
+    await enrol_member(session, exercise=exercise, user_id=participant.id, group_id="it_ops")
+    await transition_state(session, exercise, ExerciseState.active)
+
+    headers = {"Authorization": f"Bearer {facilitator_token}"}
+    injects = (
+        await client.get(f"/api/exercises/{exercise.id}/injects", headers=headers)
+    ).json()
+    by_node = {inject["scenario_node_id"]: inject for inject in injects}
+
+    # Before any response: an orphan is releasable.
+    assert (
+        await client.post(
+            f"/api/exercises/{exercise.id}/injects/{by_node['orphan']['id']}/release",
+            headers=headers,
+        )
+    ).status_code == 200
+
+    # Advance a cursor by answering the start node.
+    await client.post(
+        f"/api/exercises/{exercise.id}/injects/{by_node['start']['id']}/release",
+        headers=headers,
+    )
+    assert (
+        await _submit(
+            client,
+            participant_token,
+            exercise.id,
+            by_node["start"]["id"],
+            selected_option=None,
+        )
+    ).status_code == 201
+
+    # After it, the window is shut: a second orphan is refused like any off-cursor node.
+    r = await client.post(
+        f"/api/exercises/{exercise.id}/injects/{by_node['spare']['id']}/release",
+        headers=headers,
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Inject is not the current branch for its group"

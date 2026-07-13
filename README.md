@@ -190,7 +190,7 @@ kubectl exec -it -n iceberg-ttx deploy/iceberg-ttx-app -- \
 >
 > **Pod hardening**: every workload runs non-root under a PSS-`restricted`-style `securityContext` (no privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp), and every container uses a read-only root filesystem — app, init, Caddy, Postgres, and the backup CronJob alike. The Postgres StatefulSet runs as uid 999 with `fsGroup: 999`, which needs a StorageClass that honours `fsGroup`.
 
-> **Note**: The app must run as a single replica (`replicas: 1`). Three subsystems keep per-process state in memory and would each need a distributed backend to scale out: the **WebSocket manager** (a shared bus, e.g. Redis pub/sub), **scheduled inject release** (in-process timers — a task queue such as Celery or ARQ), and the **login/registration rate limiter** (a shared store). The manifests enforce the constraint with `strategy: Recreate`.
+> **Note**: The app must run as a single replica (`replicas: 1`); the manifests enforce it with `strategy: Recreate`. Every piece of cross-request state lives in the **process**, so a second replica would not share any of it: the **WebSocket manager** (needs a shared bus, e.g. Redis pub/sub), **scheduled inject release** and **delayed triggered comms** (in-process `asyncio` tasks — need a task queue such as Celery or ARQ), the **login/registration/reset rate limiters** (per-process counters, so the effective limits would multiply by the replica count), the **SIEM and proxy config caches** (an admin's change would not reach the other replica), and **in-flight LLM assessments**. See the [deployment docs](https://icebergai.github.io/IcebergTTX/deployment/) for the full table.
 
 ## Attachment reconciliation
 
