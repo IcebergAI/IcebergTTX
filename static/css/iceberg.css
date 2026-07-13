@@ -358,6 +358,10 @@ a:hover { color: var(--accent-deep); }
   .settings-sample-row { flex-direction: column; gap: 12px; }
   .settings-sample-actions { width: 100%; flex-wrap: wrap; }
   .settings-sample-actions > .btn { flex: 1 1 140px; }
+  .settings-page .seg {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%;
+  }
+  .settings-page .seg-btn { width: 100%; min-width: 0; padding-inline: 6px; }
 }
 
 /* --------------------------------------------------------------------------
