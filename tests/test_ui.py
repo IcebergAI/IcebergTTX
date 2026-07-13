@@ -779,7 +779,7 @@ def test_effective_config_filters_redacted_settings_on_phone(page: Page):
     login_facilitator(page)
     page.goto(f"{BASE}/admin/config")
 
-    expect(page.get_by_text("Effective configuration", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Effective configuration")).to_be_visible()
     expect(page.get_by_text("Process and runtime configuration checks pass.")).to_be_visible()
     search = page.get_by_placeholder("Filter settings")
     search.fill("registration_enabled")

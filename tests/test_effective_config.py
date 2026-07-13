@@ -23,7 +23,6 @@ async def test_effective_config_lists_every_setting_and_never_secret_values(
     client: AsyncClient, admin_token: str, monkeypatch
 ):
     secrets = {
-        "secret_key": "never-render-secret-key",
         "anthropic_api_key": "never-render-anthropic",
         "smtp_password": "never-render-smtp",
         "proxy_password": "never-render-proxy",
@@ -39,6 +38,9 @@ async def test_effective_config_lists_every_setting_and_never_secret_values(
     body = response.json()
     rows = {row["name"]: row for row in body["settings"]}
     assert set(Settings.model_fields).issubset(rows)
+    assert rows["secret_key"]["secret"] is True
+    assert rows["secret_key"]["value"] is True
+    assert settings.secret_key not in response.text
     for field, value in secrets.items():
         assert rows[field]["secret"] is True
         assert rows[field]["value"] is True
