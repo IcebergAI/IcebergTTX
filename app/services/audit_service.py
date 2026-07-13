@@ -2,7 +2,7 @@
 
 Events are always emitted as JSON lines to the ``iceberg_ttx.audit`` logger so
 they survive even if the database write fails (per the OWASP Logging Cheat
-Sheet). When ``settings.audit_persist`` is enabled they are also written to the
+Sheet). When the runtime ``audit_persist`` policy is enabled they are also written to the
 append-only ``AuditEvent`` table.
 
 Never pass secrets, password hashes, tokens, or full response/communication
@@ -19,7 +19,6 @@ from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
-from app.config import settings
 from app.services.background import spawn_limited
 
 audit_logger = logging.getLogger("iceberg_ttx.audit")
@@ -119,7 +118,9 @@ def emit(
     except Exception:  # nosec B110 # pragma: no cover - logging must never break a request
         pass
 
-    if settings.audit_persist:
+    from app.services import general_settings_service
+
+    if general_settings_service.get_config().audit_persist:
         _persist(event)
 
     _ship(event)

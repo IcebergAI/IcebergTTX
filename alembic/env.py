@@ -24,6 +24,7 @@ from app.models import (  # noqa: F401
     communication,
     email_settings,
     exercise,
+    general_settings,
     inject,
     inject_comment,
     proxy_settings,

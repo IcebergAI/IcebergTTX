@@ -34,7 +34,16 @@ services:
     environment:
       DATABASE_URL: postgresql://iceberg_ttx:${POSTGRES_PASSWORD}@db:5432/iceberg_ttx
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      # These values seed /admin/settings only until its singleton DB row exists.
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-true}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+      AUDIT_PERSIST: ${AUDIT_PERSIST:-true}
+      LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-5}
+      LOGIN_LOCKOUT_SECONDS: ${LOGIN_LOCKOUT_SECONDS:-300}
+      REGISTRATION_MAX_ATTEMPTS: ${REGISTRATION_MAX_ATTEMPTS:-5}
+      REGISTRATION_LOCKOUT_SECONDS: ${REGISTRATION_LOCKOUT_SECONDS:-3600}
+      PASSWORD_RESET_MAX_ATTEMPTS: ${PASSWORD_RESET_MAX_ATTEMPTS:-5}
+      PASSWORD_RESET_LOCKOUT_SECONDS: ${PASSWORD_RESET_LOCKOUT_SECONDS:-3600}
       # Pluggable AI provider (#26). LLM_PROVIDER selects the active backend
       # (anthropic | bedrock | openai | ollama | gemini | none); the image bundles
       # every provider SDK. Set only the vars for the provider you pick (all
