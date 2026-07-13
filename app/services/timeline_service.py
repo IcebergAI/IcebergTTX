@@ -30,7 +30,6 @@ from app.models.response import Response
 from app.models.scenario import Scenario
 from app.models.user import User
 from app.schemas.scenario_json import ScenarioDefinition
-from app.services.progression_service import participant_contexts
 from app.services.scenario_service import export_definition
 
 # Stable secondary sort so events sharing a timestamp never swap between calls.
@@ -156,13 +155,8 @@ def inject_resolution_projection(bundle: ExerciseBundle, inject: Inject) -> dict
     """Derive the compatible scalar state from authoritative per-context rows."""
     assert inject.id is not None
     rows = [row for row in bundle.resolutions if row.inject_id == inject.id]
-    expected = (
-        {inject.group_id}
-        if inject.group_id is not None
-        else participant_contexts(bundle.members)
-    )
     resolved = [row for row in rows if row.state == InjectState.resolved]
-    complete = bool(expected) and expected <= {row.group_id for row in resolved}
+    complete = bool(rows) and len(resolved) == len(rows)
     if complete:
         last = max(
             resolved,

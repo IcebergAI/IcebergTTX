@@ -50,7 +50,7 @@ from app.services.exercise_service import (
 )
 from app.services.llm.service import active_provider
 from app.services.llm_service import run_summary_pipeline
-from app.services.progression_service import progression_snapshot
+from app.services.progression_service import progression_snapshot, roster_changes_allowed
 from app.services.report_service import build_report, render_markdown
 from app.services.scenario_service import get_scenario_definition
 from app.services.schedule_service import (
@@ -356,6 +356,11 @@ async def add_member(
 ):
     ex = await require_exercise_owner(session, exercise_id, current_user)
     require_operational_mutability(ex)
+    if not await roster_changes_allowed(session, exercise_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Roster changes are locked after the first inject is released",
+        )
     member = await enrol_member(session, exercise=ex, user_id=body.user_id, group_id=body.group_id)
     audit_service.emit(
         "member.enrol",
@@ -377,6 +382,11 @@ async def patch_member(
 ):
     ex = await require_exercise_owner(session, exercise_id, current_user)
     require_operational_mutability(ex)
+    if not await roster_changes_allowed(session, exercise_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Roster changes are locked after the first inject is released",
+        )
     member = await update_member_group(
         session, exercise=ex, user_id=user_id, group_id=body.group_id
     )
@@ -396,6 +406,11 @@ async def delete_member(
 ):
     ex = await require_exercise_owner(session, exercise_id, current_user)
     require_operational_mutability(ex)
+    if not await roster_changes_allowed(session, exercise_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Roster changes are locked after the first inject is released",
+        )
     await remove_member(session, exercise=ex, user_id=user_id)
     audit_service.emit(
         "member.remove",

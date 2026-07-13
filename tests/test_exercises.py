@@ -12,11 +12,17 @@ from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.exercise import Exercise, ExerciseState, ExerciseStateTransition
+from app.models.exercise import (
+    Exercise,
+    ExerciseMember,
+    ExerciseState,
+    ExerciseStateTransition,
+)
 from app.models.inject import Inject
 from app.models.user import User, UserRole
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.exercise_service import transition_state
+from app.services.progression_service import inject_audience_contexts
 from app.services.ws_manager import manager
 
 
@@ -33,6 +39,26 @@ def _authz_denials(caplog) -> list[dict]:
             except ValueError:
                 pass
     return [e for e in events if e.get("action") == "authz.denied" and e.get("result") == "deny"]
+
+
+def test_targeted_shared_inject_excludes_non_target_participant_contexts():
+    inject = Inject(
+        id=9,
+        exercise_id=4,
+        title="Joint response",
+        content="Respond",
+        target_teams=["it_ops", "legal"],
+    )
+    members = [
+        ExerciseMember(
+            exercise_id=4,
+            user_id=index,
+            group_id=group,
+            role_at_enrolment=UserRole.participant,
+        )
+        for index, group in enumerate(("it_ops", "legal", "finance"), start=1)
+    ]
+    assert inject_audience_contexts(inject, members) == {"it_ops", "legal"}
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -1041,9 +1067,16 @@ async def test_all_projections_share_authoritative_inject_resolution(
         role=UserRole.observer,
         team=None,
     )
-    session.add_all([unassigned, legal, observer])
+    late_participant = User(
+        email="late-resolution@example.com",
+        display_name="Late Participant",
+        hashed_password=hash_password("password1234"),
+        role=UserRole.participant,
+        team="legal",
+    )
+    session.add_all([unassigned, legal, observer, late_participant])
     await session.commit()
-    for user in (unassigned, legal, observer):
+    for user in (unassigned, legal, observer, late_participant):
         await session.refresh(user)
 
     scenario = await create_scenario(
@@ -1062,7 +1095,13 @@ async def test_all_projections_share_authoritative_inject_resolution(
         scenario_id=scenario.id,
         created_by=facilitator.id,
     )
-    assert unassigned.id and legal.id and observer.id and second_facilitator.id
+    assert (
+        unassigned.id
+        and legal.id
+        and observer.id
+        and late_participant.id
+        and second_facilitator.id
+    )
     await enrol_member(session, exercise=exercise, user_id=unassigned.id)
     await enrol_member(session, exercise=exercise, user_id=legal.id, group_id="legal")
     # These contexts can never submit participant responses and must not count.
@@ -1130,6 +1169,15 @@ async def test_all_projections_share_authoritative_inject_resolution(
     assert {row["group_id"] for row in json.loads(csv_row["inject_resolutions"])} == {
         None
     }
+    late_enrolment = await client.post(
+        f"/api/exercises/{exercise.id}/members",
+        json={"user_id": late_participant.id, "group_id": "legal"},
+        headers=owner,
+    )
+    assert late_enrolment.status_code == 409
+    assert late_enrolment.json()["detail"] == (
+        "Roster changes are locked after the first inject is released"
+    )
 
     await submit(legal, "legal complete")
     export_row, report_row, timeline, csv_row = await projections()
@@ -1143,3 +1191,9 @@ async def test_all_projections_share_authoritative_inject_resolution(
         for event in timeline
         if event["kind"] == "inject_resolved"
     } == expected
+    group_change = await client.patch(
+        f"/api/exercises/{exercise.id}/members/{legal.id}",
+        json={"group_id": None},
+        headers=owner,
+    )
+    assert group_change.status_code == 409

@@ -97,6 +97,9 @@ async def release_inject(
             status_code=status.HTTP_409_CONFLICT,
             detail="Inject is no longer pending and cannot be released",
         )
+    from app.services.progression_service import seed_inject_resolution_contexts
+
+    await seed_inject_resolution_contexts(session, inject)
     await session.commit()
     # ``inject`` may already be in this session's identity map, so a returned ORM
     # row would retain its old pending attributes with synchronize_session=False.

@@ -39,6 +39,60 @@ def participant_contexts(members: Iterable[ExerciseMember]) -> set[str | None]:
     }
 
 
+def inject_audience_contexts(
+    inject: Inject, members: Iterable[ExerciseMember]
+) -> set[str | None]:
+    """Participant contexts eligible to resolve this inject at release time."""
+    contexts = participant_contexts(members)
+    if inject.group_id is not None:
+        return {inject.group_id} if inject.group_id in contexts else set()
+    if inject.target_teams:
+        return contexts & set(inject.target_teams)
+    return contexts
+
+
+async def seed_inject_resolution_contexts(
+    session: AsyncSession, inject: Inject
+) -> set[str | None]:
+    """Persist the immutable resolution audience for one released inject."""
+    assert inject.id is not None
+    members = (
+        await session.exec(
+            select(ExerciseMember).where(
+                ExerciseMember.exercise_id == inject.exercise_id
+            )
+        )
+    ).all()
+    contexts = inject_audience_contexts(inject, members)
+    for context in contexts:
+        await session.exec(
+            insert(InjectProgress)
+            .values(
+                exercise_id=inject.exercise_id,
+                inject_id=inject.id,
+                group_id=context,
+                state=InjectState.released,
+            )
+            .on_conflict_do_nothing(constraint="uq_inject_progress_group")
+        )
+    return contexts
+
+
+async def roster_changes_allowed(session: AsyncSession, exercise_id: int) -> bool:
+    """Roster changes stop once the first inject fixes its resolution audience."""
+    released = (
+        await session.exec(
+            select(Inject.id)
+            .where(
+                Inject.exercise_id == exercise_id,
+                Inject.state != InjectState.pending,
+            )
+            .limit(1)
+        )
+    ).first()
+    return released is None
+
+
 async def resolve_response_progression(
     session: AsyncSession,
     *,
@@ -61,6 +115,7 @@ async def resolve_response_progression(
     ).one()
     inject = locked_inject
     context = group_id or inject.group_id
+    await seed_inject_resolution_contexts(session, inject)
     await session.exec(
         insert(InjectProgress)
         .values(
@@ -92,24 +147,14 @@ async def resolve_response_progression(
     # A team-specific physical inject has one progression context. A shared inject
     # closes only after every enrolled participant context has resolved; observers
     # and facilitators can never submit responses and therefore do not count.
-    complete = inject.group_id is not None
-    if inject.group_id is None:
-        members = (
-            await session.exec(
-                select(ExerciseMember).where(
-                    ExerciseMember.exercise_id == inject.exercise_id
-                )
-            )
-        ).all()
-        expected = participant_contexts(members)
-        resolutions = (
-            await session.exec(
-                select(InjectProgress).where(InjectProgress.inject_id == inject.id)
-            )
-        ).all()
-        complete = bool(expected) and expected <= {
-            row.group_id for row in resolutions if row.state == InjectState.resolved
-        }
+    resolutions = (
+        await session.exec(
+            select(InjectProgress).where(InjectProgress.inject_id == inject.id)
+        )
+    ).all()
+    complete = bool(resolutions) and all(
+        row.state == InjectState.resolved for row in resolutions
+    )
     if complete:
         inject.state = InjectState.resolved
         inject.resolved_at = now
