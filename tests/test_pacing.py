@@ -1,4 +1,6 @@
-"""Pacing: exercise clock + scheduled inject release (#116)."""
+"""Pacing: exercise clock and durable exercise schedules (#116, #194)."""
+
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -7,10 +9,11 @@ from httpx_ws import aconnect_ws
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.communication import CommDirection, Communication
 from app.models.exercise import Exercise, ExerciseState
 from app.models.inject import Inject, InjectState
 from app.models.user import User
-from app.schemas.scenario_json import InjectNode, ScenarioDefinition
+from app.schemas.scenario_json import InjectNode, ScenarioDefinition, TriggerComm
 from app.services import schedule_service
 from app.services.exercise_service import (
     create_exercise,
@@ -26,7 +29,8 @@ AUTH = lambda t: {"Authorization": f"Bearer {t}"}  # noqa: E731
 async def _clear_schedules():
     """Cancel any timers a test armed so sleeping tasks don't leak between tests."""
     yield
-    for ex_id in list(schedule_service._scheduled.keys()):
+    exercise_ids = set(schedule_service._scheduled) | set(schedule_service._scheduled_comms)
+    for ex_id in exercise_ids:
         schedule_service.cancel_exercise_schedules(ex_id)
 
 
@@ -165,6 +169,64 @@ async def test_pause_defers_and_resume_rearms(
     assert ex.id not in schedule_service._scheduled  # deferred
     await client.post(f"/api/exercises/{ex.id}/resume", headers=AUTH(facilitator_token))
     assert inject.id in schedule_service._scheduled.get(ex.id, {})  # re-armed
+
+
+async def test_triggered_comms_rehydrate_and_follow_pause_resume(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    active_exercise: Exercise,
+    sample_scenario,
+):
+    """Pending trigger timers derive from durable state after restart or resume (#194)."""
+    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
+    definition.injects[0].triggers_communications = [
+        TriggerComm(
+            external_entity="NCSC",
+            direction="inbound",
+            subject="Delayed advisory",
+            body="Call the incident hotline.",
+            delay_after_release_seconds=300,
+        )
+    ]
+    sample_scenario.definition = definition.model_dump_json()
+    inject = await _first_inject(session, active_exercise.id)
+    inject.state = InjectState.released
+    inject.released_at = datetime.now(UTC) - timedelta(seconds=30)
+    session.add(sample_scenario)
+    session.add(inject)
+    await session.commit()
+
+    # Startup rehydration delegates to this persisted-state reconstruction.
+    await schedule_service.schedule_exercise_injects(session, active_exercise)
+    assert "inject_01:0" in schedule_service._scheduled_comms.get(active_exercise.id, {})
+
+    await client.post(
+        f"/api/exercises/{active_exercise.id}/pause", headers=AUTH(facilitator_token)
+    )
+    assert active_exercise.id not in schedule_service._scheduled_comms
+    await client.post(
+        f"/api/exercises/{active_exercise.id}/resume", headers=AUTH(facilitator_token)
+    )
+    assert "inject_01:0" in schedule_service._scheduled_comms.get(active_exercise.id, {})
+
+    # A persisted delivery key wins over reconstruction, including after a restart.
+    schedule_service.cancel_exercise_schedules(active_exercise.id)
+    session.add(
+        Communication(
+            exercise_id=active_exercise.id,
+            direction=CommDirection.inbound,
+            external_entity="NCSC",
+            subject="Delayed advisory",
+            body="Call the incident hotline.",
+            triggered_by_inject_id=inject.id,
+            trigger_key="inject_01:0",
+        )
+    )
+    await session.commit()
+    await session.refresh(active_exercise)
+    await schedule_service.schedule_exercise_injects(session, active_exercise)
+    assert active_exercise.id not in schedule_service._scheduled_comms
 
 
 async def test_complete_cancels_schedules(
