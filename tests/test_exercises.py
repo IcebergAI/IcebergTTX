@@ -1004,3 +1004,152 @@ async def test_participant_member_is_read_only(
     assert (
         await client.put(f"/api/exercises/{eid}", json={"title": "nope"}, headers=h)
     ).status_code == 403
+
+
+async def test_export_and_report_agree_on_shared_inject_resolution(
+    client: AsyncClient,
+    facilitator: User,
+    facilitator_token: str,
+    participant: User,
+    participant_token: str,
+    session: AsyncSession,
+):
+    """The JSON export and the report must not disagree about who has resolved what.
+
+    A *shared* inject (no target_teams -> group_id is None) resolved by a *team*
+    never mirrors onto the legacy Inject.state columns: progression_service only
+    mirrors when `inject.group_id is not None or context is None`, and for this
+    shape both halves are false. The export used to read those legacy columns while
+    report and timeline read InjectProgress, so the export reported the inject as
+    unresolved while the report reported it resolved.
+
+    The existing sample_definition cannot reproduce this — its injects are all
+    target_teams-scoped, so they get a group_id and the mirror always fires. That is
+    precisely why this went unnoticed.
+    """
+    from app.services.auth_service import create_access_token, hash_password
+    from app.services.exercise_service import create_exercise, enrol_member, transition_state
+    from app.services.scenario_service import create_scenario
+
+    legal_user = User(
+        email="legal-participant@example.com",
+        display_name="Legal Participant",
+        hashed_password=hash_password("password1234"),
+        role=UserRole.participant,
+        team="legal",
+    )
+    session.add(legal_user)
+    await session.commit()
+    await session.refresh(legal_user)
+    legal_token = create_access_token(subject=legal_user.email, role=legal_user.role.value)
+
+    scenario = await create_scenario(
+        session,
+        definition=ScenarioDefinition(
+            title="Shared inject",
+            participant_teams=[
+                {"id": "it_ops", "label": "IT Ops"},
+                {"id": "legal", "label": "Legal"},
+            ],
+            # No target_teams -> ONE physical inject, shared, group_id is None.
+            injects=[InjectNode(id="all_hands", title="All hands", content="c")],
+            start_inject_id="all_hands",
+        ),
+        created_by=facilitator.id,
+    )
+    exercise = await create_exercise(
+        session, title="Shared inject", scenario_id=scenario.id, created_by=facilitator.id
+    )
+    await enrol_member(session, exercise=exercise, user_id=participant.id, group_id="it_ops")
+    await enrol_member(session, exercise=exercise, user_id=legal_user.id, group_id="legal")
+    await transition_state(session, exercise, ExerciseState.active)
+
+    fac = _bearer(facilitator_token)
+    injects = (await client.get(f"/api/exercises/{exercise.id}/injects", headers=fac)).json()
+    assert len(injects) == 1, "a target_teams-less inject must be seeded once, shared"
+    inject_id = injects[0]["id"]
+    assert injects[0]["group_id"] is None
+
+    assert (
+        await client.post(f"/api/exercises/{exercise.id}/injects/{inject_id}/release", headers=fac)
+    ).status_code == 200
+
+    async def _resolutions_from_export() -> list[dict]:
+        body = (await client.get(f"/api/exercises/{exercise.id}/export", headers=fac)).json()
+        (row,) = [i for i in body["injects"] if i["id"] == inject_id]
+        return row["resolutions"]
+
+    async def _resolutions_from_report() -> list[dict]:
+        # The report keys injects by scenario_node_id (it carries no physical id), and
+        # resolves resolved_by to a display name where the export keeps the raw user id.
+        # Both are deliberate — so compare on group_id, which is the fact at issue.
+        body = (await client.get(f"/api/exercises/{exercise.id}/report", headers=fac)).json()
+        (row,) = [i for i in body["injects"] if i["scenario_node_id"] == "all_hands"]
+        return row["resolutions"]
+
+    # it_ops responds; legal has not.
+    assert (
+        await client.post(
+            f"/api/exercises/{exercise.id}/responses",
+            json={"inject_id": inject_id, "content": "ours is done"},
+            headers=_bearer(participant_token),
+        )
+    ).status_code == 201
+
+    export_resolved = {r["group_id"] for r in await _resolutions_from_export() if r["resolved_at"]}
+    report_resolved = {r["group_id"] for r in await _resolutions_from_report() if r["resolved_at"]}
+    # THE BUG: the export used to carry no per-group resolution at all, so this was
+    # set() while the report already said {"it_ops"}.
+    assert export_resolved == {"it_ops"}
+    assert export_resolved == report_resolved
+
+    # Partially resolved is NOT resolved: legal still owes a response.
+    body = (await client.get(f"/api/exercises/{exercise.id}/export", headers=fac)).json()
+    (row,) = [i for i in body["injects"] if i["id"] == inject_id]
+    assert row["state"] == "released"
+    assert row["resolved_at"] is None
+
+    # legal responds -> every context is resolved, and now the inject is too.
+    assert (
+        await client.post(
+            f"/api/exercises/{exercise.id}/responses",
+            json={"inject_id": inject_id, "content": "ours too"},
+            headers=_bearer(legal_token),
+        )
+    ).status_code == 201
+
+    export_resolved = {r["group_id"] for r in await _resolutions_from_export() if r["resolved_at"]}
+    report_resolved = {r["group_id"] for r in await _resolutions_from_report() if r["resolved_at"]}
+    assert export_resolved == {"it_ops", "legal"}
+    assert export_resolved == report_resolved
+
+    body = (await client.get(f"/api/exercises/{exercise.id}/export", headers=fac)).json()
+    (row,) = [i for i in body["injects"] if i["id"] == inject_id]
+    assert row["state"] == "resolved"
+    assert row["resolved_at"] is not None
+
+
+def test_export_inject_row_falls_back_to_legacy_columns_without_progression_rows():
+    """A pending inject, or one from before InjectProgress existed, has no progression
+    rows — the export must still describe it from the legacy columns rather than
+    silently reporting every such inject as unresolved."""
+    from app.models.inject import InjectState
+    from app.routers.exercises import _export_inject_row
+
+    resolved_at = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    legacy = Inject(
+        id=1,
+        exercise_id=1,
+        scenario_node_id="n1",
+        title="Legacy",
+        content="c",
+        state=InjectState.resolved,
+        resolved_at=resolved_at,
+        resolved_by=7,
+        resolution_reason="participant_response",
+    )
+    row = _export_inject_row(legacy, [], {"it_ops"})
+    assert row["state"] == InjectState.resolved
+    assert row["resolved_at"] == resolved_at.isoformat()
+    assert row["resolved_by"] == 7
+    assert row["resolutions"] == []

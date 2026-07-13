@@ -13,7 +13,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.database import get_session
 from app.dependencies import get_current_user, require_role
 from app.models.exercise import Exercise, ExerciseMember, ExerciseState
-from app.models.inject import Inject
+from app.models.inject import Inject, InjectProgress, InjectState
 from app.models.inject_comment import InjectComment
 from app.models.report_summary import ExecutiveSummary
 from app.models.response import Response
@@ -408,17 +408,70 @@ async def delete_member(
 # explicit and stays consistent across the JSON and CSV exports.
 
 
-def _export_inject_row(i: Inject) -> dict:
+def _export_inject_row(
+    i: Inject, resolutions: list[InjectProgress], member_groups: set[str | None]
+) -> dict:
+    """Project one inject, reading resolution from InjectProgress — not Inject.state.
+
+    The legacy top-level columns are only mirrored for a team-scoped inject
+    (progression_service mirrors when ``group_id is not None or context is None``), so a
+    *shared* inject resolved by a team leaves them saying ``released`` forever. Report
+    and timeline already read InjectProgress; reading it here too is what stops the
+    export disagreeing with them.
+
+    The top-level keys are kept for compatibility, but derived. Deriving them needs the
+    set of contexts we are *waiting on*, and InjectProgress cannot supply it: rows are
+    created lazily on first response, so "every recorded context is resolved" is trivially
+    true the moment one team answers. The expected contexts are the enrolled members'
+    groups (a shared inject is answered once per team; a team-scoped one has exactly one
+    context). Resolved only once every expected context is, timestamped by the last one to
+    get there — which for a team-scoped inject reduces to the previous behaviour. With no
+    members or no progression rows (a legacy or still-pending inject) fall back to the
+    columns, so old exercises keep exporting.
+    """
+    expected = {i.group_id} if i.group_id is not None else member_groups
+    resolved = [r for r in resolutions if r.state == InjectState.resolved]
+    complete = bool(expected) and expected <= {r.group_id for r in resolved}
+    if complete:
+        last = max(resolved, key=lambda r: (r.resolved_at is None, r.resolved_at))
+        state, resolved_at, resolved_by, reason = (
+            InjectState.resolved,
+            last.resolved_at,
+            last.resolved_by,
+            last.resolution_reason,
+        )
+    elif resolutions:
+        state, resolved_at, resolved_by, reason = i.state, None, None, None
+    else:
+        state, resolved_at, resolved_by, reason = (
+            i.state,
+            i.resolved_at,
+            i.resolved_by,
+            i.resolution_reason,
+        )
     return {
         "id": i.id,
         "scenario_node_id": i.scenario_node_id,
         "title": i.title,
-        "state": i.state,
+        "state": state,
         "group_id": i.group_id,
         "released_at": i.released_at.isoformat() if i.released_at else None,
-        "resolved_at": i.resolved_at.isoformat() if i.resolved_at else None,
-        "resolved_by": i.resolved_by,
-        "resolution_reason": i.resolution_reason,
+        "resolved_at": resolved_at.isoformat() if resolved_at else None,
+        "resolved_by": resolved_by,
+        "resolution_reason": reason,
+        # Per-group resolution — the authoritative record, and the only shape that can
+        # express a shared inject one team has answered and another has not.
+        "resolutions": [
+            {
+                "group_id": r.group_id,
+                "state": r.state,
+                "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
+                # Raw user id: the export is an id dump, where the report resolves names.
+                "resolved_by": r.resolved_by,
+                "resolution_reason": r.resolution_reason,
+            }
+            for r in resolutions
+        ],
     }
 
 
@@ -457,6 +510,14 @@ async def _build_export(session: AsyncSession, exercise_id: int, current_user: U
     members = (
         await session.exec(select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id))
     ).all()
+    resolution_rows = (
+        await session.exec(select(InjectProgress).where(InjectProgress.exercise_id == exercise_id))
+    ).all()
+    resolutions_by_inject: dict[int, list[InjectProgress]] = {}
+    for resolution in resolution_rows:
+        resolutions_by_inject.setdefault(resolution.inject_id, []).append(resolution)
+    # The contexts a shared inject is waiting on — see _export_inject_row.
+    member_groups = {m.group_id for m in members}
     definition = await get_scenario_definition(session, ex.scenario_id)
     return {
         "exercise": _exercise_out(ex),
@@ -467,7 +528,10 @@ async def _build_export(session: AsyncSession, exercise_id: int, current_user: U
             "debrief_notes": ex.debrief_notes,
         },
         "members": [_member_out(m) for m in members],
-        "injects": [_export_inject_row(i) for i in injects],
+        "injects": [
+            _export_inject_row(i, resolutions_by_inject.get(i.id, []), member_groups)
+            for i in injects
+        ],
         "responses": [_export_response_row(r) for r in responses],
         "inject_comments": [_export_comment_row(c) for c in comments],
     }

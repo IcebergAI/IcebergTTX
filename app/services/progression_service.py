@@ -73,6 +73,15 @@ async def resolve_response_progression(
     # A team-specific physical inject has one progression context, so its legacy
     # top-level state can safely mirror the authoritative per-context resolution.
     # Shared injects remain released while other teams may still respond.
+    #
+    # So the legacy columns are DELIBERATELY PARTIAL: for a shared inject resolved by a
+    # team, both halves of this condition are false and Inject.state is never written —
+    # not even once every team has answered. InjectProgress is the only complete record.
+    # Any reader that wants resolution must go there (report, timeline, and — since the
+    # export was found reporting shared injects as unresolved while the report called
+    # them resolved — the export too). Do not "fix" this by mirroring more aggressively:
+    # Inject.state is a single scalar and cannot honestly describe an inject that one
+    # team has resolved and another has not.
     if inject.group_id is not None or context is None:
         inject.state = InjectState.resolved
         inject.resolved_at = now
