@@ -326,3 +326,20 @@ class SuggestedInjectPublic(BaseModel):
     reviewed_by: int | None = None
     reviewed_at: str | None = None
     generated_at: str
+
+
+class SubmitResponseRequest(BaseModel):
+    """A participant's answer to an inject.
+
+    Here rather than in the router because it crosses a module boundary — the response
+    -requirements tests validate against it directly, and a router is not an import
+    target. See the schema-placement rule in CLAUDE.md.
+    """
+
+    inject_id: int
+    content: str = ""
+    selected_option: str | None = None
+
+
+class UnreadCount(BaseModel):
+    unread: int

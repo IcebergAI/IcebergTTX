@@ -9,7 +9,7 @@ from app.dependencies import get_current_user, require_role
 from app.models.communication import CommDirection, Communication
 from app.models.exercise import ExerciseState
 from app.models.user import User, UserRole
-from app.schemas.api import CommunicationPublic
+from app.schemas.api import CommunicationPublic, UnreadCount
 from app.services.access_control import (
     exercise_group_for_user,
     require_exercise_access,
@@ -192,10 +192,6 @@ async def inject_comm(
         visible_to_teams=visible_to_teams,
     )
     return await comm_payload(comm, session)
-
-
-class UnreadCount(BaseModel):
-    unread: int
 
 
 # Must stay ahead of GET /{comm_id}: FastAPI matches routes in declaration order,

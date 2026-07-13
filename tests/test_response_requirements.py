@@ -6,7 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise, ExerciseState
 from app.models.user import User
-from app.routers.responses import SubmitResponseRequest
+from app.schemas.api import SubmitResponseRequest
 from app.schemas.scenario_json import InjectNode, InjectOption, ScenarioDefinition
 from app.services.exercise_service import create_exercise, enrol_member, transition_state
 from app.services.response_service import response_next_inject_ids, response_validation_error
