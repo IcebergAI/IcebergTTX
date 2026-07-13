@@ -90,3 +90,18 @@ def test_team_scent_pills_meet_wcag_aa() -> None:
             assert ratio >= 4.5, (
                 f"--team-{team}-ink on --team-{team}-bg is only {ratio:.2f}:1 in {block_name}"
             )
+
+
+def test_generated_team_scent_palette_meets_wcag_aa() -> None:
+    """Every slot available to arbitrary scenario teams is legible in both themes."""
+    for block_name in (":root", 'html[data-theme="dark"]'):
+        block = _block(block_name)
+        for slot in range(12):
+            ratio = _contrast(
+                _oklch(block, f"--team-slot-{slot}-ink"),
+                _oklch(block, f"--team-slot-{slot}-bg"),
+            )
+            assert ratio >= 4.5, (
+                f"--team-slot-{slot}-ink on --team-slot-{slot}-bg is only "
+                f"{ratio:.2f}:1 in {block_name}"
+            )
