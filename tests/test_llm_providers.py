@@ -158,8 +158,8 @@ async def test_anthropic_adapter_parses_content_text(monkeypatch):
 
     assert out == "hello"
     kwargs = client.messages.create.call_args.kwargs
-    # Direct API path carries the prompt-caching header + cache_control block.
-    assert kwargs["extra_headers"]["anthropic-beta"] == "prompt-caching-2024-07-31"
+    # Direct API caching is generally available; no retired beta header is sent.
+    assert "extra_headers" not in kwargs
     assert kwargs["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
 

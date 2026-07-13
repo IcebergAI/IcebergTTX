@@ -218,6 +218,21 @@ const uiHelpers = {
     const m = Math.floor(s / 60), sec = s % 60;
     return `${m}:${String(sec).padStart(2, '0')}`;
   },
+  // One pause-aware clock authority for participant and facilitator views.
+  exerciseElapsedSeconds(exercise, nowMs = Date.now()) {
+    if (!exercise || !exercise.started_at) return null;
+    const start = new Date(exercise.started_at).getTime();
+    let reference;
+    if (exercise.state === 'paused' && exercise.paused_at)
+      reference = new Date(exercise.paused_at).getTime();
+    else if (exercise.state === 'completed' && exercise.ended_at)
+      reference = new Date(exercise.ended_at).getTime();
+    else reference = nowMs || Date.now();
+    return Math.max(
+      0,
+      (reference - start) / 1000 - (exercise.accumulated_pause_seconds || 0),
+    );
+  },
   // Tint modifier layered onto pills and team labels. Keep the established
   // four pixel-identical; hash every other scenario-defined id into the shared
   // accessible palette so its scent is stable across pages and sessions.

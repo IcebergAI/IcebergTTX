@@ -116,18 +116,8 @@ document.addEventListener('alpine:init', () => {
     get isObserver() { return this.role === 'observer'; },
     // Pause-aware exercise clock (#116) — same computation as the facilitator console.
     get elapsedStr() {
-      const secs = this.effectiveElapsedSeconds();
+      const secs = this.exerciseElapsedSeconds(this.exercise, this._nowMs);
       return secs == null ? '—' : this.fmtClock(secs);
-    },
-    effectiveElapsedSeconds() {
-      const ex = this.exercise;
-      if (!ex || !ex.started_at) return null;
-      const start = new Date(ex.started_at).getTime();
-      let ref;
-      if (ex.state === 'paused' && ex.paused_at) ref = new Date(ex.paused_at).getTime();
-      else if (ex.state === 'completed' && ex.ended_at) ref = new Date(ex.ended_at).getTime();
-      else ref = this._nowMs || Date.now();
-      return Math.max(0, (ref - start) / 1000 - (ex.accumulated_pause_seconds || 0));
     },
     get currentBriefId() {
       const current = this.injects.find(inj => inj.state === 'released' && !this.submitted[inj.id]);
@@ -381,7 +371,7 @@ document.addEventListener('alpine:init', () => {
     get exState() { return this.exercise ? this.exercise.state : ''; },
     // Pause-aware exercise clock (#116) — ticks client-side from server timestamps.
     get elapsedStr() {
-      const secs = this.effectiveElapsedSeconds();
+      const secs = this.exerciseElapsedSeconds(this.exercise, this._nowMs);
       return secs == null ? '—' : this.fmtClock(secs);
     },
     get exTitle() { return (this.exercise && this.exercise.title) || '…'; },
@@ -578,19 +568,6 @@ document.addEventListener('alpine:init', () => {
       query.addEventListener('change', this.mobileMediaListener);
     },
 
-    // Pause-aware effective elapsed seconds (#116): wall time since start minus all
-    // completed pause spans; frozen at paused_at/ended_at when not running.
-    effectiveElapsedSeconds() {
-      const ex = this.exercise;
-      if (!ex || !ex.started_at) return null;
-      const start = new Date(ex.started_at).getTime();
-      let ref;
-      if (ex.state === 'paused' && ex.paused_at) ref = new Date(ex.paused_at).getTime();
-      else if (ex.state === 'completed' && ex.ended_at) ref = new Date(ex.ended_at).getTime();
-      else ref = this._nowMs || Date.now();
-      return Math.max(0, (ref - start) / 1000 - (ex.accumulated_pause_seconds || 0));
-    },
-
     isScheduled(inj) {
       return inj.state === 'pending' && inj.release_offset_minutes != null;
     },
@@ -598,7 +575,7 @@ document.addEventListener('alpine:init', () => {
     // Seconds until a pending scheduled inject auto-releases (negative once due).
     countdownSeconds(inj) {
       if (inj.release_offset_minutes == null) return null;
-      const elapsed = this.effectiveElapsedSeconds();
+      const elapsed = this.exerciseElapsedSeconds(this.exercise, this._nowMs);
       if (elapsed == null) return null;
       return inj.release_offset_minutes * 60 - elapsed;
     },
