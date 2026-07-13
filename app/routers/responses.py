@@ -1,7 +1,6 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -12,7 +11,7 @@ from app.models.exercise import ExerciseState
 from app.models.inject import InjectState
 from app.models.response import Response
 from app.models.user import User, UserRole
-from app.schemas.api import AssessmentPublic, ResponsePublic
+from app.schemas.api import AssessmentPublic, ResponsePublic, SubmitResponseRequest
 from app.services.access_control import (
     exercise_group_for_user,
     require_exercise_access,
@@ -36,12 +35,6 @@ router = APIRouter(prefix="/exercises/{exercise_id}/responses", tags=["responses
 FacilitatorDep = Annotated[User, Depends(require_role(UserRole.facilitator))]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-
-
-class SubmitResponseRequest(BaseModel):
-    inject_id: int
-    content: str = ""
-    selected_option: str | None = None
 
 
 @router.get("", response_model=list[ResponsePublic])

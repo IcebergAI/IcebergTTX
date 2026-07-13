@@ -18,7 +18,6 @@ from app.models.inject import Inject
 from app.models.inject_comment import InjectComment
 from app.models.report_summary import ExecutiveSummary
 from app.models.response import Response
-from app.models.scenario import Scenario
 from app.models.user import User, UserRole
 from app.schemas.api import (
     DebriefNotes,
@@ -47,11 +46,17 @@ from app.services.exercise_service import (
     transition_state_with_history,
     update_member_group,
 )
+from app.services.exercise_service import list_members as members_for_exercise
+from app.services.inject_service import attachment_paths_for_exercise
 from app.services.llm.service import active_provider
 from app.services.llm_service import run_summary_pipeline
 from app.services.progression_service import progression_snapshot
-from app.services.report_service import build_report, render_markdown
-from app.services.scenario_service import get_scenario_definition
+from app.services.report_service import (
+    build_report,
+    executive_summary_for_exercise,
+    render_markdown,
+)
+from app.services.scenario_service import get_scenario_definition, titles_for
 from app.services.schedule_service import (
     cancel_exercise_schedules,
     schedule_exercise_injects,
@@ -106,17 +111,6 @@ def _exercise_out(ex: Exercise, scenario_title: str | None = None) -> dict:
     return ExercisePublic.from_model(ex, scenario_title).model_dump(mode="json")
 
 
-async def _scenario_titles(session: AsyncSession, exercises: list[Exercise]) -> dict[int, str]:
-    """id → title for the scenarios behind ``exercises`` — one query, not N+1."""
-    scenario_ids = {ex.scenario_id for ex in exercises if ex.scenario_id is not None}
-    if not scenario_ids:
-        return {}
-    rows = await session.exec(
-        select(Scenario.id, Scenario.title).where(col(Scenario.id).in_(scenario_ids))
-    )
-    return {scenario_id: title for scenario_id, title in rows.all() if scenario_id is not None}
-
-
 def _member_out(m: ExerciseMember) -> dict:
     return MemberPublic.from_model(m).model_dump(mode="json")
 
@@ -148,7 +142,8 @@ async def list_exercises(current_user: CurrentUserDep, session: SessionDep):
     # id DESC is a total-order tiebreaker so equal timestamps can never swap.
     q = q.order_by(col(Exercise.started_at).desc().nulls_last(), col(Exercise.id).desc())
     exercises = list((await session.exec(q)).all())
-    titles = await _scenario_titles(session, exercises)
+    scenario_ids = {ex.scenario_id for ex in exercises if ex.scenario_id is not None}
+    titles = await titles_for(session, scenario_ids)
     return [_exercise_out(ex, titles.get(ex.scenario_id)) for ex in exercises]
 
 
@@ -229,16 +224,7 @@ async def delete_exercise(exercise_id: int, current_user: FacilitatorDep, sessio
             status_code=status.HTTP_409_CONFLICT,
             detail="Only draft exercises can be deleted",
         )
-    attachment_paths = list(
-        (
-            await session.exec(
-                select(Inject.attachment_path).where(
-                    Inject.exercise_id == exercise_id,
-                    col(Inject.attachment_path).is_not(None),
-                )
-            )
-        ).all()
-    )
+    attachment_paths = await attachment_paths_for_exercise(session, exercise_id)
     await session.delete(ex)
     await session.commit()
     # The database cascade is authoritative. Files are removed only after it
@@ -312,9 +298,7 @@ async def complete(exercise_id: int, current_user: FacilitatorDep, session: Sess
 @router.get("/{exercise_id}/members", response_model=list[MemberPublic])
 async def list_members(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
     await require_exercise_access(session, exercise_id, current_user)
-    members = (
-        await session.exec(select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id))
-    ).all()
+    members = await members_for_exercise(session, exercise_id)
     return [_member_out(m) for m in members]
 
 
@@ -502,12 +486,7 @@ def _summary_public(s: ExecutiveSummary) -> ExecutiveSummaryPublic:
     return ExecutiveSummaryPublic.from_model(s)
 
 
-async def _get_summary_row(session: AsyncSession, exercise_id: int) -> ExecutiveSummary | None:
-    return (
-        await session.exec(
-            select(ExecutiveSummary).where(ExecutiveSummary.exercise_id == exercise_id)
-        )
-    ).first()
+
 
 
 @router.get("/{exercise_id}/report")
@@ -549,7 +528,7 @@ async def report_markdown(exercise_id: int, current_user: FacilitatorDep, sessio
 async def get_report_summary(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
     """Current executive summary + whether AI drafting is available (#113)."""
     ex = await require_exercise_owner(session, exercise_id, current_user)
-    row = await _get_summary_row(session, exercise_id)
+    row = await executive_summary_for_exercise(session, exercise_id)
     available = active_provider() is not None and ex.llm_enabled
     return ReportSummaryState(available=available, summary=_summary_public(row) if row else None)
 
@@ -577,7 +556,7 @@ async def edit_report_summary(
 ):
     """Facilitator edits the drafted summary before it lands in the report (#113)."""
     await require_exercise_owner(session, exercise_id, current_user)
-    row = await _get_summary_row(session, exercise_id)
+    row = await executive_summary_for_exercise(session, exercise_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No summary to edit")
     row.summary_text = body.summary_text

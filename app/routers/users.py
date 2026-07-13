@@ -2,7 +2,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
@@ -12,7 +11,7 @@ from app.models.exercise import Exercise
 from app.models.user import LOCAL_AUTH_PROVIDER, User, UserRole
 from app.schemas.api import UserPublic
 from app.schemas.auth import AdminCreateUserRequest, AdminResetPasswordRequest, InviteRequest
-from app.services import audit_service, mail_service, token_service
+from app.services import audit_service, mail_service, token_service, user_service
 from app.services.auth_service import hash_password
 from app.services.background import spawn
 
@@ -41,14 +40,14 @@ def _user_out(u: User) -> dict:
 
 @router.get("", response_model=list[UserPublic])
 async def list_users(_: FacilitatorDep, session: SessionDep):
-    return [_user_out(u) for u in (await session.exec(select(User))).all()]
+    return [_user_out(u) for u in await user_service.list_all(session)]
 
 
 @router.post("", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 async def create_user(body: AdminCreateUserRequest, admin: AdminDep, session: SessionDep):
     """Admin-provisioned account (#67) — the invite path when self-registration
     is disabled. Not gated by REGISTRATION_ENABLED or the register rate limit."""
-    if (await session.exec(select(User).where(User.email == body.email))).first():
+    if await user_service.email_exists(session, body.email):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     user = User(
         email=body.email,
@@ -82,7 +81,7 @@ async def invite_user(
     """
     if not mail_service.smtp_enabled():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    if (await session.exec(select(User).where(User.email == body.email))).first():
+    if await user_service.email_exists(session, body.email):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     if body.exercise_id is not None and await session.get(Exercise, body.exercise_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")

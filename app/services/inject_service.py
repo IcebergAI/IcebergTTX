@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import update
-from sqlmodel import col
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.inject import Inject, InjectState
@@ -237,3 +237,14 @@ async def seed_injects_from_scenario(
                 release_offset_minutes=node.release_at_minutes,
                 commit=False,
             )
+
+
+async def attachment_paths_for_exercise(session: AsyncSession, exercise_id: int) -> list[str]:
+    """Every stored attachment path in the exercise, for cleanup after a cascade delete."""
+    rows = await session.exec(
+        select(Inject.attachment_path).where(
+            Inject.exercise_id == exercise_id,
+            col(Inject.attachment_path).is_not(None),
+        )
+    )
+    return [path for path in rows.all() if path is not None]

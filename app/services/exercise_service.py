@@ -341,3 +341,13 @@ async def remove_member(session: AsyncSession, *, exercise: Exercise, user_id: i
         )
     await session.delete(member)
     await session.commit()
+
+
+async def list_members(session: AsyncSession, exercise_id: int) -> list[ExerciseMember]:
+    return list(
+        (
+            await session.exec(
+                select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id)
+            )
+        ).all()
+    )
