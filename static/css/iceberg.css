@@ -565,7 +565,9 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
    surface, so a team reads the same in a list header and on a pill. */
 .team-label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .team-label-swatch { width: 6px; height: 6px; border-radius: 2px; background: currentColor; flex: none; }
-.team-label[class*="team-"] { color: var(--team-ink); }
+.team-label:is(
+  .team-itops, .team-legal, .team-exec, .team-comms, [class*="team-scent-"]
+) { color: var(--team-ink); }
 
 /* Participant briefing card */
 .briefing {

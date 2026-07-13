@@ -352,20 +352,30 @@ def test_arbitrary_team_ids_receive_stable_shared_scents(page: Page):
           pill.className = `pill ${scent}`;
           const label = document.createElement('span');
           label.className = `team-label ${scent}`;
-          document.body.append(pill, label);
+          const shared = document.createElement('span');
+          shared.className = 'team-label';
+          const muted = document.createElement('span');
+          muted.className = 'text-muted';
+          document.body.append(pill, label, shared, muted);
           const result = {
             pillInk: getComputedStyle(pill).color,
             labelInk: getComputedStyle(label).color,
             pillFill: getComputedStyle(pill).backgroundColor,
+            sharedInk: getComputedStyle(shared).color,
+            mutedInk: getComputedStyle(muted).color,
           };
           pill.remove();
           label.remove();
+          shared.remove();
+          muted.remove();
           return result;
         }""",
         {"scent": classes["finance"]},
     )
     assert rendered["pillInk"] == rendered["labelInk"]
     assert rendered["pillFill"] != "rgba(0, 0, 0, 0)"
+    assert rendered["sharedInk"] == rendered["mutedInk"]
+    assert rendered["sharedInk"] != rendered["labelInk"]
 
 
 def test_facilitator_console_renders(page: Page):
