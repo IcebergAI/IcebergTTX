@@ -781,6 +781,31 @@ def test_unread_badge_ignores_superseded_count_response(page: Page):
     assert unread == 7
 
 
+def test_general_settings_save_on_phone_without_page_overflow(page: Page):
+    page.set_viewport_size({"width": 390, "height": 844})
+    login_facilitator(page)
+    page.goto(f"{BASE}/admin/settings")
+
+    expiry = page.locator("#token-expiry")
+    expect(expiry).to_be_visible()
+    original = int(expiry.input_value())
+    updated = 123 if original != 123 else 124
+    expiry.fill(str(updated))
+    page.get_by_role("button", name="Save general settings").click()
+    expect(page.get_by_role("status")).to_have_text("General settings saved.")
+    response = api_get(page, "/general/settings")
+    assert response.status == 200
+    assert response.json()["access_token_expire_minutes"] == updated
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+    )
+
+    # Leave the shared rendered test server as it was for later UI tests.
+    expiry.fill(str(original))
+    page.get_by_role("button", name="Save general settings").click()
+    expect(page.get_by_role("status")).to_have_text("General settings saved.")
+
+
 def test_reset_password_dialog_traps_and_restores_focus(page: Page):
     login_facilitator(page)
     page.goto(f"{BASE}/admin/users")
