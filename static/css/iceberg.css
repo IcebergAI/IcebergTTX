@@ -653,6 +653,12 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
 .fac-console__body,
 .fac-console__pane { min-width: 0; }
 .fac-console__mobile-nav { display: none; }
+.is-dense .fac-console__ticker .btn {
+  min-height: 34px; height: 34px;
+}
+.is-dense .fac-console__release-control {
+  min-width: 28px; min-height: 28px; height: 28px;
+}
 
 /* Ops pane: three labelled sections rather than one mixed scroll, so
    "who's in the room" and "what do I do with the session" don't run together. */
@@ -682,7 +688,7 @@ button, [role="button"], [role="tab"] { min-width: 40px; min-height: 40px; }
   .fac-console__action-divider,
   .fac-console__ops-toggle { display: none !important; }
   .fac-console__actions > .btn {
-    min-width: 0; min-height: 44px; height: 44px;
+    min-width: 0; min-height: 34px; height: 34px;
     padding-inline: 12px; flex: 1 1 auto;
   }
 
@@ -768,6 +774,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   .btn, button, [role="button"], [role="tab"],
   .rail-link, .rail-live-main, .rail-live-opt, .rail-logout, summary,
   .seg-btn, .settings-nav-btn, .settings-input, .comm-filter-control,
+  .is-dense .fac-console__ticker .btn, .is-dense .fac-console__release-control,
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select, textarea {
     min-width: 44px;

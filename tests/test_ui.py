@@ -436,8 +436,13 @@ def _assert_visible_control_geometry(page: Page, minimum: int) -> None:
         )].filter(node => {
           const style = getComputedStyle(node);
           const rect = node.getBoundingClientRect();
+          const denseDesktop = minimum === 40 && (
+            node.matches('[data-dense-control]')
+            || node.matches('.is-dense .fac-console__ticker .btn')
+          );
           return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0
-            && rect.height > 0 && (rect.width < minimum || rect.height < minimum);
+            && rect.height > 0 && !denseDesktop
+            && (rect.width < minimum || rect.height < minimum);
         }).map(node => ({
           tag: node.tagName, text: node.textContent.trim().slice(0, 48),
           width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height,
@@ -507,6 +512,15 @@ def test_facilitator_console_desktop_preserves_split_panes(page: Page):
     page.goto(f"{BASE}/exercises/{exercise_id}/facilitate")
     expect(page.locator('[x-text="exTitle"]')).to_have_text("Desktop Console Exercise")
     expect(page.locator(".fac-console__mobile-nav")).to_be_hidden()
+
+    ticker_heights = page.locator(".fac-console__ticker .btn:visible").evaluate_all(
+        "nodes => nodes.map(node => node.getBoundingClientRect().height)"
+    )
+    release_heights = page.locator("[data-dense-control]:visible").evaluate_all(
+        "nodes => nodes.map(node => node.getBoundingClientRect().height)"
+    )
+    assert ticker_heights and all(height == 34 for height in ticker_heights)
+    assert release_heights and all(height == 28 for height in release_heights)
 
     injects = page.get_by_test_id("facilitator-pane-injects")
     responses = page.get_by_test_id("facilitator-pane-responses")
