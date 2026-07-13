@@ -518,6 +518,12 @@ async def _build_export(session: AsyncSession, exercise_id: int, current_user: U
         resolutions_by_inject.setdefault(resolution.inject_id, []).append(resolution)
     # The contexts a shared inject is waiting on — see _export_inject_row.
     member_groups = {m.group_id for m in members}
+    inject_rows = []
+    for i in injects:
+        assert i.id is not None
+        inject_rows.append(
+            _export_inject_row(i, resolutions_by_inject.get(i.id, []), member_groups)
+        )
     definition = await get_scenario_definition(session, ex.scenario_id)
     return {
         "exercise": _exercise_out(ex),
@@ -528,10 +534,7 @@ async def _build_export(session: AsyncSession, exercise_id: int, current_user: U
             "debrief_notes": ex.debrief_notes,
         },
         "members": [_member_out(m) for m in members],
-        "injects": [
-            _export_inject_row(i, resolutions_by_inject.get(i.id, []), member_groups)
-            for i in injects
-        ],
+        "injects": inject_rows,
         "responses": [_export_response_row(r) for r in responses],
         "inject_comments": [_export_comment_row(c) for c in comments],
     }
