@@ -3,7 +3,7 @@ from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.routers.injects import _safe_filename
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -282,10 +282,29 @@ async def test_participant_sees_only_released_visible_injects(
 
 async def test_facilitator_preview_participant_uses_preview_team_for_visibility(
     client: AsyncClient,
+    session: AsyncSession,
     facilitator_token: str,
     participant_token: str,
     active_exercise: Exercise,
 ):
+    from app.services.exercise_service import enrol_member
+
+    legal_participant = User(
+        email="preview-legal@example.com",
+        display_name="Preview Legal Participant",
+        role=UserRole.participant,
+        team="legal",
+    )
+    session.add(legal_participant)
+    await session.commit()
+    await session.refresh(legal_participant)
+    await enrol_member(
+        session,
+        exercise=active_exercise,
+        user_id=legal_participant.id,
+        group_id="legal",
+    )
+
     injects = (await client.get(
         f"/api/exercises/{active_exercise.id}/injects",
         headers={"Authorization": f"Bearer {facilitator_token}"},

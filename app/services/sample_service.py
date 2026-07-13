@@ -84,7 +84,12 @@ async def create_sample_demo_exercise(
         title=f"Demo: {scenario.title}",
         created_by=created_by,
     )
-    member = await enrol_member(session, exercise=exercise, user_id=created_by)
+    definition = get_sample_definition(sample_id)
+    assert definition is not None
+    demo_group = definition.participant_teams[0].id if definition.participant_teams else None
+    member = await enrol_member(
+        session, exercise=exercise, user_id=created_by, group_id=demo_group
+    )
     # A sample demo is intentionally a one-person participant preview: the
     # facilitator owns the exercise but acts as its participant audience.
     member.role_at_enrolment = UserRole.participant
