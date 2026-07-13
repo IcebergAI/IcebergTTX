@@ -739,6 +739,71 @@ def test_communications_inbox_renders(page: Page):
     expect(page.locator("body")).not_to_contain_text("Internal Server Error")
 
 
+def test_unread_badge_updates_when_message_arrives_outside_inbox(page: Page):
+    login_facilitator(page)
+    scenario_id = _make_scenario(page)
+    exercise_id = _make_exercise(page, scenario_id)
+    api_post(page, f"/exercises/{exercise_id}/start")
+    page.evaluate(f"document.cookie = 'dt_current_exercise={exercise_id}; path=/'")
+
+    # Reload a non-inbox route so the persistent shell selects the new active
+    # exercise and subscribes before the inbound message is injected.
+    page.goto(f"{BASE}/dashboard")
+    expect(page.get_by_text("Live · EX-", exact=False).first).to_be_visible()
+    page.wait_for_function(
+        "document.querySelector('.app')?._x_dataStack?.[0]?.wsConnected === true"
+    )
+    expect(page.get_by_test_id("unread-comms-badge")).to_have_count(0)
+
+    injected = api_post(
+        page,
+        f"/exercises/{exercise_id}/communications/inject",
+        {"external_entity": "NCSC", "subject": "Live advisory", "body": "Act now"},
+    )
+    assert injected.status == 201, injected.text()
+    expect(page.get_by_test_id("unread-comms-badge")).to_have_text("1", timeout=6000)
+
+
+def test_unread_badge_ignores_superseded_count_response(page: Page):
+    login_facilitator(page)
+    scenario_id = _make_scenario(page)
+    exercise_id = _make_exercise(page, scenario_id)
+    api_post(page, f"/exercises/{exercise_id}/start")
+    page.evaluate(f"document.cookie = 'dt_current_exercise={exercise_id}; path=/'")
+    page.goto(f"{BASE}/dashboard")
+    expect(page.get_by_text("Live · EX-", exact=False).first).to_be_visible()
+
+    unread = page.evaluate(
+        """async () => {
+          const nav = document.querySelector('.app')._x_dataStack[0];
+          const originalFetch = window.fetch;
+          const pending = [];
+          window.fetch = (url, options) => {
+            if (String(url).includes('/communications/unread-count')) {
+              return new Promise(resolve => pending.push(resolve));
+            }
+            return originalFetch(url, options);
+          };
+          try {
+            const stale = nav.refreshUnread();
+            const current = nav.refreshUnread();
+            pending[1](new Response(JSON.stringify({unread: 7}), {
+              status: 200, headers: {'Content-Type': 'application/json'},
+            }));
+            await current;
+            pending[0](new Response(JSON.stringify({unread: 2}), {
+              status: 200, headers: {'Content-Type': 'application/json'},
+            }));
+            await stale;
+            return nav.unread;
+          } finally {
+            window.fetch = originalFetch;
+          }
+        }"""
+    )
+    assert unread == 7
+
+
 def test_general_settings_save_on_phone_without_page_overflow(page: Page):
     page.set_viewport_size({"width": 390, "height": 844})
     login_facilitator(page)
