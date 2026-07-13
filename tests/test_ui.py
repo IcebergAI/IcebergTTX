@@ -862,6 +862,22 @@ def test_oidc_settings_save_on_phone_without_page_overflow(page: Page):
     )
 
 
+def test_effective_config_filters_redacted_settings_on_phone(page: Page):
+    page.set_viewport_size({"width": 390, "height": 844})
+    login_facilitator(page)
+    page.goto(f"{BASE}/admin/config")
+
+    expect(page.get_by_role("heading", name="Effective configuration")).to_be_visible()
+    expect(page.get_by_text("Process and runtime configuration checks pass.")).to_be_visible()
+    search = page.get_by_placeholder("Filter settings")
+    search.fill("registration_enabled")
+    expect(page.get_by_test_id("config-row")).to_have_count(1)
+    expect(page.get_by_text("registration_enabled", exact=True)).to_be_visible()
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+    )
+
+
 def test_reset_password_dialog_traps_and_restores_focus(page: Page):
     login_facilitator(page)
     page.goto(f"{BASE}/admin/users")

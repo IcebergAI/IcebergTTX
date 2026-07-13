@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Effective configuration — IcebergTTX{% endblock %}
+
+{% block content %}
+<div x-data="adminEffectiveConfig()" class="workspace max-w-[1120px]">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Effective configuration</h1>
+      <p class="text-[13.5px] text-muted mt-1">
+        The values this process is using now, where each came from, and whether optional features are available.
+      </p>
+    </div>
+  </div>
+
+  <template x-if="loading">
+    <p class="smallcaps text-faint py-8">Loading configuration…</p>
+  </template>
+
+  <div x-show="!loading" x-cloak class="space-y-5">
+    <section class="surface p-5">
+      <div class="flex items-center justify-between gap-3 mb-4">
+        <h2 class="smallcaps text-muted">Validation</h2>
+        <span class="pill" :class="validation.ok ? 'text-ok' : 'text-crit'"
+              x-text="validation.ok ? 'Valid' : 'Needs attention'"></span>
+      </div>
+      <p x-show="validation.ok" class="text-[13px] text-muted">
+        Process and runtime configuration checks pass.
+      </p>
+      <ul x-show="!validation.ok" class="space-y-1 text-[12.5px] text-crit">
+        <template x-for="error in validation.errors" :key="error">
+          <li x-text="error"></li>
+        </template>
+      </ul>
+    </section>
+
+    <section class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Feature status">
+      <template x-for="feature in featureRows" :key="feature.label">
+        <div class="surface p-4">
+          <div class="smallcaps text-muted" x-text="feature.label"></div>
+          <div class="mt-2 text-[14px] font-medium" :class="feature.enabled ? 'text-ok' : 'text-muted'"
+               x-text="feature.value"></div>
+        </div>
+      </template>
+    </section>
+
+    <section class="surface p-0 overflow-hidden">
+      <div class="p-4 border-b rule flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="smallcaps text-muted">All settings</h2>
+          <p class="text-[11.5px] text-faint mt-1">Secrets show set/not set only; no value or prefix crosses the API.</p>
+        </div>
+        <label class="min-w-[220px] grow max-w-sm">
+          <span class="sr-only">Filter settings</span>
+          <input type="search" x-model="query" placeholder="Filter settings"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13px] bg-surface" />
+        </label>
+      </div>
+
+      <div class="divide-y rule">
+        <template x-for="row in filteredSettings" :key="row.name">
+          <div class="p-4 grid gap-2 md:grid-cols-[minmax(190px,1fr)_minmax(220px,1.5fr)_150px] items-start"
+               data-testid="config-row">
+            <div>
+              <div class="mono text-[12.5px] break-all" x-text="row.name"></div>
+              <div class="text-[11px] text-faint mt-0.5" x-text="row.category"></div>
+            </div>
+            <div class="mono text-[12px] break-all" :class="row.secret ? 'text-muted' : ''"
+                 x-text="formatValue(row)"></div>
+            <div><span class="pill" x-text="row.provenance"></span></div>
+          </div>
+        </template>
+        <p x-show="filteredSettings.length === 0" class="p-6 text-[13px] text-muted">No matching settings.</p>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

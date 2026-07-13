@@ -41,6 +41,7 @@ from app.routers import (
 from app.routers import (
     auth,
     communications,
+    effective_config,
     exercises,
     general,
     health,
@@ -264,6 +265,7 @@ app.include_router(oidc.router, prefix="/api")
 app.include_router(audit_router.router, prefix="/api")
 app.include_router(email_router.router, prefix="/api")
 app.include_router(general.router, prefix="/api")
+app.include_router(effective_config.router, prefix="/api")
 app.include_router(llm.router, prefix="/api")
 app.include_router(oidc_settings_router.router, prefix="/api")
 app.include_router(proxy_router.router, prefix="/api")

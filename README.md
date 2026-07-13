@@ -500,6 +500,12 @@ histories, and token-lifetime changes affect newly issued tokens only.
 Security-sensitive process settings such as `SECRET_KEY`, `TRUSTED_ORIGINS`, `DEV_MODE`, and
 cookie security are deliberately not exposed by this page or API.
 
+Admins can audit the complete live configuration at **`/admin/config`**. Every setting reports
+its effective value and whether it comes from the authoritative database row, an environment
+value, or the built-in default. Credentials, connection strings, and tokens are represented only
+as `set` / `not set`; neither values nor prefixes cross the API. The page also surfaces runtime
+validation plus email, local-auth, registration, SSO, and active-AI feature status.
+
 ## AI provider settings
 
 The non-secret `LLM_*`, model, endpoint, and Bedrock-region values seed the singleton shown at
