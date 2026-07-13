@@ -157,4 +157,57 @@ document.addEventListener('alpine:init', () => {
       this.testResult = data && data.result ? data.result : 'error: request failed';
     },
   }));
+
+  Alpine.data('adminEmail', () => ({
+    cfg: {
+      enabled: false, smtp_host: '', smtp_port: 587, smtp_from: '', smtp_username: '',
+      smtp_starttls: true, smtp_tls: false, public_base_url: '',
+    },
+    saving: false,
+    testing: false,
+    message: '',
+    testResult: '',
+
+    async init() { await this.loadSettings(); },
+
+    chooseStarttls() { if (this.cfg.smtp_starttls) this.cfg.smtp_tls = false; },
+    chooseTls() { if (this.cfg.smtp_tls) this.cfg.smtp_starttls = false; },
+    get testFailed() { return this.testResult.indexOf('error') === 0; },
+
+    async loadSettings() {
+      const resp = await apiFetch('/email/settings');
+      const data = await readJson(resp, null);
+      if (!data) return;
+      this.cfg = {
+        enabled: !!data.enabled,
+        smtp_host: data.smtp_host || '',
+        smtp_port: data.smtp_port || 587,
+        smtp_from: data.smtp_from || '',
+        smtp_username: data.smtp_username || '',
+        smtp_starttls: data.smtp_starttls !== false,
+        smtp_tls: !!data.smtp_tls,
+        public_base_url: data.public_base_url || '',
+      };
+    },
+
+    async save() {
+      this.saving = true;
+      this.message = '';
+      const resp = await apiFetch('/email/settings', {
+        method: 'PUT', body: JSON.stringify(this.cfg),
+      });
+      this.saving = false;
+      this.message = resp && resp.ok ? 'Email settings saved.' : 'Could not save.';
+      if (resp && resp.ok) await this.loadSettings();
+    },
+
+    async runTest() {
+      this.testing = true;
+      this.testResult = '';
+      const resp = await apiFetch('/email/test', { method: 'POST' });
+      const data = await readJson(resp, null);
+      this.testing = false;
+      this.testResult = data && data.result ? data.result : 'error: request failed';
+    },
+  }));
 });

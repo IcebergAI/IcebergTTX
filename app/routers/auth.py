@@ -85,7 +85,7 @@ def _require_smtp() -> None:
     Returns 404 (not 403): with no mailer the feature does not exist, so the routes
     read as absent rather than forbidden. UI entry points are hidden in parallel.
     """
-    if not settings.smtp_enabled:
+    if not mail_service.smtp_enabled():
         audit_service.emit(
             "auth.email_feature",
             result="deny",

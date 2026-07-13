@@ -484,8 +484,10 @@ slash) so the callback URL matches what you register with the IdP.
 
 ## Email (password reset & invites)
 
-Email is **optional and off by default**. It switches on only when both `SMTP_HOST` and
-`SMTP_FROM` are set; until then the email-dependent endpoints return 404 and their UI entry
+Email is **optional and off by default**. On first startup, the non-secret `SMTP_*` values
+seed the singleton configuration shown at **`/admin/email`**. From then on the database row
+is authoritative and admins can change delivery settings without a restart. Until email is
+enabled with both a host and From address, dependent endpoints return 404 and their UI entry
 points stay hidden.
 
 ```bash
@@ -497,6 +499,10 @@ SMTP_PASSWORD=<password>          # optional
 SMTP_STARTTLS=true                # or SMTP_TLS=true for implicit TLS
 PUBLIC_BASE_URL=https://ttx.example.com   # so emailed links are absolute
 ```
+
+`SMTP_PASSWORD` is environment-only: it is never accepted by the admin API, persisted,
+logged, or shown. The runtime cache is process-local, matching the SIEM and proxy caches,
+so the supported deployment remains a single application replica.
 
 With it enabled you get two flows:
 
