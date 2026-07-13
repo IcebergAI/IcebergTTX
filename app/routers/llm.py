@@ -1,5 +1,6 @@
 """Admin runtime LLM configuration API; provider credentials remain env-only."""
 
+import asyncio
 import logging
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -100,9 +101,10 @@ async def test_llm_provider(current_user: AdminDep) -> dict[str, str]:
         result = "disabled"
     else:
         try:
-            await provider.complete(
-                "This is a connectivity check.", "", "Reply with OK.", max_tokens=1
-            )
+            async with asyncio.timeout(10):
+                await provider.complete(
+                    "This is a connectivity check.", "", "Reply with OK.", max_tokens=1
+                )
             result = "ok"
         except Exception as exc:  # noqa: BLE001 - safe class-only boundary
             logger.warning("LLM provider test failed: %s", type(exc).__name__)
