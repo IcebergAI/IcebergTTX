@@ -189,16 +189,18 @@ inject is released. Use `triggers_communications` on the inject.
 }
 ```
 
-**What the facilitator sees** — releasing `leak` schedules the message; 120 seconds
-later it lands in the communications inbox for all teams and broadcasts over WebSocket.
+**What the facilitator sees** — releasing `leak` schedules this **inbound** message;
+120 seconds later it lands in the communications inbox for all teams and broadcasts over WebSocket.
 `delay_after_release_seconds: 0` delivers immediately.
 
 !!! warning "Authored fields differ from the inbox record"
     On a trigger you set only `external_entity`, `direction` (**exactly `"inbound"` or
     `"outbound"`**), `subject`, `body`, and `delay_after_release_seconds`. You do **not**
-    set `sender` or `visible_to_teams` — the server fills those in, and triggered comms
-    default to **all-team** visibility. To send a team-scoped or same-day message during
-    a live exercise, use **Inject inbound** in the Communications panel instead.
+    set `sender` or `visible_to_teams`. Triggered **inbound** comms default to all-team
+    visibility. Triggered **outbound** comms have no participant sender or recipient-team
+    scope, so they are visible to facilitators rather than participant inboxes. To send a
+    team-scoped or participant-authored message during a live exercise, use the
+    Communications panel instead.
 
 ## Recipe: scheduled release (put an inject on a clock)
 

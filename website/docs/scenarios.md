@@ -108,8 +108,9 @@ The builder is a three-pane workspace:
 
 `triggers_communications`
 :   Messages automatically injected into the comms inbox when this inject is
-    released, visible to all teams. `delay_after_release_seconds` staggers
-    delivery.
+    released. Triggered **inbound** messages are visible to all teams. Triggered
+    **outbound** messages are facilitator-visible because they have no participant
+    sender or recipient-team scope. `delay_after_release_seconds` staggers delivery.
 
 !!! note "Validation"
     The builder's readiness pane validates as you type, and blocking issues

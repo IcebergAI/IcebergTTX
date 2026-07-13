@@ -194,7 +194,7 @@
       </div>
       <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
         <div class="smallcaps text-muted pt-0.5">triggers_communications</div>
-        <div class="text-ink-soft">Messages automatically injected into the comms inbox when this inject is released, visible to all teams. <code class="mono text-[12px]">delay_after_release_seconds</code> staggers delivery. You set only <code class="mono text-[12px]">external_entity</code>, <code class="mono text-[12px]">direction</code>, <code class="mono text-[12px]">subject</code>, <code class="mono text-[12px]">body</code> and the delay — the server fills in the rest.</div>
+        <div class="text-ink-soft">Messages automatically injected into the comms inbox when this inject is released. Triggered <code class="mono text-[12px]">inbound</code> messages are visible to all teams; triggered <code class="mono text-[12px]">outbound</code> messages are facilitator-visible because no participant sender or recipient teams are attached. <code class="mono text-[12px]">delay_after_release_seconds</code> staggers delivery. You set only <code class="mono text-[12px]">external_entity</code>, <code class="mono text-[12px]">direction</code>, <code class="mono text-[12px]">subject</code>, <code class="mono text-[12px]">body</code> and the delay — the server fills in the rest.</div>
       </div>
     </div>
   </section>

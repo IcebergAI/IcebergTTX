@@ -134,6 +134,14 @@ async def test_help_page_scenario_example_matches_the_real_schema(
             # The authored delay must survive parsing, not be silently dropped to 0.
             assert parsed.delay_after_release_seconds == authored["delay_after_release_seconds"]
 
+    # Trigger direction changes participant visibility: inbound trigger records have
+    # all-team visibility, while outbound records have neither a participant sender nor
+    # recipient-team scope and are therefore facilitator-visible only.
+    assert "visible to all teams" in r.text
+    assert "facilitator-visible" in r.text
+    assert re.search(r"inbound.*visible to all teams", r.text, re.S | re.I)
+    assert re.search(r"outbound.*facilitator-visible", r.text, re.S | re.I)
+
 
 async def test_help_page_ai_guidance_matches_the_code(
     client: AsyncClient, facilitator_token: str
