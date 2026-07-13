@@ -248,6 +248,11 @@ def validate_config(config: OIDCRuntimeConfig) -> None:
         enabled.append(key)
         if not all(value.strip() for value in requirements[key]):
             raise ValueError(f"{key} is enabled but its non-secret configuration is incomplete")
+        scopes = set(getattr(config, f"oidc_{key}_scopes").split())
+        if "openid" not in scopes:
+            raise ValueError(
+                f"{key} is enabled but its scopes do not include the required openid scope"
+            )
         if not secrets[key]:
             raise ValueError(
                 f"OIDC_{key.upper()}_CLIENT_SECRET is not set in the environment"

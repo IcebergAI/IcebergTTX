@@ -1,5 +1,6 @@
 """Runtime OIDC settings, lockout prevention, and secret boundaries (#191)."""
 
+import pytest
 from httpx import AsyncClient
 
 from app.config import settings
@@ -64,6 +65,32 @@ async def test_oidc_only_lockout_save_is_refused_and_runtime_unchanged(
     assert response.status_code == 422
     assert "OIDC-only mode requires" in response.json()["detail"]
     assert oidc_settings_service.get_config().auth_mode == before.auth_mode
+
+
+@pytest.mark.parametrize("scopes", ["", "profile email"])
+async def test_oidc_only_rejects_provider_without_openid_scope(
+    client: AsyncClient, admin_token: str, monkeypatch, scopes: str
+):
+    monkeypatch.setattr(settings, "oidc_authentik_client_secret", "env-secret")
+    before = oidc_settings_service.get_config()
+    response = await client.put(
+        "/api/oidc/settings",
+        json={
+            "auth_mode": "oidc",
+            "oidc_entra_enabled": False,
+            "oidc_authentik_enabled": True,
+            "oidc_authentik_client_id": "runtime-client",
+            "oidc_authentik_base_url": "https://identity.runtime.test",
+            "oidc_authentik_app_slug": "iceberg",
+            "oidc_authentik_scopes": scopes,
+            "oidc_auth0_enabled": False,
+            "oidc_okta_enabled": False,
+        },
+        headers=_bearer(admin_token),
+    )
+    assert response.status_code == 422
+    assert "required openid scope" in response.json()["detail"]
+    assert oidc_settings_service.get_config() == before
 
 
 async def test_role_map_save_rebuilds_registry_for_next_login(
