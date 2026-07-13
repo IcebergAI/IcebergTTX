@@ -24,10 +24,14 @@ class AuthToken(SQLModel, table=True):
     purpose: AuthTokenPurpose
     email: str = Field(index=True)
     # Set for password reset (the account being reset); NULL for invites (no account yet).
-    user_id: int | None = Field(default=None, foreign_key="user.id", ondelete="CASCADE")
+    user_id: int | None = Field(
+        default=None, foreign_key="user.id", ondelete="CASCADE", index=True
+    )
     # Invite pre-binding (unused by reset).
     team: str | None = Field(default=None)
-    exercise_id: int | None = Field(default=None, foreign_key="exercise.id", ondelete="SET NULL")
+    exercise_id: int | None = Field(
+        default=None, foreign_key="exercise.id", ondelete="SET NULL", index=True
+    )
     expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     used_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     created_at: datetime = Field(

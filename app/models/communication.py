@@ -25,8 +25,13 @@ class Communication(SQLModel, table=True):
             "trigger_key",
             name="uq_communication_exercise_trigger_key",
         ),
+        # The inbox both filters on exercise_id and orders by sent_at, so one index
+        # serves the whole query. Declared ascending: btree scans backwards for DESC.
+        Index("ix_communication_exercise_sent_at", "exercise_id", "sent_at"),
     )
     id: int | None = Field(default=None, primary_key=True)
+    # exercise_id needs no index of its own: it leads both the unique constraint and
+    # the composite above.
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")
     sender_id: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
     sender_team: str | None = None
@@ -34,8 +39,9 @@ class Communication(SQLModel, table=True):
     external_entity: str | None = None      # e.g. "ICO", "NCSC", "CEO"
     subject: str
     body: str
+    # Indexed for the SET NULL fan-out when an inject is deleted, not for a query.
     triggered_by_inject_id: int | None = Field(
-        default=None, foreign_key="inject.id", ondelete="SET NULL"
+        default=None, foreign_key="inject.id", ondelete="SET NULL", index=True
     )
     # Durable idempotency key for node-level scenario-triggered communications (#140).
     trigger_key: str | None = None

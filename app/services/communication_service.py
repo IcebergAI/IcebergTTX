@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -98,6 +99,64 @@ async def communication_read_times(
     return {receipt.communication_id: receipt.read_at for receipt in receipts}
 
 
+async def sender_teams_for_comms(
+    session: AsyncSession, comms: Sequence[Communication]
+) -> dict[int, str | None]:
+    """Batch the inbox's sender-team resolution into two queries instead of two per row.
+
+    Same precedence as sender_team_for_comm(), which this replaces for list-shaped
+    callers: the denormalised column, then the sender's ExerciseMember.group_id, then
+    their global User.team. Note that a sender with neither resolves to None *and stores
+    None*, so the per-row version re-queried those rows on every single load, forever —
+    a backfill of Communication.sender_team would not have fixed that.
+    """
+    resolved: dict[int, str | None] = {}
+    unresolved: list[Communication] = []
+    for c in comms:
+        if c.id is None:
+            continue
+        if c.sender_team:
+            resolved[c.id] = c.sender_team
+        elif c.sender_id is None:
+            resolved[c.id] = None
+        else:
+            unresolved.append(c)
+    if not unresolved:
+        return resolved
+
+    exercise_ids = {c.exercise_id for c in unresolved}
+    sender_ids = {c.sender_id for c in unresolved if c.sender_id is not None}
+    members = (
+        await session.exec(
+            select(ExerciseMember).where(
+                col(ExerciseMember.exercise_id).in_(exercise_ids),
+                col(ExerciseMember.user_id).in_(sender_ids),
+            )
+        )
+    ).all()
+    group_ids = {(m.exercise_id, m.user_id): m.group_id for m in members}
+
+    # Only senders with no exercise-scoped group need their global team looked up.
+    fallback_ids = {
+        c.sender_id
+        for c in unresolved
+        if c.sender_id is not None and not group_ids.get((c.exercise_id, c.sender_id))
+    }
+    user_teams: dict[int, str | None] = {}
+    if fallback_ids:
+        users = (
+            await session.exec(select(User).where(col(User.id).in_(fallback_ids)))
+        ).all()
+        user_teams = {u.id: u.team for u in users if u.id is not None}
+
+    for c in unresolved:
+        assert c.id is not None and c.sender_id is not None
+        resolved[c.id] = group_ids.get((c.exercise_id, c.sender_id)) or user_teams.get(
+            c.sender_id
+        )
+    return resolved
+
+
 async def list_communications(
     session: AsyncSession,
     exercise_id: int,
@@ -117,11 +176,12 @@ async def list_communications(
     if not participant_view and user_team is None:
         return list(comms)
 
+    sender_teams = await sender_teams_for_comms(session, comms)
     visible = []
     for c in comms:
         teams = c.visible_to_teams
         if c.direction == CommDirection.outbound:
-            sender_team = await sender_team_for_comm(session, c)
+            sender_team = sender_teams.get(c.id) if c.id is not None else None
             sent_by_user = c.sender_id == user_id and (
                 sender_team is None or sender_team == user_team
             )
@@ -200,13 +260,26 @@ async def comm_payload(
     session: AsyncSession | None = None,
     *,
     read_at: datetime | None = None,
+    sender_teams: dict[int, str | None] | None = None,
 ) -> dict:
+    """Build one comm's API payload.
+
+    List callers pass a pre-batched ``sender_teams`` map (see sender_teams_for_comms)
+    the same way they pass ``read_at`` from communication_read_times(); single-comm
+    callers omit it and take the per-row lookup. Membership, not truthiness, decides
+    whether the map answers: None is a legitimate resolved team.
+    """
     assert c.id is not None
+    sender_team = (
+        sender_teams[c.id]
+        if sender_teams is not None and c.id in sender_teams
+        else await sender_team_for_comm(session, c)
+    )
     return CommunicationPublic(
         id=c.id,
         exercise_id=c.exercise_id,
         sender_id=c.sender_id,
-        sender_team=await sender_team_for_comm(session, c),
+        sender_team=sender_team,
         direction=c.direction,
         external_entity=c.external_entity,
         subject=c.subject,

@@ -154,6 +154,12 @@ jobs:
       - name: Apply migrations
         run: uv run alembic upgrade head
 
+      # The pytest suite builds its schema with metadata.create_all, not Alembic, so it
+      # stays green even when a model change has no matching migration. This is the only
+      # thing that catches that drift.
+      - name: Check migrations match the models
+        run: uv run alembic check
+
       - name: Run authenticated Playwright suite
         run: |
           uv run uvicorn app.main:app --host 127.0.0.1 --port 8765 > /tmp/iceberg-ui.log 2>&1 &
