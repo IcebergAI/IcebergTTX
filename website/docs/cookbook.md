@@ -152,10 +152,12 @@ Participants only ever see injects assigned to their own team.
     **dangling references** and **cycles**, not unreached nodes.
 
     It is releasable by hand, but **only until the first response lands anywhere in the
-    exercise**. After that, every team has a progression cursor sitting on a real node, and
-    an inject no cursor points at is refused with `409 Inject is not the current branch for
-    its group`. So use an unlinked node as an *opening* inject you release up front, not as
-    something to hold in reserve for later.
+    exercise**. That first response advances *one* cursor — the responding team's — and from
+    then on any inject no cursor points at is refused with `409 Inject is not the current
+    branch for its group`. Note how little it takes: **one** team answering **one** inject
+    shuts the window for **every** team, including teams that have not responded at all. So
+    use an unlinked node as an *opening* inject you release up front, not as something to
+    hold in reserve for later.
 
 ## Recipe: triggered communications (delayed press/regulator comms)
 

@@ -1,8 +1,9 @@
 from httpx import AsyncClient
 from httpx_ws import aconnect_ws
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.exercise import Exercise
+from app.models.exercise import Exercise, ExerciseProgress
 from app.models.user import User
 from app.schemas.scenario_json import InjectNode, InjectOption, ScenarioDefinition
 
@@ -624,11 +625,18 @@ async def test_unlinked_inject_is_releasable_only_before_the_first_response(
     facilitator: User,
     participant: User,
 ):
-    """An orphan node has a release window that closes at the first response.
+    """An orphan node has a release window that closes at the FIRST response anywhere.
 
     release_is_allowed() lets a node nothing links to through while no cursor has
-    advanced, but bails once any cursor holds a current_inject_id. The cookbook's
-    "reachability is not required" recipe depends on this, so pin both ends of it.
+    advanced, but bails once *any* cursor holds a current_inject_id -- and only the
+    responding team's cursor ever advances (resolve_response_progression scopes its
+    UPDATE to that group). So one team answering shuts the window for every team,
+    including teams that have not responded at all.
+
+    Two teams, and only it_ops responds: that is what discriminates the real `any`
+    gate from an `all` one, under which legal's untouched cursor would keep the
+    orphan releasable. The cookbook's "reachability is not required" recipe depends
+    on this, so pin both ends of it.
     """
     from app.models.exercise import ExerciseState
     from app.services.exercise_service import create_exercise, enrol_member, transition_state
@@ -638,7 +646,11 @@ async def test_unlinked_inject_is_releasable_only_before_the_first_response(
         session,
         definition=ScenarioDefinition(
             title="Orphan window",
-            participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+            participant_teams=[
+                {"id": "it_ops", "label": "IT Ops"},
+                # never responds -- its cursor stays un-advanced for the whole test
+                {"id": "legal", "label": "Legal"},
+            ],
             injects=[
                 InjectNode(id="start", title="Start", content="c", target_teams=["it_ops"]),
                 # linked to by nothing — the cookbook's `legal_task` shape
@@ -684,7 +696,18 @@ async def test_unlinked_inject_is_releasable_only_before_the_first_response(
         )
     ).status_code == 201
 
-    # After it, the window is shut: a second orphan is refused like any off-cursor node.
+    # Only it_ops' cursor advanced. legal never responded, so its cursor still holds no
+    # current_inject_id -- an `all` gate would still let the orphan through here.
+    cursors = (
+        await session.exec(
+            select(ExerciseProgress).where(ExerciseProgress.exercise_id == exercise.id)
+        )
+    ).all()
+    advanced = {c.group_id: c.current_inject_id is not None for c in cursors}
+    assert advanced["it_ops"] is True
+    assert advanced["legal"] is False
+
+    # The window is shut regardless: a second orphan is refused like any off-cursor node.
     r = await client.post(
         f"/api/exercises/{exercise.id}/injects/{by_node['spare']['id']}/release",
         headers=headers,
