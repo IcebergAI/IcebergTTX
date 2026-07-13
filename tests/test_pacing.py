@@ -10,7 +10,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.communication import CommDirection, Communication
-from app.models.exercise import Exercise, ExerciseState
+from app.models.exercise import Exercise, ExerciseState, ExerciseStateTransition
 from app.models.inject import Inject, InjectState
 from app.models.user import User
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition, TriggerComm
@@ -227,6 +227,55 @@ async def test_triggered_comms_rehydrate_and_follow_pause_resume(
     await session.refresh(active_exercise)
     await schedule_service.schedule_exercise_injects(session, active_exercise)
     assert active_exercise.id not in schedule_service._scheduled_comms
+
+
+def test_trigger_delay_excludes_multiple_persisted_pause_spans(monkeypatch):
+    now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(schedule_service, "datetime", FrozenDateTime)
+    exercise = Exercise(
+        id=7,
+        scenario_id=3,
+        title="Pause-aware trigger",
+        state=ExerciseState.active,
+        created_by=1,
+    )
+    transitions = [
+        ExerciseStateTransition(
+            exercise_id=7,
+            from_state=ExerciseState.active,
+            to_state=ExerciseState.paused,
+            transitioned_at=now - timedelta(seconds=240),
+        ),
+        ExerciseStateTransition(
+            exercise_id=7,
+            from_state=ExerciseState.paused,
+            to_state=ExerciseState.active,
+            transitioned_at=now - timedelta(seconds=180),
+        ),
+        ExerciseStateTransition(
+            exercise_id=7,
+            from_state=ExerciseState.active,
+            to_state=ExerciseState.paused,
+            transitioned_at=now - timedelta(seconds=120),
+        ),
+        ExerciseStateTransition(
+            exercise_id=7,
+            from_state=ExerciseState.paused,
+            to_state=ExerciseState.active,
+            transitioned_at=now - timedelta(seconds=90),
+        ),
+    ]
+
+    elapsed = schedule_service._active_elapsed_since(
+        exercise, now - timedelta(seconds=300), transitions
+    )
+    assert elapsed == 210
 
 
 async def test_complete_cancels_schedules(
