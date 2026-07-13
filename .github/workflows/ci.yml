@@ -56,10 +56,9 @@ jobs:
       # available on GitHub-hosted runners) and sets DATABASE_URL itself. To run
       # against an external Postgres instead, set DATABASE_URL_OVERRIDE_FOR_TESTS.
       - name: Test
-        run: uv run pytest -vv -s
+        run: uv run pytest
         env:
           SECRET_KEY: test-secret-key-for-ci
-          PYTHONUNBUFFERED: "1"
 
   ui:
     runs-on: ubuntu-latest

@@ -6,6 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.exercise import Exercise, ExerciseMember, ExerciseState
 from app.models.inject import Inject, InjectState
 from app.models.scenario import Scenario
+from app.models.user import UserRole
 from app.services.sample_service import get_sample_definition
 
 
@@ -106,6 +107,7 @@ async def test_create_demo_exercise_enrolls_facilitator_and_releases_start(
         .where(ExerciseMember.user_id == facilitator.id)
     )).first()
     assert member is not None
+    assert member.role_at_enrolment == UserRole.participant
 
     released = (await session.exec(
         select(Inject)

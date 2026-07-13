@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -274,20 +275,21 @@ async def test_ws_facilitator_always_receives_team_targeted(
     create_r = await client.post(
         f"/api/exercises/{active_exercise.id}/injects",
         json={
-            "title": "Legal Only",
-            "content": "For legal only",
-            "target_teams": ["legal"],
+            "title": "IT Ops Only",
+            "content": "For IT Ops only",
+            "target_teams": ["it_ops"],
         },
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     inject_id = create_r.json()["id"]
 
     async with aconnect_ws(_ws_url(active_exercise.id, facilitator_token), client) as ws:
-        await client.post(
+        release = await client.post(
             f"/api/exercises/{active_exercise.id}/injects/{inject_id}/release",
             headers={"Authorization": f"Bearer {facilitator_token}"},
         )
-        msg = await ws.receive_json()
+        assert release.status_code == 200
+        msg = await asyncio.wait_for(ws.receive_json(), timeout=5)
 
     assert msg["type"] == "inject_released"
 
@@ -316,17 +318,22 @@ async def test_ws_observer_receives_group_scoped_inject(
 
     create_r = await client.post(
         f"/api/exercises/{active_exercise.id}/injects",
-        json={"title": "Legal Only", "content": "For legal", "target_teams": ["legal"]},
+        json={
+            "title": "IT Ops Only",
+            "content": "For IT Ops",
+            "target_teams": ["it_ops"],
+        },
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     inject_id = create_r.json()["id"]
 
     async with aconnect_ws(_ws_url(active_exercise.id, token), client) as ws:
-        await client.post(
+        release = await client.post(
             f"/api/exercises/{active_exercise.id}/injects/{inject_id}/release",
             headers={"Authorization": f"Bearer {facilitator_token}"},
         )
-        msg = await ws.receive_json()
+        assert release.status_code == 200
+        msg = await asyncio.wait_for(ws.receive_json(), timeout=5)
 
     assert msg["type"] == "inject_released"
     assert msg["payload"]["id"] == inject_id
@@ -478,4 +485,4 @@ async def test_ws_revoked_token_rejected(
     stale = create_access_token(subject=facilitator.email, role=facilitator.role.value)
     with pytest.raises(WebSocketDisconnect):
         async with aconnect_ws(_ws_url(active_exercise.id, stale), client) as ws:
-            await ws.receive_json()
+            await asyncio.wait_for(ws.receive_json(), timeout=5)
