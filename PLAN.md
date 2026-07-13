@@ -228,6 +228,8 @@ class Communication(SQLModel, table=True):
 ### Communications `/exercises/{id}/communications`
 - `GET` (filtered by team visibility), `POST` (send outbound), `GET /{comm_id}` (marks read)
 - `POST /inject` — facilitator injects a simulated inbound comm
+- At `<=760px`, the inbox becomes a list/reader drill-in. Selecting a message opens the
+  reader; Back returns to the list and restores keyboard focus to the selected row.
 
 ### LLM (stubs return 501 until Phase 8)
 - `POST /exercises/{id}/responses/{response_id}/assess`

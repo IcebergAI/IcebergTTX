@@ -29,11 +29,13 @@
   <!-- Two-pane layout. Fills the leftover viewport via .workspace--fill rather
        than the old `height: calc(100vh - 180px)`, which guessed at the chrome
        above it and broke whenever that chrome changed. -->
-  <div class="grid surface overflow-hidden flex-1 min-h-0"
-       style="grid-template-columns: 352px 1fr;">
+  <div class="comm-layout surface overflow-hidden flex-1 min-h-0"
+       data-testid="communications-layout">
 
     <!-- Message list -->
-    <div class="border-r rule flex flex-col min-h-0">
+    <div class="comm-pane comm-pane-list border-r rule flex flex-col min-h-0"
+         :class="mobilePane === 'list' && 'is-mobile-active'"
+         data-testid="communications-list-pane">
       <div class="px-4 pt-3 pb-2 flex items-center gap-2 border-b rule shrink-0">
         <input x-model="commSearch"
                class="comm-filter-control flex-1 min-w-0"
@@ -65,7 +67,8 @@
       <!-- Colours come from classes, not inline `style`: the selected-row rules
            have to be able to override them, and inline styles would win. -->
       <template x-for="c in filteredComms" :key="c.id">
-        <div @click="open(c)"
+        <div @click="open(c)" @keydown.enter.prevent="open(c)" @keydown.space.prevent="open(c)"
+             role="button" tabindex="0" :data-comm-id="c.id"
              class="comm-list-row px-4 py-3 border-b rule cursor-pointer"
              :class="selected && selected.id === c.id ? 'comm-list-row-selected' : ''">
           <div class="flex items-center gap-2 mb-1">
@@ -90,7 +93,13 @@
     </div>
 
     <!-- Reader pane -->
-    <div class="overflow-y-auto p-8">
+    <div class="comm-pane comm-pane-reader overflow-y-auto p-8"
+         :class="mobilePane === 'reader' && 'is-mobile-active'"
+         data-testid="communications-reader-pane">
+      <button type="button" class="comm-mobile-back btn btn-ghost mb-4"
+              @click="showList()" aria-label="Back to messages">
+        <span aria-hidden="true">←</span> Back to messages
+      </button>
       <template x-if="!selected">
         <div class="flex items-center justify-center h-full">
           <p class="smallcaps text-faint">Select a message to read.</p>
