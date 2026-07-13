@@ -542,13 +542,7 @@ async def get_debrief(exercise_id: int, current_user: FacilitatorDep, session: S
 
 
 def _summary_public(s: ExecutiveSummary) -> ExecutiveSummaryPublic:
-    return ExecutiveSummaryPublic(
-        exercise_id=s.exercise_id,
-        summary_text=s.summary_text,
-        llm_model=s.llm_model,
-        edited=s.edited,
-        generated_at=s.generated_at.isoformat(),
-    )
+    return ExecutiveSummaryPublic.from_model(s)
 
 
 async def _get_summary_row(session: AsyncSession, exercise_id: int) -> ExecutiveSummary | None:

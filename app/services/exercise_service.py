@@ -19,6 +19,8 @@ from app.models.user import User
 from app.services.inject_service import seed_injects_from_scenario
 from app.services.progression_service import seed_progression
 from app.services.scenario_service import export_definition
+from app.services.team_service import scenario_team_ids as definition_team_ids
+from app.services.team_service import validate_team_ids as validate_definition_team_ids
 
 
 @dataclass(frozen=True)
@@ -195,7 +197,7 @@ async def scenario_group_ids(session: AsyncSession, exercise: Exercise) -> set[s
     if not scenario:
         return set()
     definition = export_definition(scenario)
-    return {team.id for team in definition.participant_teams}
+    return definition_team_ids(definition)
 
 
 async def validate_group_id(
@@ -220,19 +222,15 @@ async def validate_team_ids(
     """Normalize and validate a non-empty, duplicate-free scenario team audience."""
     if team_ids is None:
         return None
-    normalized = [team_id.strip() for team_id in team_ids]
-    if any(not team_id for team_id in normalized):
-        raise HTTPException(status_code=422, detail=f"{field} must not contain blank team ids")
-    if len(normalized) != len(set(normalized)):
-        raise HTTPException(status_code=422, detail=f"{field} must not contain duplicate team ids")
-    allowed = await scenario_group_ids(session, exercise)
-    unknown = sorted(set(normalized) - allowed)
-    if unknown:
-        raise HTTPException(
-            status_code=422,
-            detail=f"{field} contains team ids not defined in this scenario: {', '.join(unknown)}",
+    scenario = await session.get(Scenario, exercise.scenario_id)
+    if not scenario:
+        raise HTTPException(status_code=422, detail="exercise scenario was not found")
+    try:
+        return validate_definition_team_ids(
+            team_ids, export_definition(scenario), field=field
         )
-    return normalized or None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 async def default_group_for_user(

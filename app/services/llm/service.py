@@ -10,7 +10,7 @@ lazy registration).
 
 from __future__ import annotations
 
-from app.config import settings
+from app.services import llm_settings_service
 from app.services.llm import anthropic_provider as _anthropic  # noqa: F401 - registers adapter
 from app.services.llm import openai_provider as _openai  # noqa: F401 - registers adapter
 from app.services.llm.base import LLMProvider, build_provider
@@ -22,7 +22,7 @@ _provider_built = False
 def build_active_provider() -> LLMProvider | None:
     """Build the active provider from config, or None when the LLM is disabled or
     the selected family has no adapter."""
-    cfg = settings.active_llm_provider()
+    cfg = llm_settings_service.get_config().active_provider()
     if cfg is None:
         return None
     return build_provider(cfg)
