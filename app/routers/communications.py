@@ -25,6 +25,7 @@ from app.services.communication_service import (
     list_communications,
     mark_read,
     sender_team_for_comm,
+    sender_teams_for_comms,
     unread_count,
 )
 from app.services.exercise_service import validate_team_ids
@@ -102,6 +103,7 @@ async def list_comms(exercise_id: int, current_user: CurrentUserDep, session: Se
     )
     comm_ids = [c.id for c in comms if c.id is not None]
     read_times = await communication_read_times(session, comm_ids, current_user.id)
+    sender_teams = await sender_teams_for_comms(session, comms)
     payloads = []
     for communication in comms:
         assert communication.id is not None
@@ -110,6 +112,7 @@ async def list_comms(exercise_id: int, current_user: CurrentUserDep, session: Se
                 communication,
                 session,
                 read_at=read_times.get(communication.id),
+                sender_teams=sender_teams,
             )
         )
     return payloads

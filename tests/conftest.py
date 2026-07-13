@@ -32,11 +32,14 @@ else:
     os.environ["DATABASE_URL"] = _database_override
 
 import asyncio  # noqa: E402
+from collections.abc import Iterator  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
 
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from httpx import AsyncClient  # noqa: E402
 from httpx_ws.transport import ASGIWebSocketTransport  # noqa: E402
+from sqlalchemy import event  # noqa: E402
 from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 from sqlmodel.ext.asyncio.session import AsyncSession  # noqa: E402
@@ -154,6 +157,30 @@ async def session_fixture():
         finally:
             await async_session.close()
             await trans.rollback()
+
+
+@pytest.fixture(name="count_statements")
+def count_statements_fixture():
+    """Record every SQL statement issued inside the context, for N+1 regression tests.
+
+    Yields the list of statements, so a test can assert the count stays flat as the
+    number of rows grows rather than pinning a brittle absolute number.
+    """
+
+    @contextmanager
+    def _counter() -> Iterator[list[str]]:
+        statements: list[str] = []
+
+        def _record(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
+            statements.append(statement)
+
+        event.listen(engine.sync_engine, "before_cursor_execute", _record)
+        try:
+            yield statements
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", _record)
+
+    return _counter
 
 
 @pytest_asyncio.fixture(name="client", scope="session")
