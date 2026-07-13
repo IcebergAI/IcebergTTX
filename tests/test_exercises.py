@@ -758,29 +758,46 @@ async def test_release_serializes_against_concurrent_roster_change(monkeypatch):
             AsyncSession(engine, expire_on_commit=False) as release_session,
             AsyncSession(engine, expire_on_commit=False) as roster_session,
         ):
-            release_view = await release_session.get(Inject, inject_id)
-            roster_view = await roster_session.get(Exercise, exercise_id)
-            assert release_view is not None and roster_view is not None
-            release_task = asyncio.create_task(
-                release_inject(release_session, release_view, released_by=owner_id)
-            )
-            await asyncio.wait_for(snapshot_started.wait(), timeout=5)
-            roster_task = asyncio.create_task(
-                enrol_member(
-                    roster_session,
-                    exercise=roster_view,
-                    user_id=late_id,
-                    group_id="legal",
+            try:
+                release_view = await release_session.get(Inject, inject_id)
+                roster_view = await roster_session.get(Exercise, exercise_id)
+                assert release_view is not None and roster_view is not None
+                release_task = asyncio.create_task(
+                    release_inject(release_session, release_view, released_by=owner_id)
                 )
-            )
-            await asyncio.sleep(0.05)
-            assert not roster_task.done()
-            allow_snapshot.set()
-            released = await asyncio.wait_for(release_task, timeout=5)
-            assert released.state.value == "released"
-            with pytest.raises(HTTPException) as exc_info:
-                await asyncio.wait_for(roster_task, timeout=5)
-            assert exc_info.value.status_code == 409
+                await asyncio.wait_for(snapshot_started.wait(), timeout=5)
+                roster_task = asyncio.create_task(
+                    enrol_member(
+                        roster_session,
+                        exercise=roster_view,
+                        user_id=late_id,
+                        group_id="legal",
+                    )
+                )
+                await asyncio.sleep(0.05)
+                assert not roster_task.done()
+                allow_snapshot.set()
+                released = await asyncio.wait_for(release_task, timeout=5)
+                assert released.state.value == "released"
+                with pytest.raises(HTTPException) as exc_info:
+                    await asyncio.wait_for(roster_task, timeout=5)
+                assert exc_info.value.status_code == 409
+            finally:
+                # Never leave the release coroutine paused while the session context
+                # is closing: an assertion failure before the normal event signal
+                # would otherwise retain its row lock and deadlock test cleanup.
+                allow_snapshot.set()
+                pending = [
+                    task
+                    for task in (release_task, roster_task)
+                    if task is not None and not task.done()
+                ]
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                await release_session.rollback()
+                await roster_session.rollback()
 
         async with AsyncSession(engine, expire_on_commit=False) as verify:
             members = (
