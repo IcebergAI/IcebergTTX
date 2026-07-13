@@ -14,7 +14,11 @@ from app.models.scenario import Scenario
 from app.models.user import User, UserRole
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.auth_service import create_access_token, hash_password
-from app.services.communication_service import mark_read
+from app.services.communication_service import (
+    mark_read,
+    sender_team_for_comm,
+    sender_teams_for_comms,
+)
 from app.services.exercise_service import enrol_member
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -819,3 +823,183 @@ async def test_unread_count_drops_once_a_comm_is_read(
         f"/api/exercises/{active_exercise.id}/communications/unread-count", headers=headers
     )
     assert r.json() == {"unread": 0}
+
+
+# ── Batched sender-team resolution (#210) ─────────────────────────────────────
+
+async def _seed_unresolved_comms(
+    session: AsyncSession, exercise_id: int, sender_id: int, count: int, prefix: str
+) -> None:
+    """Add outbound comms with no denormalised sender_team — the N+1's trigger.
+
+    Comms sent through the API carry sender_team already, so they short-circuit the
+    lookup. Only rows without it (legacy, or a sender with neither group nor team)
+    ever reached the per-row ExerciseMember query.
+    """
+    for i in range(count):
+        session.add(
+            Communication(
+                exercise_id=exercise_id,
+                sender_id=sender_id,
+                sender_team=None,
+                direction=CommDirection.outbound,
+                subject=f"{prefix} {i}",
+                body="Body",
+            )
+        )
+    await session.commit()
+
+
+async def test_listing_comms_does_not_scale_queries_with_inbox_size(
+    client: AsyncClient,
+    session: AsyncSession,
+    participant: User,
+    facilitator_token: str,
+    active_exercise: Exercise,
+    count_statements,
+):
+    """The inbox must cost a constant number of queries, not two per message (#210)."""
+    assert participant.id is not None
+    headers = {"Authorization": f"Bearer {facilitator_token}"}
+    url = f"/api/exercises/{active_exercise.id}/communications"
+
+    await _seed_unresolved_comms(session, active_exercise.id, participant.id, 3, "small")
+    with count_statements() as small:
+        r = await client.get(url, headers=headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 3
+
+    await _seed_unresolved_comms(session, active_exercise.id, participant.id, 15, "large")
+    with count_statements() as large:
+        r = await client.get(url, headers=headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 18
+
+    # A fixed threshold would rot as the endpoint grows; the invariant is that the
+    # count does not move when the inbox six-times in size.
+    assert len(large) == len(small)
+
+
+async def test_unread_count_does_not_scale_queries_with_inbox_size(
+    client: AsyncClient,
+    session: AsyncSession,
+    participant: User,
+    participant_token: str,
+    active_exercise: Exercise,
+    count_statements,
+):
+    """#210 called /unread-count "not implicated"; it was, via list_communications."""
+    assert participant.id is not None
+    headers = {"Authorization": f"Bearer {participant_token}"}
+    url = f"/api/exercises/{active_exercise.id}/communications/unread-count"
+
+    await _seed_unresolved_comms(session, active_exercise.id, participant.id, 3, "small")
+    with count_statements() as small:
+        r = await client.get(url, headers=headers)
+    assert r.status_code == 200
+
+    await _seed_unresolved_comms(session, active_exercise.id, participant.id, 15, "large")
+    with count_statements() as large:
+        r = await client.get(url, headers=headers)
+    assert r.status_code == 200
+
+    assert len(large) == len(small)
+
+
+async def test_sender_teams_for_comms_matches_per_row_resolution(
+    session: AsyncSession,
+    participant: User,
+    active_exercise: Exercise,
+):
+    """The batch resolver must agree with sender_team_for_comm at every precedence level."""
+    # A sender enrolled with an exercise group that differs from their global team,
+    # to prove group_id wins over User.team rather than coinciding with it.
+    grouped = User(
+        email="grouped@example.com",
+        display_name="Grouped",
+        hashed_password=hash_password("password1234"),
+        role=UserRole.participant,
+        team="it_ops",
+    )
+    # A sender with neither an exercise group nor a global team: resolves to None, and
+    # stores None, so the per-row version re-queried this row on every single load.
+    teamless = User(
+        email="teamless@example.com",
+        display_name="Teamless",
+        hashed_password=hash_password("password1234"),
+        role=UserRole.participant,
+        team=None,
+    )
+    session.add(grouped)
+    session.add(teamless)
+    await session.commit()
+    await session.refresh(grouped)
+    await session.refresh(teamless)
+    await enrol_member(session, exercise=active_exercise, user_id=grouped.id, group_id="legal")
+    await enrol_member(session, exercise=active_exercise, user_id=teamless.id, group_id=None)
+
+    comms = [
+        # denormalised column wins outright
+        Communication(
+            exercise_id=active_exercise.id,
+            sender_id=participant.id,
+            sender_team="exec",
+            direction=CommDirection.outbound,
+            subject="denormalised",
+            body="b",
+        ),
+        # ExerciseMember.group_id beats the sender's global User.team
+        Communication(
+            exercise_id=active_exercise.id,
+            sender_id=grouped.id,
+            direction=CommDirection.outbound,
+            subject="group",
+            body="b",
+        ),
+        # no group → fall back to User.team
+        Communication(
+            exercise_id=active_exercise.id,
+            sender_id=participant.id,
+            direction=CommDirection.outbound,
+            subject="user team",
+            body="b",
+        ),
+        # neither group nor team
+        Communication(
+            exercise_id=active_exercise.id,
+            sender_id=teamless.id,
+            direction=CommDirection.outbound,
+            subject="teamless",
+            body="b",
+        ),
+        # no sender at all (a facilitator-injected inbound)
+        Communication(
+            exercise_id=active_exercise.id,
+            sender_id=None,
+            direction=CommDirection.inbound,
+            external_entity="ICO",
+            subject="inbound",
+            body="b",
+        ),
+    ]
+    for c in comms:
+        session.add(c)
+    await session.commit()
+    for c in comms:
+        await session.refresh(c)
+
+    batched = await sender_teams_for_comms(session, comms)
+
+    by_subject = {c.subject: batched[c.id] for c in comms}
+    assert by_subject == {
+        "denormalised": "exec",
+        "group": "legal",
+        "user team": "it_ops",
+        "teamless": None,
+        "inbound": None,
+    }
+
+    # And it agrees with the per-row helper it replaces, which still serves single-comm
+    # callers (_comm_visible_to_user, send_comm, get_comm).
+    for c in comms:
+        assert batched[c.id] == await sender_team_for_comm(session, c)
