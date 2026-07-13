@@ -183,8 +183,8 @@ async def lifespan(app: FastAPI):
     from app.services.oidc import service as oidc_service
 
     oidc_service.register_providers()
-    # Re-arm scheduled inject releases for any exercise that was active before a restart
-    # (#116). In-memory timers don't survive a process restart; single-process only.
+    # Re-arm persisted inject and communication schedules for exercises that were active
+    # before a restart (#116, #194). Timers remain single-process only.
     from app.services.schedule_service import rehydrate_schedules
 
     await rehydrate_schedules()

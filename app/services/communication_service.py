@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -14,7 +13,6 @@ from app.models.exercise import ExerciseMember
 from app.models.inject import Inject
 from app.models.user import User
 from app.schemas.api import CommunicationPublic
-from app.services.background import spawn
 from app.services.scenario_service import definition_for_exercise
 
 logger = logging.getLogger(__name__)
@@ -322,22 +320,23 @@ def schedule_triggered_comms(
 ) -> None:
     """Schedule node-level all-team communications once, across group-specific injects."""
     assert inject.id is not None
+    from app.services.schedule_service import arm_triggered_communication
+
     for index, tc in enumerate(trigger_comms):
-        spawn(
-            _delayed_comm(
-                exercise_id=inject.exercise_id,
-                inject_id=inject.id,
-                direction=tc.direction,
-                external_entity=tc.external_entity,
-                subject=tc.subject,
-                body=tc.body,
-                delay=tc.delay_after_release_seconds,
-                trigger_key=f"{logical_node_id}:{index}",
-            )
+        arm_triggered_communication(
+            exercise_id=inject.exercise_id,
+            inject_id=inject.id,
+            direction=tc.direction,
+            external_entity=tc.external_entity,
+            subject=tc.subject,
+            body=tc.body,
+            delay=tc.delay_after_release_seconds,
+            trigger_key=f"{logical_node_id}:{index}",
         )
 
 
-async def _delayed_comm(
+async def deliver_triggered_communication(
+    session: AsyncSession,
     *,
     exercise_id: int,
     inject_id: int,
@@ -345,36 +344,30 @@ async def _delayed_comm(
     external_entity: str,
     subject: str,
     body: str,
-    delay: int,
     trigger_key: str,
-) -> None:
-    try:
-        if delay > 0:
-            await asyncio.sleep(delay)
-
-        from app.database import engine
-
-        async with AsyncSession(engine, expire_on_commit=False) as session:
-            statement = (
-                pg_insert(Communication)
-                .values(
-                    exercise_id=exercise_id,
-                    direction=CommDirection(direction),
-                    subject=subject,
-                    body=body,
-                    external_entity=external_entity,
-                    triggered_by_inject_id=inject_id,
-                    trigger_key=trigger_key,
-                    sent_at=datetime.now(UTC),
-                )
-                .on_conflict_do_nothing(constraint="uq_communication_exercise_trigger_key")
-                .returning(col(Communication.id))
-            )
-            comm_id = (await session.exec(statement)).scalar_one_or_none()
-            await session.commit()
-            if comm_id is not None:
-                comm = await session.get(Communication, comm_id)
-                assert comm is not None
-                await broadcast_communication(comm)
-    except Exception:
-        logger.exception("Delayed comm failed for inject %d", inject_id)
+) -> Communication | None:
+    """Persist and broadcast one logical trigger exactly once."""
+    statement = (
+        pg_insert(Communication)
+        .values(
+            exercise_id=exercise_id,
+            direction=CommDirection(direction),
+            subject=subject,
+            body=body,
+            external_entity=external_entity,
+            triggered_by_inject_id=inject_id,
+            trigger_key=trigger_key,
+            sent_at=datetime.now(UTC),
+        )
+        .on_conflict_do_nothing(constraint="uq_communication_exercise_trigger_key")
+        .returning(col(Communication.id))
+    )
+    comm_id = (await session.exec(statement)).scalar_one_or_none()
+    await session.commit()
+    if comm_id is None:
+        return None
+    comm = await session.get(Communication, comm_id)
+    if comm is None:
+        raise RuntimeError("Triggered communication was not persisted")
+    await broadcast_communication(comm)
+    return comm

@@ -127,27 +127,22 @@ async def test_node_triggered_comm_is_idempotent_across_group_injects(monkeypatc
             first_inject_id, second_inject_id = injects[0].id, injects[1].id
             assert first_inject_id is not None and second_inject_id is not None
 
+        async def deliver(inject_id: int):
+            async with AsyncSession(engine, expire_on_commit=False) as delivery:
+                return await communication_service.deliver_triggered_communication(
+                    delivery,
+                    exercise_id=exercise_id,
+                    inject_id=inject_id,
+                    direction="inbound",
+                    external_entity="NCSC",
+                    subject="One logical trigger",
+                    body="Body",
+                    trigger_key="node:0",
+                )
+
         await asyncio.gather(
-            communication_service._delayed_comm(
-                exercise_id=exercise_id,
-                inject_id=first_inject_id,
-                direction="inbound",
-                external_entity="NCSC",
-                subject="One logical trigger",
-                body="Body",
-                delay=0,
-                trigger_key="node:0",
-            ),
-            communication_service._delayed_comm(
-                exercise_id=exercise_id,
-                inject_id=second_inject_id,
-                direction="inbound",
-                external_entity="NCSC",
-                subject="One logical trigger",
-                body="Body",
-                delay=0,
-                trigger_key="node:0",
-            ),
+            deliver(first_inject_id),
+            deliver(second_inject_id),
         )
         async with AsyncSession(engine, expire_on_commit=False) as verify:
             comms = (
