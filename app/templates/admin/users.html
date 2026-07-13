@@ -12,9 +12,20 @@
       </p>
     </div>
     {% if smtp_enabled %}
-    <button @click="openInvite()" class="btn btn-primary h-9 px-4 text-[13px] shrink-0">
+    <button @click="openInvite()" class="btn btn-primary h-10 px-4 text-[13px] shrink-0">
       Invite participant
     </button>
+    {% else %}
+    <div class="shrink-0 text-right max-w-[260px]">
+      <button type="button" disabled aria-describedby="invite-disabled-reason"
+              class="btn btn-primary h-10 px-4 text-[13px] opacity-45 cursor-not-allowed">
+        Invite participant
+      </button>
+      <p id="invite-disabled-reason" class="text-[11.5px] text-muted mt-1.5 leading-snug">
+        Email is not configured —
+        <a href="/admin/email" class="text-ink-soft font-medium underline hover:text-ink">set it up in Admin → Email</a>.
+      </p>
+    </div>
     {% endif %}
   </div>
 

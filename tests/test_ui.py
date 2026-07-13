@@ -827,6 +827,22 @@ def test_reset_password_dialog_traps_and_restores_focus(page: Page):
     expect(trigger).to_be_focused()
 
 
+def test_admin_sees_disabled_invite_with_email_setup_route(page: Page):
+    login_facilitator(page)
+    page.goto(f"{BASE}/admin/users")
+
+    invite = page.get_by_role("button", name="Invite participant")
+    expect(invite).to_be_visible()
+    expect(invite).to_be_disabled()
+    expect(page.locator("#invite-disabled-reason")).to_contain_text(
+        "Email is not configured"
+    )
+    setup = page.get_by_role("link", name="set it up in Admin → Email")
+    expect(setup).to_have_attribute("href", "/admin/email")
+    setup.click()
+    expect(page).to_have_url(f"{BASE}/admin/email")
+
+
 def test_communication_dialog_traps_and_restores_focus(page: Page):
     login_facilitator(page)
     scenario_id = _make_scenario(page)
