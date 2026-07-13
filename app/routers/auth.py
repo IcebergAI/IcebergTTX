@@ -351,7 +351,10 @@ async def invite_accept(
     """
     _require_smtp()
     token = await token_service.consume(
-        session, raw=body.token, purpose=AuthTokenPurpose.invite
+        session,
+        raw=body.token,
+        purpose=AuthTokenPurpose.invite,
+        commit=False,
     )
     if token is None:
         audit_service.emit(
@@ -364,6 +367,7 @@ async def invite_accept(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired invite link."
         )
     if (await session.exec(select(User).where(User.email == token.email))).first():
+        await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="This email already has an account."
         )
@@ -377,14 +381,26 @@ async def invite_accept(
         team=token.team,
     )
     session.add(user)
-    await session.commit()
-    await session.refresh(user)
+    await session.flush()
     assert user.id is not None  # nosec B101 - narrow the PK for enrol_member
     # Auto-enrol in the invite's exercise (group defaults from the user's team).
     if token.exercise_id is not None:
         exercise = await session.get(Exercise, token.exercise_id)
         if exercise is not None:
-            await enrol_member(session, exercise=exercise, user_id=user.id)
+            try:
+                await enrol_member(
+                    session,
+                    exercise=exercise,
+                    user_id=user.id,
+                    commit=False,
+                )
+            except HTTPException:
+                # Roll back both the token burn and account creation when release
+                # won the shared roster lock before this acceptance.
+                await session.rollback()
+                raise
+    await session.commit()
+    await session.refresh(user)
 
     new_token = create_access_token(
         subject=user.email, role=user.role.value, is_admin=user.is_admin

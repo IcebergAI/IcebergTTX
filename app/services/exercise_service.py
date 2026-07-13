@@ -247,6 +247,7 @@ async def enrol_member(
     exercise: Exercise,
     user_id: int,
     group_id: str | None = None,
+    commit: bool = True,
 ) -> ExerciseMember:
     assert exercise.id is not None
     from app.services.progression_service import roster_changes_allowed
@@ -283,8 +284,11 @@ async def enrol_member(
         role_at_enrolment=user.role,
     )
     session.add(member)
-    await session.commit()
-    await session.refresh(member)
+    if commit:
+        await session.commit()
+        await session.refresh(member)
+    else:
+        await session.flush()
     return member
 
 
