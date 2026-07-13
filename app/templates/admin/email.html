@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Email settings — IcebergTTX{% endblock %}
+
+{% block content %}
+<div x-data="adminEmail()" class="workspace max-w-[1040px]">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Email settings</h1>
+      <p class="text-[13.5px] text-muted mt-1">
+        Configure participant invitations and self-service password recovery without restarting the app.
+      </p>
+    </div>
+  </div>
+
+  <div class="space-y-5">
+    <section class="surface p-5">
+      <div class="section-title mb-4">
+        <h2 class="smallcaps text-muted">SMTP delivery</h2>
+      </div>
+
+      <label class="flex items-center gap-3 mb-5">
+        <input type="checkbox" x-model="cfg.enabled" />
+        <span>
+          <span class="block text-[13.5px] font-medium">Enable email features</span>
+          <span class="block text-[11.5px] text-faint">Host and From address must also be set.</span>
+        </span>
+      </label>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="smtp-host">SMTP host</label>
+          <input id="smtp-host" type="text" x-model="cfg.smtp_host" autocomplete="off"
+                 placeholder="smtp.example.com"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="smtp-port">Port</label>
+          <input id="smtp-port" type="number" min="1" max="65535" x-model.number="cfg.smtp_port"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="smtp-from">From address</label>
+          <input id="smtp-from" type="text" x-model="cfg.smtp_from"
+                 placeholder="IcebergTTX &lt;noreply@example.com&gt;"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface" />
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="smtp-username">Username</label>
+          <input id="smtp-username" type="text" x-model="cfg.smtp_username" autocomplete="off"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+          <p class="text-[11.5px] text-faint mt-1">
+            <span class="mono">SMTP_PASSWORD</span> is set out-of-band — never entered or shown here.
+          </p>
+        </div>
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="public-base-url">Public base URL</label>
+          <input id="public-base-url" type="url" x-model="cfg.public_base_url"
+                 placeholder="https://ttx.example.com"
+                 class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+          <p class="text-[11.5px] text-faint mt-1">Used for links in invitation and reset emails.</p>
+        </div>
+        <fieldset>
+          <legend class="block smallcaps text-muted mb-2">Transport security</legend>
+          <label class="flex items-center gap-2 mb-2">
+            <input type="checkbox" x-model="cfg.smtp_starttls" @change="chooseStarttls()" />
+            <span class="text-[13px]">STARTTLS</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <input type="checkbox" x-model="cfg.smtp_tls" @change="chooseTls()" />
+            <span class="text-[13px]">Implicit TLS</span>
+          </label>
+        </fieldset>
+      </div>
+
+      <div class="flex items-center gap-2 mt-5">
+        <button type="button" @click="save()" :disabled="saving"
+                class="btn btn-primary h-10 px-4 text-[13px] justify-center disabled:opacity-50">
+          <span x-text="saving ? 'Saving…' : 'Save email settings'"></span>
+        </button>
+        <p class="text-[12.5px] text-muted" role="status" x-text="message"></p>
+      </div>
+    </section>
+
+    <section class="surface p-5">
+      <div class="section-title mb-3"><h2 class="smallcaps text-muted">Test delivery</h2></div>
+      <p class="text-[12.5px] text-muted mb-3">
+        Sends one message to your signed-in administrator address. Save the settings first.
+      </p>
+      <button type="button" @click="runTest()" :disabled="testing"
+              class="btn btn-ghost h-10 px-4 text-[13px] justify-center disabled:opacity-50">
+        <span x-text="testing ? 'Sending…' : 'Send test email'"></span>
+      </button>
+      <p class="text-[12.5px] mt-3 mono" role="status"
+         :class="testFailed ? 'text-red-600' : 'text-muted'" x-text="testResult"></p>
+    </section>
+  </div>
+</div>
+{% endblock %}

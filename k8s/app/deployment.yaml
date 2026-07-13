@@ -159,6 +159,47 @@ spec:
                 configMapKeyRef:
                   name: iceberg-ttx-config
                   key: ACCESS_TOKEN_EXPIRE_MINUTES
+            # Email (#186) — non-secret fields seed /admin/email; password stays Secret-only.
+            - name: SMTP_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SMTP_HOST
+            - name: SMTP_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SMTP_PORT
+            - name: SMTP_FROM
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SMTP_FROM
+            - name: SMTP_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SMTP_USERNAME
+            - name: SMTP_STARTTLS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SMTP_STARTTLS
+            - name: SMTP_TLS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: SMTP_TLS
+            - name: PUBLIC_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: PUBLIC_BASE_URL
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: iceberg-ttx-secrets
+                  key: SMTP_PASSWORD
             - name: FORWARDED_ALLOW_IPS
               valueFrom:
                 configMapKeyRef:

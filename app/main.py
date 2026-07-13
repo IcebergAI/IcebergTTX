@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -21,6 +22,7 @@ from app.models import (  # noqa: F401
     audit_settings,
     auth_token,
     communication,
+    email_settings,
     exercise,
     inject,
     inject_comment,
@@ -31,7 +33,9 @@ from app.models import (  # noqa: F401
     suggested_inject,
     user,
 )
-from app.routers import audit as audit_router
+from app.routers import (
+    audit as audit_router,
+)
 from app.routers import (
     auth,
     communications,
@@ -47,8 +51,15 @@ from app.routers import (
     users,
     ws,
 )
-from app.routers import proxy as proxy_router
-from app.routers import settings as settings_router
+from app.routers import (
+    email as email_router,
+)
+from app.routers import (
+    proxy as proxy_router,
+)
+from app.routers import (
+    settings as settings_router,
+)
 from app.routers.ui import UIRedirect
 from app.services import audit_service
 from app.services.ws_manager import heartbeat_task
@@ -93,6 +104,20 @@ async def _load_proxy_config() -> None:
         logger.exception("failed to load outbound proxy config; using httpx defaults")
 
 
+async def _load_email_config() -> None:
+    """Load runtime email settings; env fallback remains active if loading fails."""
+    try:
+        from sqlmodel.ext.asyncio.session import AsyncSession
+
+        from app.database import engine
+        from app.services import email_settings_service
+
+        async with AsyncSession(engine) as session:
+            await email_settings_service.refresh_cache(session)
+    except Exception:
+        logger.exception("failed to load email config; using environment defaults")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
@@ -103,6 +128,7 @@ async def lifespan(app: FastAPI):
     # this below register_providers() and OIDC silently loses proxying.
     await _load_proxy_config()
     await _load_siem_config()
+    await _load_email_config()
     # Register enabled OIDC providers with Authlib (#25). Idempotent; the routes
     # also register lazily so this is a no-op fast path under the test transport.
     from app.services.oidc import service as oidc_service
@@ -147,6 +173,23 @@ async def ui_redirect_handler(request: Request, exc: UIRedirect) -> RedirectResp
     return RedirectResponse(exc.url)
 
 
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Return useful validation locations without reflecting attacker-controlled values.
+
+    FastAPI includes each rejected ``input`` in its default 422 response. That can
+    reflect passwords, tokens, or other secrets supplied to forbidden fields, so
+    retain the structured error while removing raw inputs from every entry.
+    """
+    errors = [
+        {key: value for key, value in error.items() if key not in {"input", "ctx"}}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
@@ -171,6 +214,7 @@ app.include_router(ui.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(oidc.router, prefix="/api")
 app.include_router(audit_router.router, prefix="/api")
+app.include_router(email_router.router, prefix="/api")
 app.include_router(proxy_router.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(scenarios.router, prefix="/api")

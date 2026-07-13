@@ -126,6 +126,16 @@ def _reset_llm_provider_cache():
     reset_provider_cache()
 
 
+@pytest.fixture(autouse=True)
+def _reset_mail_config_cache():
+    """Keep the process-global runtime email snapshot isolated between tests."""
+    from app.services import mail_service
+
+    mail_service.set_config(None)
+    yield
+    mail_service.set_config(None)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _create_schema():
     # The test suite builds a throwaway schema directly from the models rather
