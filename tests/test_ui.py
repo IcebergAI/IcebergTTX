@@ -425,6 +425,59 @@ def test_mobile_shell_opens_navigation_and_reaches_settings(page: Page):
     expect(page.locator("h1")).to_contain_text("Settings")
 
 
+def test_communications_mobile_list_reader_navigation(page: Page):
+    """Phone users get one usable comms pane at a time and can return with focus (#202)."""
+    page.set_viewport_size({"width": 390, "height": 844})
+    login_facilitator(page)
+    scenario_id = _make_scenario(page)
+    exercise_id = _make_exercise(page, scenario_id, title="Mobile communications")
+    api_post(page, f"/exercises/{exercise_id}/start")
+    created = api_post(
+        page,
+        f"/exercises/{exercise_id}/communications/inject",
+        {
+            "external_entity": "Press office",
+            "subject": "Mobile reader proof",
+            "body": "This message must remain readable at phone widths.",
+            "visible_to_teams": ["it_ops"],
+        },
+    )
+    assert created.status == 201, created.text()
+
+    page.goto(f"{BASE}/exercises/{exercise_id}/communications")
+    layout = page.get_by_test_id("communications-layout")
+    list_pane = page.get_by_test_id("communications-list-pane")
+    reader_pane = page.get_by_test_id("communications-reader-pane")
+    expect(list_pane).to_be_visible()
+    expect(reader_pane).to_be_hidden()
+
+    row = list_pane.locator('[data-comm-id]').filter(has_text="Mobile reader proof")
+    row.click()
+    expect(list_pane).to_be_hidden()
+    expect(reader_pane).to_be_visible()
+    expect(
+        reader_pane.get_by_text("This message must remain readable at phone widths.")
+    ).to_be_visible()
+
+    back = reader_pane.get_by_role("button", name="Back to messages")
+    expect(back).to_be_focused()
+    back.click()
+    expect(list_pane).to_be_visible()
+    expect(reader_pane).to_be_hidden()
+    expect(row).to_be_focused()
+
+    for width in (320, 390, 760):
+        page.set_viewport_size({"width": width, "height": 844})
+        page.wait_for_timeout(50)
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+        pane_width = list_pane.evaluate("el => el.getBoundingClientRect().width")
+        layout_width = layout.evaluate("el => el.getBoundingClientRect().width")
+        assert pane_width >= layout_width - 1
+        _assert_visible_control_geometry(page, 44)
+
+
 def _assert_visible_control_geometry(page: Page, minimum: int) -> None:
     """Verify the visible shared controls meet the touch-target baseline."""
     undersized = page.evaluate(
@@ -486,6 +539,16 @@ def test_touch_target_geometry_across_core_routes(page: Page):
         page.get_by_test_id("facilitator-tab-responses").click()
         expect(page.get_by_test_id("facilitator-pane-responses")).to_be_visible()
         _assert_visible_control_geometry(page, minimum)
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+
+    # Comms and settings are core phone surfaces too; neither may silently
+    # squeeze an internal pane while the document itself remains overflow-free.
+    page.set_viewport_size({"width": 390, "height": 844})
+    for route in (f"/exercises/{exercise_id}/communications", "/settings"):
+        page.goto(f"{BASE}{route}")
+        _assert_visible_control_geometry(page, 44)
         assert page.evaluate(
             "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
         )
