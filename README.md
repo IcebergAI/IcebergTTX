@@ -24,7 +24,8 @@ manifests.
 ## Features
 
 - **Scenario library** — build branching inject trees (or linear chained flows) in the visual scenario builder, or import/export them as JSON
-- **Live exercises** — the facilitator releases injects in real time via WebSocket push, and can put any inject on a pause-aware countdown (`release_at_minutes`) that is still cancellable and can be triggered early
+- **Live exercises** — the facilitator releases injects in real time via WebSocket push, and can put an inject on a pause-aware countdown (`release_at_minutes`) that is still cancellable and can be triggered early
+- **Participants choose the path** — a team's selected option settles which branch follows and advances their progression cursor; the facilitator controls whether and when it is released, but cannot overrule the choice
 - **Exercise pacing** — `draft → active → paused → completed`, with pause-aware elapsed clocks; pausing defers pending release timers and resuming re-arms them
 - **Participant responses** — branch decisions require an explicit choice; injects can require that choice alone or choice plus free-text reasoning
 - **Team comment threads** — participants discuss released injects in group-scoped comment threads
@@ -575,11 +576,12 @@ k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, 
 1. **Create a scenario** — Scenarios → New, or import a JSON file
 2. **Create an exercise** — Exercises → New, select a scenario, optionally enable LLM
 3. **Enrol participants** — Facilitator console → Participants panel, search and add users
-4. **Start and release injects** — Hit Start, then Release each inject when ready. Injects
-   carrying `release_at_minutes` auto-release on a pause-aware countdown instead; you can
-   still release them early or cancel the schedule
-5. **Review responses** — Middle pane; the app suggests the valid next branches, you choose
-   which to release
+4. **Start and release injects** — Hit Start, then Release each inject when ready. An inject
+   carrying `release_at_minutes` auto-releases on a pause-aware countdown once the team has
+   reached it; you can still release it early or cancel the schedule
+5. **Review responses** — Middle pane. The team's selected option settles *which* branch
+   follows; you decide whether and when to release it (the branch they didn't pick is
+   rejected with a 409)
 6. **Pause / resume** — Pause halts new submissions and defers pending release timers
 7. **Complete, review and export** — Complete, then use the review timeline, the generated
    report, or export the transcript (JSON) / responses (CSV)

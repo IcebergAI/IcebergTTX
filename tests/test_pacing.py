@@ -322,3 +322,119 @@ async def test_worker_skips_when_paused(
     # Guard held — no release while paused. The worker shares this session's identity
     # map, so the in-memory inject is authoritative (and unchanged).
     assert inject.state == InjectState.pending
+
+
+# ── The progression cursor gates a scheduled release ──────────────────────────
+
+
+async def _linear_scheduled_exercise(
+    session: AsyncSession, facilitator: User, participant: User, *, offset: int
+) -> Exercise:
+    """A start node whose *linear successor* carries the schedule.
+
+    Every other test here schedules the start inject, which the cursor points at from the
+    moment the exercise begins — so the cursor never gets in the way, and this gap stayed
+    invisible. A downstream inject is only reachable once the team responds to the one
+    before it.
+    """
+    definition = ScenarioDefinition(
+        title="Pressure builds",
+        participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+        injects=[
+            InjectNode(
+                id="detect",
+                title="Anomaly detected",
+                content="Unusual outbound traffic.",
+                target_teams=["it_ops"],
+                next_inject_id="escalate",
+            ),
+            InjectNode(
+                id="escalate",
+                title="It is getting worse",
+                content="A second unit reports the same symptoms.",
+                target_teams=["it_ops"],
+                release_at_minutes=offset,
+            ),
+        ],
+        start_inject_id="detect",
+    )
+    scenario = await create_scenario(session, definition=definition, created_by=facilitator.id)
+    exercise = await create_exercise(
+        session, scenario_id=scenario.id, title="Linear sched", created_by=facilitator.id
+    )
+    await enrol_member(session, exercise=exercise, user_id=participant.id, group_id="it_ops")
+    return await transition_state(session, exercise, ExerciseState.active)
+
+
+async def _inject_by_node(session: AsyncSession, exercise_id: int, node_id: str) -> Inject:
+    return (
+        await session.exec(
+            select(Inject)
+            .where(Inject.exercise_id == exercise_id)
+            .where(Inject.scenario_node_id == node_id)
+        )
+    ).one()
+
+
+async def test_scheduled_release_is_skipped_when_the_team_has_not_reached_the_inject(
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+    monkeypatch,
+):
+    """A timer does not exempt an inject from the progression cursor.
+
+    release_at_minutes only says *when* an inject may release — release_inject still
+    requires it to be the current branch for its group. So a downstream inject whose
+    countdown expires before the team has responded their way to it is rejected, and
+    _release_when_due swallows the error: the inject stays pending and the one-shot timer
+    is gone. The docs promise exactly this, and must keep matching it.
+    """
+    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
+    escalate = await _inject_by_node(session, exercise.id, "escalate")
+
+    monkeypatch.setattr(
+        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
+    )
+    await schedule_service._release_when_due(exercise.id, escalate.id, 0)
+
+    # Nobody responded to `detect`, so the cursor never advanced to `escalate`.
+    assert escalate.state == InjectState.pending
+    # And the timer is one-shot: nothing re-arms it when the team later catches up.
+    assert escalate.id not in schedule_service._scheduled.get(exercise.id, {})
+
+
+async def test_scheduled_release_fires_once_the_team_has_reached_the_inject(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+    participant_token: str,
+    facilitator_token: str,
+    monkeypatch,
+):
+    """The same schedule does fire once a response has advanced the cursor onto it."""
+    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
+    detect = await _inject_by_node(session, exercise.id, "detect")
+    escalate = await _inject_by_node(session, exercise.id, "escalate")
+
+    assert (
+        await client.post(
+            f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+    ).status_code == 200
+    assert (
+        await client.post(
+            f"/api/exercises/{exercise.id}/responses",
+            json={"inject_id": detect.id, "content": "Investigating."},
+            headers={"Authorization": f"Bearer {participant_token}"},
+        )
+    ).status_code == 201
+
+    monkeypatch.setattr(
+        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
+    )
+    await schedule_service._release_when_due(exercise.id, escalate.id, 0)
+
+    assert escalate.state == InjectState.released

@@ -117,23 +117,28 @@ The builder is a three-pane workspace:
     Every `next_inject_id` reference must exist, and node-level and per-option
     `next_inject_id` edges are checked for **cycles** — linear chains can't loop.
 
-## Branching model — the facilitator picks the branch
+## Branching model — the participants choose the path, the facilitator controls the pace
 
-A scenario **suggests**; it never advances itself. When a participant responds, the
-service resolves which inject IDs are valid next steps and offers them to the
-facilitator, who **reviews the response and releases the branch they want**. The
-scenario never walks itself down a branch on a participant's behalf.
-
-This is about *which* inject comes next, not *when* it arrives. The two are
-independent:
+The two decisions belong to different people, and it is worth being precise about which:
 
 | | Who decides | |
 |---|---|---|
-| **Which** inject comes next | Always the facilitator | Options resolve to *suggestions* on the response card |
-| **When** an inject is released | The facilitator, by default | Unless the inject sets `release_at_minutes`, which puts it on a pause-aware timer the facilitator can still pre-empt or cancel |
+| **Which** inject comes next | The **participants** | The selected option's `next_inject_id` advances that team's cursor to exactly one node |
+| **Whether and when** it is released | The **facilitator** | Release it now, later, or never — but the branch itself is already settled |
 
-So a scheduled inject does not undermine the branching model: scheduling controls the
-clock, and the facilitator still chooses the path.
+When a team responds, the option they picked resolves to a single next node and moves that
+team's **progression cursor** to it. The facilitator then reviews the response and releases
+that inject when the room is ready. What the facilitator *cannot* do is overrule the
+choice: releasing the branch the team did **not** pick is rejected with
+`409 Inject is not the current branch for its group`.
+
+So the scenario does not auto-advance — nothing reaches participants until a human releases
+it — but the path through the tree is the participants' to choose. That is the point: their
+decisions have to actually carry consequences.
+
+!!! note "One response settles the branch for the whole team"
+    The cursor is per team, not per person. The first response resolves the inject for the
+    team and commits it to that branch; the alternatives can no longer be released to them.
 
 ## AI assessment
 
@@ -158,10 +163,11 @@ rated as poor.
 3. **Add participants** — search registered users in the Participants panel and
    enrol them; each is assigned a team. Share `/exercises/{id}/participate`.
 4. **Start and release injects** — press **Release** to push an inject; participants
-   receive it instantly over WebSocket. Injects carrying `release_at_minutes` also
-   auto-release on a pause-aware countdown, which you can pre-empt or cancel. Review
-   responses and team comments, then choose which branch to release next. **Pause**
-   halts new submissions (and defers any pending timers).
+   receive it instantly over WebSocket. An inject carrying `release_at_minutes` also
+   auto-releases on a pause-aware countdown once the team has reached it, and you can
+   pre-empt or cancel that. Review responses and team comments, then release the branch the
+   team's choice resolved to. **Pause** halts new submissions (and defers any pending
+   timers).
 5. **Inject communications** — from **Communications**, click *Inject inbound* to
    simulate a message from an external entity (ICO, NCSC, CEO…) targeted at specific
    teams.

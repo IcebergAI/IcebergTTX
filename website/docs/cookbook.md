@@ -95,11 +95,12 @@ form a **cycle** (the validator rejects loops across both option and node-level 
 }
 ```
 
-**What the facilitator sees** — when a participant selects an option, the console
-resolves the matching `next_inject_id` and surfaces it as a **Suggested next** button on
-the response card. It is a suggestion, not an advance: you review the response, then
-release the branch you want. Set an option's `next_inject_id` to `null` to make it a
-dead-end.
+**What the facilitator sees** — when a participant selects an option, the console resolves
+the matching `next_inject_id` and surfaces it as a **Suggested next** button on the response
+card. The team's choice settles *which* branch follows — releasing the one they did not pick
+is rejected with `409 Inject is not the current branch for its group`. What the facilitator
+controls is *whether and when* that branch is released; nothing reaches participants until
+they release it. Set an option's `next_inject_id` to `null` to make it a dead-end.
 
 ## Recipe: team-targeted injects
 
@@ -221,19 +222,41 @@ auto-releases that many minutes after the exercise **starts**.
 ```
 
 **What the facilitator sees** — `detect` is released by hand as usual. `escalate` shows a
-live **countdown** in the inject tree and releases itself 30 minutes after the exercise
-started. The facilitator can still hit **Release** to bring it forward, or cancel the
-schedule to make it manual again.
+live **countdown** in the inject tree and, **provided the team has reached it**, releases
+itself 30 minutes after the exercise started. The facilitator can still hit **Release** to
+bring it forward, or cancel the schedule to make it manual again.
+
+!!! warning "A timer only fires on an inject the team has actually reached"
+    This is the part that will catch you out. `release_at_minutes` does not exempt an inject
+    from the progression cursor: an inject can only be released when it is the **current
+    branch for its group**. In the scenario above, the team reaches `escalate` only by
+    responding to `detect`.
+
+    So if nobody has responded to `detect` when the 30-minute mark arrives, the scheduled
+    release is **rejected and silently skipped** — and the timer is **one-shot**, so it does
+    not re-arm when the team catches up later. The inject stays `pending` and you must
+    release it by hand.
+
+    Two practical consequences:
+
+    - **Leave slack.** Pick an offset the team will comfortably have reached by, not the
+      earliest moment the inject *could* make sense.
+    - **Don't rely on it for the critical path.** Treat a schedule as a convenience that
+      saves you watching a stopwatch, not as a guarantee the inject will appear.
+
+    The start inject is the one node always reachable from `t=0`, so scheduling *it* is
+    the only case that cannot be skipped.
 
 !!! note "The countdown is pause-aware"
     The offset is measured in *elapsed exercise time*, not wall-clock time. Pausing the
     exercise defers the timer; resuming re-arms it with the remaining offset. An inject set
     to 30 minutes, in an exercise paused for 5, fires 35 minutes after the start.
 
-!!! tip "Scheduling does not change the branching model"
-    `release_at_minutes` only controls *when* an inject may release — it adds **no** edge to
-    the scenario graph and is not part of cycle detection. Which branch comes next is still
-    the facilitator's call. Omit the field (the default) for manual-only release.
+!!! tip "Scheduling adds no edge to the graph"
+    `release_at_minutes` only controls *when* an inject may release. It adds **no** edge to
+    the scenario graph and takes no part in cycle detection. It also does not change who
+    chooses the branch — that is still settled by the team's response. Omit the field (the
+    default) for manual-only release.
 
 ## Recipe: free-text vs option responses
 

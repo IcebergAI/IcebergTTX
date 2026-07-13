@@ -91,23 +91,38 @@ early**, and its schedule can be **cancelled** outright, from the same control:
 - **Release early** — the ordinary **Release** button, which cancels the pending timer.
 - **Cancel the schedule** — reverts the inject to manual-only release.
 
-See the [scheduled-release recipe](cookbook.md#recipe-scheduled-release-put-an-inject-on-a-clock)
-for how to author it, or set it live from the console at any time.
+!!! warning "A timer only fires on an inject the team has actually reached"
+    A schedule does not exempt an inject from the progression cursor. If the team has not yet
+    reached that inject when its countdown expires — because they haven't responded to the
+    inject before it — the release is **skipped**, and the timer does **not** re-arm when
+    they catch up. The inject simply stays `pending` for you to release by hand.
 
-#### Choosing the branch
+    Leave slack in your offsets, and treat a schedule as a convenience that saves you
+    watching a stopwatch rather than a guarantee the inject will appear. See the
+    [scheduled-release recipe](cookbook.md#recipe-scheduled-release-put-an-inject-on-a-clock).
 
-Timing is one decision; **which** inject goes next is a separate one, and that is always
-yours. When a participant responds, the app resolves the valid **next** steps (the selected
-option's `next_inject_id`, or the node-level one) and surfaces them as **Suggested next**
-buttons on the response card. It suggests; it does not advance. You review the response,
-then release the branch you want — the scenario never auto-advances down a branch on a
-participant's behalf, whether or not any inject is on a timer.
+#### Who chooses the branch
+
+Two different decisions, and they belong to two different people:
+
+- **The team chooses the path.** The option they select advances their **progression
+  cursor** to exactly one next node. That is the whole point — their decisions have to carry
+  consequences.
+- **You choose the pace.** You review the response and release that inject when the room is
+  ready — now, later, or not at all.
+
+What you **cannot** do is overrule the choice. The response card surfaces the team's
+resolved next step as a **Suggested next** button; releasing the branch they did *not* pick
+is rejected with `409 Inject is not the current branch for its group`.
+
+So the scenario never auto-advances — nothing reaches anyone until you release it — but the
+route through the tree is theirs.
 
 ![Reviewing a response and its suggested next branch](assets/inject-release.png){ .shot }
 
-!!! note "One response resolves the inject for the whole team"
-    A response advances that team's cursor to the branch it selected. Another branch of the
-    same decision can no longer be released to that team afterwards.
+!!! note "One response settles the branch for the whole team"
+    The cursor is per team, not per person. The first response commits the team to that
+    branch, and the alternatives can no longer be released to them.
 
 ### 6. Monitor responses and AI assessment
 
