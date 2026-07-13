@@ -15,7 +15,7 @@ from authlib.integrations.starlette_client import OAuth
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.config import OIDCProviderConfig, settings
+from app.config import OIDCProviderConfig
 from app.models.user import User, UserRole
 from app.services import audit_service, proxy, ws_manager
 from app.services.oidc import auth0 as _auth0  # noqa: F401 - registers adapter
@@ -45,7 +45,9 @@ def register_providers() -> list[OIDCProviderConfig]:
     login-page buttons).
     """
     global _registration_done
-    configs = settings.enabled_oidc_providers()
+    from app.services import oidc_settings_service
+
+    configs = oidc_settings_service.get_config().enabled_providers()
     for cfg in configs:
         if cfg.key in _registered:
             continue

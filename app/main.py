@@ -59,6 +59,9 @@ from app.routers import (
     email as email_router,
 )
 from app.routers import (
+    oidc_settings as oidc_settings_router,
+)
+from app.routers import (
     proxy as proxy_router,
 )
 from app.routers import (
@@ -150,6 +153,17 @@ async def _load_llm_config() -> None:
         logger.exception("failed to load LLM config; using environment defaults")
 
 
+async def _load_oidc_config() -> None:
+    """Load authoritative OIDC routing before Authlib registration."""
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from app.database import engine
+    from app.services import oidc_settings_service
+
+    async with AsyncSession(engine) as session:
+        await oidc_settings_service.refresh_cache(session)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
@@ -163,6 +177,7 @@ async def lifespan(app: FastAPI):
     await _load_email_config()
     await _load_general_config()
     await _load_llm_config()
+    await _load_oidc_config()
     # Register enabled OIDC providers with Authlib (#25). Idempotent; the routes
     # also register lazily so this is a no-op fast path under the test transport.
     from app.services.oidc import service as oidc_service
@@ -251,6 +266,7 @@ app.include_router(audit_router.router, prefix="/api")
 app.include_router(email_router.router, prefix="/api")
 app.include_router(general.router, prefix="/api")
 app.include_router(llm.router, prefix="/api")
+app.include_router(oidc_settings_router.router, prefix="/api")
 app.include_router(proxy_router.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(scenarios.router, prefix="/api")
