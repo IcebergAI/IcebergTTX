@@ -399,6 +399,7 @@ document.addEventListener('alpine:init', () => {
     pingInterval: null,
     reconnectTimeout: null,
     destroyed: false,
+    unreadRequestGeneration: 0,
 
     async init() {
       document.addEventListener('dt:soft-navigated', (event) => {
@@ -477,6 +478,7 @@ document.addEventListener('alpine:init', () => {
     // Unread comms for the exercise the rail is currently pointed at. Scoped
     // server-side to what this viewer may actually read.
     async refreshUnread() {
+      const generation = ++this.unreadRequestGeneration;
       const id = this.currentExerciseId;
       if (!id) {
         this.unread = 0;
@@ -485,6 +487,11 @@ document.addEventListener('alpine:init', () => {
       const r = await apiFetch('/exercises/' + id + '/communications/unread-count');
       if (!r || !r.ok) return;
       const body = await readJson(r, { unread: 0 });
+      if (
+        generation !== this.unreadRequestGeneration
+        || id !== this.currentExerciseId
+        || this.destroyed
+      ) return;
       this.unread = body.unread || 0;
     },
 
@@ -497,6 +504,7 @@ document.addEventListener('alpine:init', () => {
 
     destroy() {
       this.destroyed = true;
+      this.unreadRequestGeneration++;
       if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
       if (this.pingInterval) clearInterval(this.pingInterval);
       this.reconnectTimeout = null;
