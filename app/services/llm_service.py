@@ -12,6 +12,7 @@ from app.database import engine
 from app.schemas.api import AssessmentPublic, ExecutiveSummaryPublic, SuggestedInjectPublic
 from app.services.background import spawn
 from app.services.llm.service import active_provider
+from app.services.team_service import validate_team_ids
 
 logger = logging.getLogger(__name__)
 
@@ -115,16 +116,7 @@ def _validated_suggested_target_teams(value: object, definition) -> list[str] | 
         return None
     if not isinstance(value, list) or not all(isinstance(team, str) for team in value):
         raise ValueError("LLM target_teams must be a list of team id strings or null")
-    teams = [team.strip() for team in value]
-    if any(not team for team in teams):
-        raise ValueError("LLM target_teams must not contain blank team ids")
-    if len(teams) != len(set(teams)):
-        raise ValueError("LLM target_teams must not contain duplicate team ids")
-    allowed = {team.id for team in definition.participant_teams}
-    unknown = sorted(set(teams) - allowed)
-    if unknown:
-        raise ValueError(f"LLM target_teams are not in this scenario: {', '.join(unknown)}")
-    return teams or None
+    return validate_team_ids(value, definition, field="LLM target_teams")
 
 
 async def _assess_response_result(session, response, inject, definition):
@@ -510,13 +502,7 @@ async def _run_summary_pipeline(exercise_id: int) -> None:
 
 
 def _summary_payload(s) -> dict:
-    return ExecutiveSummaryPublic(
-        exercise_id=s.exercise_id,
-        summary_text=s.summary_text,
-        llm_model=s.llm_model,
-        edited=s.edited,
-        generated_at=s.generated_at.isoformat(),
-    ).model_dump(mode="json")
+    return ExecutiveSummaryPublic.from_model(s).model_dump(mode="json")
 
 
 def _assessment_payload(a) -> dict:
