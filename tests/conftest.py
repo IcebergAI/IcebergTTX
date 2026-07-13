@@ -72,7 +72,7 @@ def seed_playwright_users():
     """
     try:
         import httpx
-        base = "http://localhost:8765"
+        base = os.environ.get("ICEBERG_TTX_UI_BASE", "http://localhost:8765").rstrip("/")
         for email, name, role, team in [
             ("facilitator@deep.test", "Test Facilitator", "facilitator", None),
             ("participant@deep.test", "Test Participant", "participant", "it_ops"),
