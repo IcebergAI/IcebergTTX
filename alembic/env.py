@@ -22,6 +22,7 @@ from app.models import (  # noqa: F401
     audit_settings,
     auth_token,
     communication,
+    email_settings,
     exercise,
     inject,
     inject_comment,
