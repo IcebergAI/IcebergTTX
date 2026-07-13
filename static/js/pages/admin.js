@@ -351,4 +351,57 @@ document.addEventListener('alpine:init', () => {
       }
     },
   }));
+
+  Alpine.data('adminEffectiveConfig', () => ({
+    loading: true,
+    query: '',
+    settings: [],
+    features: {},
+    validation: { ok: false, errors: [] },
+
+    async init() {
+      const resp = await apiFetch('/config/effective');
+      const data = await readJson(resp, null);
+      if (data) {
+        this.settings = data.settings || [];
+        this.features = data.features || {};
+        this.validation = data.validation || this.validation;
+      }
+      this.loading = false;
+    },
+
+    formatValue(row) {
+      if (row.secret) return row.value ? 'set' : 'not set';
+      if (row.value === null || row.value === '') return '—';
+      if (Array.isArray(row.value)) return row.value.length ? row.value.join(', ') : '—';
+      if (typeof row.value === 'boolean') return row.value ? 'true' : 'false';
+      return String(row.value);
+    },
+
+    get filteredSettings() {
+      const needle = this.query.trim().toLowerCase();
+      if (!needle) return this.settings;
+      return this.settings.filter(row => (
+        row.name.toLowerCase().includes(needle)
+        || row.category.toLowerCase().includes(needle)
+        || row.provenance.toLowerCase().includes(needle)
+      ));
+    },
+
+    get featureRows() {
+      const providers = this.features.oidc_providers || [];
+      return [
+        { label: 'Email', enabled: !!this.features.smtp_enabled,
+          value: this.features.smtp_enabled ? 'Enabled' : 'Disabled' },
+        { label: 'Local authentication', enabled: !!this.features.local_auth_enabled,
+          value: this.features.local_auth_enabled ? 'Enabled' : 'Disabled' },
+        { label: 'Self-registration', enabled: !!this.features.registration_enabled,
+          value: this.features.registration_enabled ? 'Enabled' : 'Disabled' },
+        { label: 'AI provider', enabled: this.features.active_llm_provider !== 'none',
+          value: this.features.active_llm_provider || 'none' },
+        { label: 'SSO providers', enabled: providers.length > 0,
+          value: providers.length ? providers.join(', ') : 'None' },
+      ];
+    },
+  }));
 });

@@ -301,3 +301,8 @@ def admin_llm_settings_page(request: Request, user: AdminUser):
 @router.get("/admin/oidc", response_class=HTMLResponse)
 def admin_oidc_settings_page(request: Request, user: AdminUser):
     return templates.TemplateResponse(request, "admin/oidc.html", {"user": user})
+
+
+@router.get("/admin/config", response_class=HTMLResponse)
+def admin_effective_config_page(request: Request, user: AdminUser):
+    return templates.TemplateResponse(request, "admin/config.html", {"user": user})
