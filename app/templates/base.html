@@ -157,6 +157,7 @@
             {{ rail_icon('comms') }}<span class="rail-link-label">Comms</span>
             <template x-if="hasUnread">
               <span class="rail-link-badge mono" x-text="unreadLabel"
+                    data-testid="unread-comms-badge"
                     :aria-label="unread + ' unread messages'"></span>
             </template>
           </a>

@@ -163,7 +163,6 @@ async def _load_oidc_config() -> None:
     async with AsyncSession(engine) as session:
         await oidc_settings_service.refresh_cache(session)
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
