@@ -218,8 +218,9 @@ const uiHelpers = {
     const m = Math.floor(s / 60), sec = s % 60;
     return `${m}:${String(sec).padStart(2, '0')}`;
   },
-  // Tint modifier layered onto a `.pill`. Scenario-defined team ids outside
-  // these four get no tint and render as the neutral pill.
+  // Tint modifier layered onto pills and team labels. Keep the established
+  // four pixel-identical; hash every other scenario-defined id into the shared
+  // accessible palette so its scent is stable across pages and sessions.
   teamColor(id) {
     const map = {
       it_ops: 'team-itops',
@@ -227,7 +228,14 @@ const uiHelpers = {
       exec:   'team-exec',
       comms:  'team-comms',
     };
-    return map[id] || '';
+    if (map[id]) return map[id];
+    if (!id) return '';
+    let hash = 2166136261;
+    for (const character of String(id)) {
+      hash ^= character.codePointAt(0);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `team-scent-${(hash >>> 0) % 12}`;
   },
   padId(id, width = 2) {
     return String(id).padStart(width, '0');
