@@ -9,8 +9,7 @@ from fastapi import APIRouter, Cookie, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app.config import settings
-from app.services import general_settings_service, mail_service
+from app.services import general_settings_service, mail_service, oidc_settings_service
 from app.services.audit_service import APP_VERSION
 from app.services.auth_service import decode_access_token
 from app.services.oidc import service as oidc_service
@@ -27,7 +26,7 @@ def _auth_context() -> dict:
     """SSO buttons + local-form visibility for the auth pages (#25)."""
     oidc_service.ensure_registered()
     return {
-        "local_auth": settings.local_auth_enabled,
+        "local_auth": oidc_settings_service.get_config().local_auth_enabled,
         "registration_enabled": general_settings_service.get_config().registration_enabled,
         # Gates the "Forgot password?" link + the reset pages (#117).
         "smtp_enabled": mail_service.smtp_enabled(),
@@ -138,7 +137,7 @@ def register_page(request: Request, user: UserContext):
     # local auth is off (OIDC-only) or self-registration is disabled (#67) so
     # there's no dead form.
     if (
-        not settings.local_auth_enabled
+        not oidc_settings_service.get_config().local_auth_enabled
         or not general_settings_service.get_config().registration_enabled
     ):
         return RedirectResponse("/login")
@@ -151,14 +150,14 @@ def forgot_password_page(request: Request, user: UserContext):
         return RedirectResponse("/dashboard")
     # Self-service reset needs both local auth and a configured mailer (#117);
     # redirect to /login when either is off so there's no dead form.
-    if not settings.local_auth_enabled or not mail_service.smtp_enabled():
+    if not oidc_settings_service.get_config().local_auth_enabled or not mail_service.smtp_enabled():
         return RedirectResponse("/login")
     return templates.TemplateResponse(request, "auth/forgot_password.html", _auth_context())
 
 
 @router.get("/reset-password", response_class=HTMLResponse)
 def reset_password_page(request: Request, user: UserContext):
-    if not settings.local_auth_enabled or not mail_service.smtp_enabled():
+    if not oidc_settings_service.get_config().local_auth_enabled or not mail_service.smtp_enabled():
         return RedirectResponse("/login")
     # The token is read from the query string by the Alpine component (not injected
     # into the template) so it never lands in server-rendered HTML.
@@ -167,7 +166,7 @@ def reset_password_page(request: Request, user: UserContext):
 
 @router.get("/accept-invite", response_class=HTMLResponse)
 def accept_invite_page(request: Request, user: UserContext):
-    if not settings.local_auth_enabled or not mail_service.smtp_enabled():
+    if not oidc_settings_service.get_config().local_auth_enabled or not mail_service.smtp_enabled():
         return RedirectResponse("/login")
     # Token rides in the query string, read by the Alpine component (#117).
     return templates.TemplateResponse(request, "auth/accept_invite.html", _auth_context())
@@ -297,3 +296,8 @@ def admin_general_settings_page(request: Request, user: AdminUser):
 @router.get("/admin/llm", response_class=HTMLResponse)
 def admin_llm_settings_page(request: Request, user: AdminUser):
     return templates.TemplateResponse(request, "admin/llm.html", {"user": user})
+
+
+@router.get("/admin/oidc", response_class=HTMLResponse)
+def admin_oidc_settings_page(request: Request, user: AdminUser):
+    return templates.TemplateResponse(request, "admin/oidc.html", {"user": user})

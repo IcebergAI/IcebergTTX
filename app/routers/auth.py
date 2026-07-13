@@ -22,7 +22,13 @@ from app.schemas.auth import (
     UpdateMeRequest,
     UserResponse,
 )
-from app.services import audit_service, general_settings_service, mail_service, token_service
+from app.services import (
+    audit_service,
+    general_settings_service,
+    mail_service,
+    oidc_settings_service,
+    token_service,
+)
 from app.services.auth_service import create_access_token, hash_password, verify_password
 from app.services.background import spawn
 from app.services.exercise_service import enrol_member
@@ -51,7 +57,7 @@ def _set_session_cookie(response: Response, token: str) -> None:
 
 def _require_local_auth() -> None:
     """Guard the local email/password endpoints when AUTH_MODE=oidc (#25)."""
-    if not settings.local_auth_enabled:
+    if not oidc_settings_service.get_config().local_auth_enabled:
         audit_service.emit(
             "auth.login",
             result="deny",

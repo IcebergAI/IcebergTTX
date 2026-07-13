@@ -848,6 +848,20 @@ def test_llm_settings_save_disabled_policy_on_phone(page: Page):
     assert provider.input_value() == "none"
 
 
+def test_oidc_settings_save_on_phone_without_page_overflow(page: Page):
+    page.set_viewport_size({"width": 390, "height": 844})
+    login_facilitator(page)
+    page.goto(f"{BASE}/admin/oidc")
+
+    mode = page.locator("#auth-mode")
+    expect(mode).to_be_visible()
+    page.get_by_role("button", name="Save SSO settings").click()
+    expect(page.get_by_role("status")).to_have_text("SSO settings saved.")
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+    )
+
+
 def test_reset_password_dialog_traps_and_restores_focus(page: Page):
     login_facilitator(page)
     page.goto(f"{BASE}/admin/users")

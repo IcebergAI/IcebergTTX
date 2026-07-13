@@ -14,10 +14,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.config import settings
 from app.database import get_session
 from app.routers.auth import _set_session_cookie
-from app.services import audit_service
+from app.services import audit_service, oidc_settings_service
 from app.services.auth_service import create_access_token
 from app.services.oidc import service as oidc_service
 from app.services.oidc.base import get_adapter
@@ -28,8 +27,9 @@ router = APIRouter(prefix="/auth/oidc", tags=["auth"])
 def _callback_url(request: Request, provider: str) -> str:
     """Absolute redirect_uri the IdP will call back. Honours a configured base
     (for proxies that rewrite host/scheme) else derives it from the request."""
-    if settings.oidc_redirect_base_url:
-        base = settings.oidc_redirect_base_url.rstrip("/")
+    redirect_base = oidc_settings_service.get_config().oidc_redirect_base_url
+    if redirect_base:
+        base = redirect_base.rstrip("/")
         return f"{base}/api/auth/oidc/{provider}/callback"
     return str(request.url_for("oidc_callback", provider=provider))
 

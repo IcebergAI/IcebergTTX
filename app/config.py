@@ -15,7 +15,7 @@ AUTH_MODE_BOTH = "both"
 
 # OIDC provider keys shipped with adapters (#25). The registry in
 # app/services/oidc maps these to adapter implementations.
-OIDC_PROVIDER_KEYS = ("entra", "authentik")
+OIDC_PROVIDER_KEYS = ("entra", "authentik", "auth0", "okta")
 
 # Pluggable AI backend. LLM_PROVIDER selects the single active provider for the
 # whole app (the AI analog of AUTH_MODE). "" / "none" disables the LLM pipeline.
@@ -464,10 +464,6 @@ def _validate_proxy_settings(s: Settings) -> None:
 def validate_settings(s: Settings | None = None) -> None:
     """Fail fast on insecure production configuration. Called at startup."""
     s = s or settings
-    if s.auth_mode not in (AUTH_MODE_LOCAL, AUTH_MODE_OIDC, AUTH_MODE_BOTH):
-        raise RuntimeError(
-            f"AUTH_MODE must be one of local|oidc|both, got {s.auth_mode!r}."
-        )
     llm_key = s.llm_provider.strip().lower()
     if llm_key not in (*LLM_DISABLED_KEYS, *LLM_PROVIDER_KEYS):
         raise RuntimeError(
@@ -490,45 +486,9 @@ def validate_settings(s: Settings | None = None) -> None:
             "via the SECRET_KEY environment variable, or set DEV_MODE=true for "
             "local development."
         )
-    # OIDC providers that are switched on must carry credentials + discovery inputs.
-    if s.oidc_auth_enabled:
-        if s.oidc_entra_enabled and not (
-            s.oidc_entra_client_id and s.oidc_entra_client_secret and s.oidc_entra_tenant_id
-        ):
-            raise RuntimeError(
-                "OIDC_ENTRA_ENABLED is set but OIDC_ENTRA_CLIENT_ID / "
-                "OIDC_ENTRA_CLIENT_SECRET / OIDC_ENTRA_TENANT_ID are incomplete."
-            )
-        if s.oidc_authentik_enabled and not (
-            s.oidc_authentik_client_id
-            and s.oidc_authentik_client_secret
-            and s.oidc_authentik_base_url
-            and s.oidc_authentik_app_slug
-        ):
-            raise RuntimeError(
-                "OIDC_AUTHENTIK_ENABLED is set but OIDC_AUTHENTIK_CLIENT_ID / "
-                "OIDC_AUTHENTIK_CLIENT_SECRET / OIDC_AUTHENTIK_BASE_URL / "
-                "OIDC_AUTHENTIK_APP_SLUG are incomplete."
-            )
-        if s.oidc_auth0_enabled and not (
-            s.oidc_auth0_client_id and s.oidc_auth0_client_secret and s.oidc_auth0_domain
-        ):
-            raise RuntimeError(
-                "OIDC_AUTH0_ENABLED is set but OIDC_AUTH0_CLIENT_ID / "
-                "OIDC_AUTH0_CLIENT_SECRET / OIDC_AUTH0_DOMAIN are incomplete."
-            )
-        if s.oidc_okta_enabled and not (
-            s.oidc_okta_client_id and s.oidc_okta_client_secret and s.oidc_okta_domain
-        ):
-            raise RuntimeError(
-                "OIDC_OKTA_ENABLED is set but OIDC_OKTA_CLIENT_ID / "
-                "OIDC_OKTA_CLIENT_SECRET / OIDC_OKTA_DOMAIN are incomplete."
-            )
-    if s.auth_mode == AUTH_MODE_OIDC and not s.enabled_oidc_providers():
-        raise RuntimeError(
-            "AUTH_MODE=oidc but no OIDC provider is enabled/configured; users would "
-            "have no way to sign in."
-        )
+    # OIDC mode/provider readiness is DB-backed and validated atomically on seed
+    # and every admin save. Re-validating dead environment seeds here would make
+    # a later env edit override the authoritative singleton on restart.
     # Provider credential readiness is validated on the runtime admin save path.
     # Secrets remain environment-only, while the active provider itself is DB-backed.
 
