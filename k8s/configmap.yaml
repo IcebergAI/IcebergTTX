@@ -5,6 +5,15 @@ metadata:
   namespace: iceberg-ttx
 data:
   ACCESS_TOKEN_EXPIRE_MINUTES: "480"
+  # Email (#186) — non-secret values seed the admin-editable /admin/email row.
+  # SMTP_PASSWORD remains in the Secret; after first startup the DB is authoritative.
+  SMTP_HOST: ""
+  SMTP_PORT: "587"
+  SMTP_FROM: ""
+  SMTP_USERNAME: ""
+  SMTP_STARTTLS: "true"
+  SMTP_TLS: "false"
+  PUBLIC_BASE_URL: ""
   # Pluggable AI provider (#26) — non-secret routing. LLM_PROVIDER selects the
   # active backend (anthropic | bedrock | openai | ollama | gemini | none); provider
   # API keys are Secrets (ANTHROPIC/OPENAI/GEMINI_API_KEY), never here. Set only the

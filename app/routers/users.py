@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.config import settings
 from app.database import get_session
 from app.dependencies import require_admin, require_role
 from app.models.auth_token import AuthTokenPurpose
@@ -81,7 +80,7 @@ async def invite_user(
     Works while open self-registration is disabled — the token *is* the authorisation.
     Pre-binds the email (+ optional team/exercise). 404 when SMTP is unconfigured.
     """
-    if not settings.smtp_enabled:
+    if not mail_service.smtp_enabled():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     if (await session.exec(select(User).where(User.email == body.email))).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")

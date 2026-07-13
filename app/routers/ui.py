@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
+from app.services import mail_service
 from app.services.audit_service import APP_VERSION
 from app.services.auth_service import decode_access_token
 from app.services.oidc import service as oidc_service
@@ -29,7 +30,7 @@ def _auth_context() -> dict:
         "local_auth": settings.local_auth_enabled,
         "registration_enabled": settings.registration_enabled,
         # Gates the "Forgot password?" link + the reset pages (#117).
-        "smtp_enabled": settings.smtp_enabled,
+        "smtp_enabled": mail_service.smtp_enabled(),
         "oidc_providers": [(p.key, p.display_name) for p in oidc_service.registered_providers()],
     }
 
@@ -147,14 +148,14 @@ def forgot_password_page(request: Request, user: UserContext):
         return RedirectResponse("/dashboard")
     # Self-service reset needs both local auth and a configured mailer (#117);
     # redirect to /login when either is off so there's no dead form.
-    if not settings.local_auth_enabled or not settings.smtp_enabled:
+    if not settings.local_auth_enabled or not mail_service.smtp_enabled():
         return RedirectResponse("/login")
     return templates.TemplateResponse(request, "auth/forgot_password.html", _auth_context())
 
 
 @router.get("/reset-password", response_class=HTMLResponse)
 def reset_password_page(request: Request, user: UserContext):
-    if not settings.local_auth_enabled or not settings.smtp_enabled:
+    if not settings.local_auth_enabled or not mail_service.smtp_enabled():
         return RedirectResponse("/login")
     # The token is read from the query string by the Alpine component (not injected
     # into the template) so it never lands in server-rendered HTML.
@@ -163,7 +164,7 @@ def reset_password_page(request: Request, user: UserContext):
 
 @router.get("/accept-invite", response_class=HTMLResponse)
 def accept_invite_page(request: Request, user: UserContext):
-    if not settings.local_auth_enabled or not settings.smtp_enabled:
+    if not settings.local_auth_enabled or not mail_service.smtp_enabled():
         return RedirectResponse("/login")
     # Token rides in the query string, read by the Alpine component (#117).
     return templates.TemplateResponse(request, "auth/accept_invite.html", _auth_context())
@@ -266,7 +267,7 @@ def settings_page(request: Request, user: LoggedInUser):
 def admin_users_page(request: Request, user: AdminUser):
     # smtp_enabled gates the "Invite participant" affordance (#117).
     return templates.TemplateResponse(
-        request, "admin/users.html", {"user": user, "smtp_enabled": settings.smtp_enabled}
+        request, "admin/users.html", {"user": user, "smtp_enabled": mail_service.smtp_enabled()}
     )
 
 
@@ -278,3 +279,8 @@ def admin_audit_page(request: Request, user: AdminUser):
 @router.get("/admin/proxy", response_class=HTMLResponse)
 def admin_proxy_page(request: Request, user: AdminUser):
     return templates.TemplateResponse(request, "admin/proxy.html", {"user": user})
+
+
+@router.get("/admin/email", response_class=HTMLResponse)
+def admin_email_page(request: Request, user: AdminUser):
+    return templates.TemplateResponse(request, "admin/email.html", {"user": user})

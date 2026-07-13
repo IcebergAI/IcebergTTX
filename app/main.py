@@ -21,6 +21,7 @@ from app.models import (  # noqa: F401
     audit_settings,
     auth_token,
     communication,
+    email_settings,
     exercise,
     inject,
     inject_comment,
@@ -31,7 +32,9 @@ from app.models import (  # noqa: F401
     suggested_inject,
     user,
 )
-from app.routers import audit as audit_router
+from app.routers import (
+    audit as audit_router,
+)
 from app.routers import (
     auth,
     communications,
@@ -47,8 +50,15 @@ from app.routers import (
     users,
     ws,
 )
-from app.routers import proxy as proxy_router
-from app.routers import settings as settings_router
+from app.routers import (
+    email as email_router,
+)
+from app.routers import (
+    proxy as proxy_router,
+)
+from app.routers import (
+    settings as settings_router,
+)
 from app.routers.ui import UIRedirect
 from app.services import audit_service
 from app.services.ws_manager import heartbeat_task
@@ -93,6 +103,20 @@ async def _load_proxy_config() -> None:
         logger.exception("failed to load outbound proxy config; using httpx defaults")
 
 
+async def _load_email_config() -> None:
+    """Load runtime email settings; env fallback remains active if loading fails."""
+    try:
+        from sqlmodel.ext.asyncio.session import AsyncSession
+
+        from app.database import engine
+        from app.services import email_settings_service
+
+        async with AsyncSession(engine) as session:
+            await email_settings_service.refresh_cache(session)
+    except Exception:
+        logger.exception("failed to load email config; using environment defaults")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
@@ -103,6 +127,7 @@ async def lifespan(app: FastAPI):
     # this below register_providers() and OIDC silently loses proxying.
     await _load_proxy_config()
     await _load_siem_config()
+    await _load_email_config()
     # Register enabled OIDC providers with Authlib (#25). Idempotent; the routes
     # also register lazily so this is a no-op fast path under the test transport.
     from app.services.oidc import service as oidc_service
@@ -171,6 +196,7 @@ app.include_router(ui.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(oidc.router, prefix="/api")
 app.include_router(audit_router.router, prefix="/api")
+app.include_router(email_router.router, prefix="/api")
 app.include_router(proxy_router.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(scenarios.router, prefix="/api")
