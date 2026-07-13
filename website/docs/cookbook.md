@@ -18,8 +18,9 @@ an existing inject. Teams are optional, but if you declare `participant_teams`, 
 
 !!! tip "Check before you run"
     The scenario builder's readiness pane validates as you type, and the detail page
-    shows the same sidebar. Programmatically, `POST /api/scenarios/validate` returns
-    `{ "valid": bool, "errors": [...] }`.
+    shows the same sidebar. To re-check a scenario you have already saved,
+    `GET /api/scenarios/{id}/validate` (facilitator) returns `{"valid": true, "errors": []}`,
+    or `valid: false` with the validation error when it fails.
 
 ## Recipe: a linear drill
 
@@ -96,8 +97,9 @@ form a **cycle** (the validator rejects loops across both option and node-level 
 
 **What the facilitator sees** — when a participant selects an option, the console
 resolves the matching `next_inject_id` and surfaces it as a **Suggested next** button on
-the response card. This is the "pull, not push" model: you review the response, then
-release the branch. Set an option's `next_inject_id` to `null` to make it a dead-end.
+the response card. It is a suggestion, not an advance: you review the response, then
+release the branch you want. Set an option's `next_inject_id` to `null` to make it a
+dead-end.
 
 ## Recipe: team-targeted injects
 
@@ -187,6 +189,51 @@ later it lands in the communications inbox for all teams and broadcasts over Web
     set `sender` or `visible_to_teams` — the server fills those in, and triggered comms
     default to **all-team** visibility. To send a team-scoped or same-day message during
     a live exercise, use **Inject inbound** in the Communications panel instead.
+
+## Recipe: scheduled release (put an inject on a clock)
+
+**Goal** — have an inject fire on its own, so the room feels time pressure without the
+facilitator having to watch a stopwatch. Set `release_at_minutes` on the inject: it
+auto-releases that many minutes after the exercise **starts**.
+
+```json title="scheduled-release.json"
+{
+  "title": "Pressure builds",
+  "participant_teams": [{ "id": "it_ops", "label": "IT Operations" }],
+  "start_inject_id": "detect",
+  "injects": [
+    {
+      "id": "detect",
+      "title": "Anomaly detected",
+      "content": "Your monitoring stack has flagged unusual outbound traffic.",
+      "target_teams": ["it_ops"],
+      "next_inject_id": "escalate"
+    },
+    {
+      "id": "escalate",
+      "title": "It is getting worse",
+      "content": "Thirty minutes in, a second business unit reports the same symptoms.",
+      "target_teams": ["it_ops"],
+      "release_at_minutes": 30
+    }
+  ]
+}
+```
+
+**What the facilitator sees** — `detect` is released by hand as usual. `escalate` shows a
+live **countdown** in the inject tree and releases itself 30 minutes after the exercise
+started. The facilitator can still hit **Release** to bring it forward, or cancel the
+schedule to make it manual again.
+
+!!! note "The countdown is pause-aware"
+    The offset is measured in *elapsed exercise time*, not wall-clock time. Pausing the
+    exercise defers the timer; resuming re-arms it with the remaining offset. An inject set
+    to 30 minutes, in an exercise paused for 5, fires 35 minutes after the start.
+
+!!! tip "Scheduling does not change the branching model"
+    `release_at_minutes` only controls *when* an inject may release — it adds **no** edge to
+    the scenario graph and is not part of cycle detection. Which branch comes next is still
+    the facilitator's call. Omit the field (the default) for manual-only release.
 
 ## Recipe: free-text vs option responses
 

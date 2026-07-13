@@ -80,7 +80,8 @@ remain in scope.
 
     `script-src 'self'` with no `unsafe-*`, plus `X-Frame-Options: DENY`,
     `nosniff`, `Referrer-Policy`, `Permissions-Policy`, and HSTS in production —
-    all emitted by the app, not the proxy.
+    emitted by the app itself, not the proxy. (Caddy serves `/static/*` directly and
+    adds only `nosniff` + caching headers to those asset responses.)
 
 -   :material-file-document-outline: __Audit logging__
 
@@ -103,11 +104,15 @@ remain in scope.
 
 Local auth (bcrypt password hashing, NIST-aligned length-only policy) runs alongside
 or instead of **OpenID Connect** SSO (Authorization-Code + PKCE via Authlib).
-Adapters ship for Entra, Authentik, Auth0, and Okta. JIT-provisioned SSO users are
-created as **participants** — no self-elevation — and client secrets are env-only.
+Adapters ship for Entra, Authentik, Auth0, and Okta. JIT-provisioned SSO users default
+to **participant**, and a user cannot elevate themselves: a higher role is only granted
+when one of their IdP groups appears in the administrator-configured
+`OIDC_<provider>_ROLE_MAP` allowlist (unknown groups and unknown role names are
+ignored). Client secrets are env-only.
 
 ## Operator responsibilities
 
 Deployment hardening — secret management, TLS termination, network policy, and the
-single-replica WebSocket constraint — is the operator's responsibility. See
+[single-replica constraint](deployment.md) (the WebSocket manager, the scheduled-release
+timers, and the rate limiter are all in-memory) — is the operator's responsibility. See
 [Deployment](deployment.md) for the hardened Compose and Kubernetes baselines.

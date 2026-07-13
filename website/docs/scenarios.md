@@ -60,6 +60,7 @@ The builder is a three-pane workspace:
   "target_teams": ["it_ops"],
   "free_text_response": true,
   "sequence_order": 1,
+  "release_at_minutes": 15,
   "next_inject_id": null,
   "options": [
     { "id": "opt_isolate", "label": "Isolate affected systems immediately", "next_inject_id": "inject_02a" },
@@ -93,6 +94,14 @@ The builder is a three-pane workspace:
     submits a free-text response, then the facilitator releases the next inject.
     This chains injects into a straight-line sequence.
 
+`release_at_minutes`
+:   Optional. **Auto-releases** this inject that many minutes after the exercise
+    starts, instead of waiting for the facilitator. The console shows a live
+    countdown, and the clock is **pause-aware** — pausing defers the timer and
+    resuming re-arms it with the remaining offset. The facilitator can still
+    release it early or cancel the schedule. Omit (or `null`) for manual release
+    only, which is the default.
+
 `expected_actions`
 :   Evaluator cues shown alongside responses in the facilitator console (and used
     by the LLM assessment when enabled).
@@ -108,11 +117,23 @@ The builder is a three-pane workspace:
     Every `next_inject_id` reference must exist, and node-level and per-option
     `next_inject_id` edges are checked for **cycles** — linear chains can't loop.
 
-## Branching model — "pull, not push"
+## Branching model — the facilitator picks the branch
 
-When a participant responds, the service resolves which inject IDs are valid next
-steps, but the **facilitator manually reviews and releases** the chosen branch. This
-keeps a human in the loop rather than auto-advancing the scenario.
+A scenario **suggests**; it never advances itself. When a participant responds, the
+service resolves which inject IDs are valid next steps and offers them to the
+facilitator, who **reviews the response and releases the branch they want**. The
+scenario never walks itself down a branch on a participant's behalf.
+
+This is about *which* inject comes next, not *when* it arrives. The two are
+independent:
+
+| | Who decides | |
+|---|---|---|
+| **Which** inject comes next | Always the facilitator | Options resolve to *suggestions* on the response card |
+| **When** an inject is released | The facilitator, by default | Unless the inject sets `release_at_minutes`, which puts it on a pause-aware timer the facilitator can still pre-empt or cancel |
+
+So a scheduled inject does not undermine the branching model: scheduling controls the
+clock, and the facilitator still chooses the path.
 
 ## AI assessment
 
@@ -137,8 +158,10 @@ rated as poor.
 3. **Add participants** — search registered users in the Participants panel and
    enrol them; each is assigned a team. Share `/exercises/{id}/participate`.
 4. **Start and release injects** — press **Release** to push an inject; participants
-   receive it instantly over WebSocket. Review responses and team comments, then
-   choose which branch to release next. **Pause** halts new submissions.
+   receive it instantly over WebSocket. Injects carrying `release_at_minutes` also
+   auto-release on a pause-aware countdown, which you can pre-empt or cancel. Review
+   responses and team comments, then choose which branch to release next. **Pause**
+   halts new submissions (and defers any pending timers).
 5. **Inject communications** — from **Communications**, click *Inject inbound* to
    simulate a message from an external entity (ICO, NCSC, CEO…) targeted at specific
    teams.

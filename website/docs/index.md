@@ -55,8 +55,9 @@ ships with Docker Compose and Kubernetes manifests.
 
     ---
 
-    The facilitator releases injects one at a time; participants receive them
-    instantly via WebSocket and submit a stance plus free-text reasoning.
+    The facilitator releases injects one at a time — or puts them on a pause-aware
+    countdown — and participants receive them instantly via WebSocket, then submit a
+    stance plus free-text reasoning.
 
 -   :material-forum: __Team comment threads__
 
@@ -97,8 +98,8 @@ One tool across the whole exercise lifecycle — **prepare** a branching scenari
 **run** the live session, and **learn** from the after-action review. The
 [facilitator guide](facilitator-guide.md) walks it end to end.
 
-The **facilitator console** — a live exercise with a team-grouped inject tree,
-one-at-a-time release, and the participant response feed.
+The **facilitator console** — a live exercise with a team-grouped inject tree, release
+controls (manual, or a scheduled countdown), and the participant response feed.
 
 ![Facilitator console in dark mode](assets/facilitator-dark.png){ .shot }
 

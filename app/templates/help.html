@@ -169,8 +169,7 @@
       "external_entity": "NCSC",
       "subject": "Ransomware advisory",
       "body": "We have been made aware of a campaign targeting...",
-      "delay_seconds": 120,
-      "visible_to_teams": ["it_ops"]
+      "delay_after_release_seconds": 120
     }
   ]
 }</pre>
@@ -195,7 +194,7 @@
       </div>
       <div class="grid gap-x-4 text-[13px]" style="grid-template-columns: 160px 1fr;">
         <div class="smallcaps text-muted pt-0.5">triggers_communications</div>
-        <div class="text-ink-soft">Messages automatically injected into the comms inbox when this inject is released. <code class="mono text-[12px]">delay_seconds</code> staggers delivery.</div>
+        <div class="text-ink-soft">Messages automatically injected into the comms inbox when this inject is released, visible to all teams. <code class="mono text-[12px]">delay_after_release_seconds</code> staggers delivery. You set only <code class="mono text-[12px]">external_entity</code>, <code class="mono text-[12px]">direction</code>, <code class="mono text-[12px]">subject</code>, <code class="mono text-[12px]">body</code> and the delay — the server fills in the rest.</div>
       </div>
     </div>
   </section>

@@ -12,9 +12,15 @@ single host, and **Kubernetes** manifests for a cluster. Both front the app with
 **Caddy**; the only difference is where TLS is terminated.
 
 !!! info "Single-replica constraint"
-    The WebSocket manager is in-memory, so the app must run as a **single replica**
-    until a distributed backend (e.g. Redis pub/sub) is added. The Kubernetes
-    manifests enforce this with `replicas: 1` and `strategy: Recreate`.
+    The app must run as a **single replica**. Three subsystems hold per-process state
+    in memory and would each need a distributed backend before it can scale out:
+
+    - the **WebSocket manager** (needs a shared bus, e.g. Redis pub/sub);
+    - **scheduled inject release** (in-process timers — needs a task queue such as
+      Celery or ARQ);
+    - the **login/registration rate limiter** (needs a shared store).
+
+    The Kubernetes manifests enforce this with `replicas: 1` and `strategy: Recreate`.
 
 ## Docker Compose
 
@@ -27,7 +33,7 @@ cp .env.example .env
 # For a public deployment, set SITE_ADDRESS to your domain.
 
 docker compose up -d      # build and start
-docker compose ps         # check all three services are healthy
+docker compose ps         # db, app and caddy healthy (caddy-init is one-shot and exits)
 ```
 
 Caddy serves the app over **HTTPS on port 443** (redirecting `:80`), serves
@@ -59,9 +65,14 @@ docker compose exec app python -m app.bootstrap_admin \
 Stopping:
 
 ```bash
-docker compose down        # keeps named volumes (postgres_data, uploads)
-docker compose down -v     # also deletes volumes — permanent data loss
+docker compose down        # keeps the named volumes
+docker compose down -v     # also deletes them — permanent data loss
 ```
+
+The five named volumes are `postgres_data` (the database), `uploads` (inject
+attachments), `static_files`, and Caddy's `caddy_data` / `caddy_config`. `down -v`
+destroys all of them — including the Let's Encrypt certificates in `caddy_data`, so a
+rebuilt stack must re-issue them and will re-consume rate limit quota.
 
 !!! warning "Always use HTTPS"
     The app sets `Secure` cookies, so it must be reached over HTTPS. Only use
@@ -87,7 +98,9 @@ kubectl rollout status deployment/caddy -n iceberg-ttx
 
 kubectl apply -f k8s/networkpolicy.yaml   # requires a NetworkPolicy-enforcing CNI
 
-kubectl exec -n iceberg-ttx deploy/iceberg-ttx-app -- \
+# -it is required: with no --password and no ADMIN_PASSWORD, the tool prompts for one
+# (never echoed), and without a TTY it has nothing to read from.
+kubectl exec -it -n iceberg-ttx deploy/iceberg-ttx-app -- \
     python -m app.bootstrap_admin --email you@example.com --name "You"
 ```
 
@@ -106,10 +119,11 @@ container reuses the app image) — set the release tag you want and **pin by di
 
 ### Pod hardening
 
-All three workloads run non-root under a PSS-`restricted`-style `securityContext`
-(no privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp; app
-and init containers use a read-only root filesystem). The Postgres StatefulSet runs
-as uid 999 with `fsGroup: 999`, which needs a StorageClass that honours `fsGroup`.
+Every workload runs non-root under a PSS-`restricted`-style `securityContext` (no
+privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp), and **every
+container uses a read-only root filesystem** — app, init, Caddy, Postgres, and the
+backup CronJob alike. The Postgres StatefulSet runs as uid 999 with `fsGroup: 999`,
+which needs a StorageClass that honours `fsGroup`.
 
 ### Origin checks
 
