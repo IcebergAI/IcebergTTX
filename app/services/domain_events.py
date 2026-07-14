@@ -98,8 +98,8 @@ class ResponseSubmitted(DomainEvent):
 
 @dataclass(frozen=True)
 class CommunicationCreated(DomainEvent):
-    # An id, not the ORM row: _delayed_comm learns its id from an INSERT ... RETURNING
-    # and never loads the object.
+    # An id, not the ORM row: deliver_triggered_communication learns its id from an
+    # INSERT ... RETURNING and never loads the object.
     communication_id: int
 
 

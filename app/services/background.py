@@ -3,7 +3,11 @@
 ``asyncio.create_task`` only registers a *weak* reference in the event loop, so a
 task with no other reference can be garbage-collected mid-flight. ``spawn`` holds
 a strong reference until the task completes, which is the pattern every
-background call site (LLM pipeline, delayed comms, audit persistence) needs.
+background call site (LLM pipeline, mail delivery, audit persistence) needs.
+
+Delayed exercise work is *not* one of them any more: an inject release or a triggered
+communication also has to be cancellable and rehydratable, so ``schedule_service`` keeps
+its own keyed registry, which holds the strong reference itself (#211).
 
 This does not provide durability across process restarts — a delayed task is
 still lost if the single process dies (see the task-queue note in CLAUDE.md). It

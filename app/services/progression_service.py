@@ -192,11 +192,20 @@ async def resolve_response_progression(
     return True
 
 
-async def release_is_allowed(session: AsyncSession, inject: Inject) -> bool:
+async def release_is_allowed(
+    session: AsyncSession, inject: Inject, *, scheduled: bool = False
+) -> bool:
     """Release a scenario node only for a context currently pointing at it.
 
     Legacy exercises without progression rows remain operable. Independent root
     nodes are also valid opening choices before a context has advanced.
+
+    ``scheduled`` marks a release fired by an inject's own ``release_at_minutes``
+    rather than picked by a facilitator (#218). The cursor lock below exists to stop
+    a facilitator hand-picking a node off the branch the participants chose; a
+    schedule is declared in the scenario before the exercise ran and picks nothing,
+    so it is exempt — but only as far as the *unreferenced*-node check below, which
+    still refuses a node that some branch does link to.
     """
     if not inject.scenario_node_id:
         return True
@@ -210,7 +219,7 @@ async def release_is_allowed(session: AsyncSession, inject: Inject) -> bool:
     # physical inject; visibility remains constrained by the inject group.
     if any(cursor.current_node_id == inject.scenario_node_id for cursor in cursors):
         return True
-    if any(cursor.current_inject_id is not None for cursor in cursors):
+    if not scheduled and any(cursor.current_inject_id is not None for cursor in cursors):
         return False
 
     definition = await definition_for_exercise(session, inject.exercise_id)

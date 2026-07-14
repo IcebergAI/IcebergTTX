@@ -1,9 +1,9 @@
-"""Pacing: exercise clock and durable exercise schedules (#116, #194)."""
+"""Pacing: exercise clock and durable exercise schedules (#116, #194, #218)."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
-import pytest_asyncio
 from httpx import AsyncClient
 from httpx_ws import aconnect_ws
 from sqlmodel import select
@@ -14,24 +14,16 @@ from app.models.exercise import Exercise, ExerciseState, ExerciseStateTransition
 from app.models.inject import Inject, InjectState
 from app.models.user import User
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition, TriggerComm
-from app.services import schedule_service
+from app.services import progression_service, schedule_service
 from app.services.exercise_service import (
     create_exercise,
     enrol_member,
     transition_state,
 )
+from app.services.response_service import submit_response
 from app.services.scenario_service import create_scenario
 
 AUTH = lambda t: {"Authorization": f"Bearer {t}"}  # noqa: E731
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def _clear_schedules():
-    """Cancel any timers a test armed so sleeping tasks don't leak between tests."""
-    yield
-    exercise_ids = set(schedule_service._scheduled) | set(schedule_service._scheduled_comms)
-    for ex_id in exercise_ids:
-        schedule_service.cancel_exercise_schedules(ex_id)
 
 
 async def _scheduled_scenario(session: AsyncSession, facilitator: User, *, offset: int = 30):
@@ -487,32 +479,362 @@ async def _inject_by_node(session: AsyncSession, exercise_id: int, node_id: str)
     ).one()
 
 
-async def test_scheduled_release_is_skipped_when_the_team_has_not_reached_the_inject(
+async def test_due_release_is_deferred_when_the_cursor_has_not_arrived(
     session: AsyncSession,
     facilitator: User,
     participant: User,
     monkeypatch,
+    caplog,
 ):
-    """A timer does not exempt an inject from the progression cursor.
+    """A timer coming due early is *deferred*, not failed.
 
-    release_at_minutes only says *when* an inject may release — release_inject still
-    requires it to be the current branch for its group. So a downstream inject whose
-    countdown expires before the team has responded their way to it is rejected, and
-    _release_when_due swallows the error: the inject stays pending and the one-shot timer
-    is gone. The docs promise exactly this, and must keep matching it.
+    The team has not responded their way to `escalate` yet, so it must not release. The
+    point of this test is the *manner* of the refusal: the worker checks the gate itself
+    and returns, so nothing is logged as an error. Before #218 the release attempt raised
+    409 inside release_inject and the worker's `except Exception` swallowed it, which is
+    what made a routine "not yet" indistinguishable from a genuine failure.
     """
     exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
     escalate = await _inject_by_node(session, exercise.id, "escalate")
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        schedule_service.audit_service, "emit", lambda action, **kw: events.append((action, kw))
+    )
+    monkeypatch.setattr(
+        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
+    )
+
+    with caplog.at_level("INFO", logger="app.services.schedule_service"):
+        await schedule_service._release_when_due(exercise.id, escalate.id, 0)
+
+    assert escalate.state == InjectState.pending
+    assert not [r for r in caplog.records if "Scheduled release failed" in r.message]
+    assert [action for action, _ in events] == ["inject.release_deferred"]
+    assert events[0][1]["reason"] == "cursor_not_reached"
+
+
+async def test_a_response_rearms_the_scheduled_inject_the_cursor_reaches(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+    participant_token: str,
+    facilitator_token: str,
+):
+    """The deferred timer comes back the moment the team's response unlocks the node.
+
+    This is the half of #218 that turns "never" into "when they get there": the timer is
+    one-shot, so without a re-arm on cursor advance the deferral above would be permanent.
+    The offset is still in the future here, so the re-armed task just sleeps — asserting on
+    the registry keeps it deterministic (see the note on _CtxSession above).
+    """
+    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
+    detect = await _inject_by_node(session, exercise.id, "detect")
+    escalate = await _inject_by_node(session, exercise.id, "escalate")
+
+    await client.post(
+        f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
+        headers=AUTH(facilitator_token),
+    )
+    assert escalate.id not in schedule_service._scheduled.get(exercise.id, {})
+
+    assert (
+        await client.post(
+            f"/api/exercises/{exercise.id}/responses",
+            json={"inject_id": detect.id, "content": "Investigating."},
+            headers=AUTH(participant_token),
+        )
+    ).status_code == 201
+
+    assert escalate.id in schedule_service._scheduled[exercise.id]
+
+
+async def test_an_overdue_scheduled_inject_arms_at_zero_when_the_cursor_arrives(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+    participant_token: str,
+    facilitator_token: str,
+    monkeypatch,
+):
+    """A cursor arriving *after* the offset has passed releases the inject immediately.
+
+    The delay comes off the offset's absolute basis, so "overdue" falls out as delay 0
+    rather than needing a branch of its own. Spy _arm instead of awaiting the task: it may
+    already have run and been forgotten by the time we look.
+    """
+    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
+    detect = await _inject_by_node(session, exercise.id, "detect")
+    escalate = await _inject_by_node(session, exercise.id, "escalate")
+    # 45 minutes into a 30-minute offset: the countdown expired while the team was still
+    # working on `detect`, and its timer has long since deferred and dropped.
+    exercise.started_at = datetime.now(UTC) - timedelta(minutes=45)
+    session.add(exercise)
+    await session.flush()
+
+    armed: list[tuple[int, int, float]] = []
+    monkeypatch.setattr(
+        schedule_service,
+        "_arm",
+        lambda ex_id, inject_id, delay: armed.append((ex_id, inject_id, delay)),
+    )
+    await client.post(
+        f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
+        headers=AUTH(facilitator_token),
+    )
+    await client.post(
+        f"/api/exercises/{exercise.id}/responses",
+        json={"inject_id": detect.id, "content": "Investigating."},
+        headers=AUTH(participant_token),
+    )
+
+    assert armed == [(exercise.id, escalate.id, 0.0)]
+
+
+async def test_a_response_does_not_arm_the_branch_the_team_did_not_take(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+    participant_token: str,
+    facilitator_token: str,
+):
+    """Re-arming follows the cursor, so it can only ever arm the chosen branch."""
+    definition = ScenarioDefinition(
+        title="Fork",
+        participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+        injects=[
+            InjectNode(
+                id="triage",
+                title="Triage",
+                content="Contain or monitor?",
+                target_teams=["it_ops"],
+                options=[
+                    {"id": "contain", "label": "Contain", "next_inject_id": "containment"},
+                    {"id": "monitor", "label": "Monitor", "next_inject_id": "spread"},
+                ],
+            ),
+            InjectNode(
+                id="containment",
+                title="Containment holds",
+                content="Isolated.",
+                target_teams=["it_ops"],
+                release_at_minutes=30,
+            ),
+            InjectNode(
+                id="spread",
+                title="It spreads",
+                content="Second host hit.",
+                target_teams=["it_ops"],
+                release_at_minutes=30,
+            ),
+        ],
+        start_inject_id="triage",
+    )
+    scenario = await create_scenario(session, definition=definition, created_by=facilitator.id)
+    exercise = await create_exercise(
+        session, scenario_id=scenario.id, title="Fork Ex", created_by=facilitator.id
+    )
+    await enrol_member(session, exercise=exercise, user_id=participant.id, group_id="it_ops")
+    exercise = await transition_state(session, exercise, ExerciseState.active)
+    triage = await _inject_by_node(session, exercise.id, "triage")
+    containment = await _inject_by_node(session, exercise.id, "containment")
+    spread = await _inject_by_node(session, exercise.id, "spread")
+
+    await client.post(
+        f"/api/exercises/{exercise.id}/injects/{triage.id}/release",
+        headers=AUTH(facilitator_token),
+    )
+    await client.post(
+        f"/api/exercises/{exercise.id}/responses",
+        json={"inject_id": triage.id, "content": "Contain it.", "selected_option": "contain"},
+        headers=AUTH(participant_token),
+    )
+
+    assert containment.id in schedule_service._scheduled[exercise.id]
+    assert spread.id not in schedule_service._scheduled[exercise.id]
+
+
+async def test_rearming_does_not_replace_a_live_timer(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+    participant_token: str,
+    facilitator_token: str,
+):
+    """A second response must not cancel-and-replace a timer that is already armed.
+
+    arm_inject_schedule cancels before it arms, and cancel_inject_schedule only refuses to
+    cancel the *calling* task. So a blind re-arm could kill a worker mid-release — between
+    its commit and its dispatch — leaving an inject released in the database with no frame
+    and no triggered comms. The deadline cannot have moved, so the armed task must survive
+    untouched.
+    """
+    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
+    detect = await _inject_by_node(session, exercise.id, "detect")
+    escalate = await _inject_by_node(session, exercise.id, "escalate")
+
+    await client.post(
+        f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
+        headers=AUTH(facilitator_token),
+    )
+    await client.post(
+        f"/api/exercises/{exercise.id}/responses",
+        json={"inject_id": detect.id, "content": "Investigating."},
+        headers=AUTH(participant_token),
+    )
+    timer = schedule_service._scheduled[exercise.id][escalate.id]
+
+    # A second cursor advance over the same node — here, the same team replaying its way
+    # through the exercise via a fresh response on the next inject — re-runs the arming.
+    await schedule_service.arm_cursor_reached_injects(session, exercise)
+
+    assert schedule_service._scheduled[exercise.id][escalate.id] is timer
+    assert not timer.task.cancelled()
+
+
+async def test_a_response_landing_mid_deferral_still_leaves_a_timer(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+    participant_token: str,
+    facilitator_token: str,
+    monkeypatch,
+):
+    """Both sides must not stand down at once, or the inject is stranded after all.
+
+    The registry entry outlives the worker's decision to defer, so there is a window where
+    a response can commit, see a live-looking timer, and skip arming — while that worker's
+    gate query had already read the *pre-commit* cursor and is about to defer and vanish.
+    Neither side arms, and the inject sits pending forever: #218 again, just narrower.
+
+    Drive the interleaving precisely by blocking the worker inside the gate, advancing the
+    cursor, and running the arm handler while it is still registered.
+    """
+    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=0)
+    detect = await _inject_by_node(session, exercise.id, "detect")
+    escalate = await _inject_by_node(session, exercise.id, "escalate")
+    await client.post(
+        f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
+        headers=AUTH(facilitator_token),
+    )
+
+    in_gate = asyncio.Event()
+    resume_gate = asyncio.Event()
+    real_gate = progression_service.release_is_allowed
+
+    async def blocking_gate(session_, inject, *, scheduled=False):
+        allowed = await real_gate(session_, inject, scheduled=scheduled)
+        if inject.id == escalate.id:
+            # The answer is now fixed on the pre-response cursor — exactly the stale read.
+            in_gate.set()
+            await resume_gate.wait()
+        return allowed
+
+    monkeypatch.setattr(progression_service, "release_is_allowed", blocking_gate)
+    monkeypatch.setattr(
+        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
+    )
+
+    schedule_service._arm(exercise.id, escalate.id, 0)
+    worker = schedule_service._scheduled[exercise.id][escalate.id].task
+    await asyncio.wait_for(in_gate.wait(), timeout=5)
+
+    # The response commits and dispatches (arming the cursor-reached injects as it goes)
+    # while the worker sits blocked on its stale answer.
+    await submit_response(
+        session,
+        inject_id=detect.id,
+        exercise_id=exercise.id,
+        user_id=participant.id,
+        content="Investigating.",
+        group_id="it_ops",
+    )
+
+    # Spy the re-arm rather than letting it run: a second delay-0 worker would re-enter this
+    # test's session while it is still in use (see the _CtxSession note above).
+    rearmed: list[tuple[int, int, float]] = []
+    monkeypatch.setattr(
+        schedule_service,
+        "_arm",
+        lambda ex_id, inject_id, delay: rearmed.append((ex_id, inject_id, delay)),
+    )
+    resume_gate.set()
+    await asyncio.wait_for(worker, timeout=5)
+
+    # The worker took the news the response left it and re-armed, instead of both sides
+    # standing down. Delay 0, because the offset has long since passed.
+    assert rearmed == [(exercise.id, escalate.id, 0.0)]
+
+
+async def test_scheduled_release_of_an_unreferenced_node_survives_the_first_response(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+    participant_token: str,
+    facilitator_token: str,
+    monkeypatch,
+):
+    """A timed node nothing links to fires on its clock, first response or not.
+
+    No cursor will *ever* point at an orphan, so re-arming cannot save it — the cursor lock
+    has to let a *scheduled* release through instead. It still refuses a manual one, which
+    test_responses.py::test_unlinked_inject_is_releasable_only_before_the_first_response
+    pins from the other side. This is the "at T+40 the press calls" shape: a parallel
+    timeline that depends on no branch.
+    """
+    definition = ScenarioDefinition(
+        title="Parallel timeline",
+        participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+        injects=[
+            InjectNode(
+                id="detect",
+                title="Anomaly detected",
+                content="Unusual outbound traffic.",
+                target_teams=["it_ops"],
+            ),
+            InjectNode(
+                id="press_call",
+                title="The press calls",
+                content="A journalist has the story.",
+                target_teams=["it_ops"],
+                release_at_minutes=40,
+            ),
+        ],
+        start_inject_id="detect",
+    )
+    scenario = await create_scenario(session, definition=definition, created_by=facilitator.id)
+    exercise = await create_exercise(
+        session, scenario_id=scenario.id, title="Parallel Ex", created_by=facilitator.id
+    )
+    await enrol_member(session, exercise=exercise, user_id=participant.id, group_id="it_ops")
+    exercise = await transition_state(session, exercise, ExerciseState.active)
+    detect = await _inject_by_node(session, exercise.id, "detect")
+    press_call = await _inject_by_node(session, exercise.id, "press_call")
+
+    # The first response anywhere is what used to shut the orphan's release window.
+    await client.post(
+        f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
+        headers=AUTH(facilitator_token),
+    )
+    await client.post(
+        f"/api/exercises/{exercise.id}/responses",
+        json={"inject_id": detect.id, "content": "Investigating."},
+        headers=AUTH(participant_token),
+    )
 
     monkeypatch.setattr(
         schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
     )
-    await schedule_service._release_when_due(exercise.id, escalate.id, 0)
+    await schedule_service._release_when_due(exercise.id, press_call.id, 0)
 
-    # Nobody responded to `detect`, so the cursor never advanced to `escalate`.
-    assert escalate.state == InjectState.pending
-    # And the timer is one-shot: nothing re-arms it when the team later catches up.
-    assert escalate.id not in schedule_service._scheduled.get(exercise.id, {})
+    # The worker shares this session's identity map, so release_inject's refresh lands on
+    # the instance we already hold.
+    assert press_call.state == InjectState.released
 
 
 async def test_scheduled_release_fires_once_the_team_has_reached_the_inject(

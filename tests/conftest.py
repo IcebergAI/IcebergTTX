@@ -123,6 +123,33 @@ def _reset_login_rate_limiter():
 
 
 @pytest.fixture(autouse=True)
+def _clear_schedules():
+    """Cancel any timers a test armed so sleeping tasks don't leak between tests.
+
+    Global rather than local to test_pacing, because arming is no longer something only
+    that module provokes: since #218 *any* response submitted in an exercise with a
+    scheduled inject arms a real task, from whichever test file happens to do it.
+
+    Sync, and cancelling the tasks by hand rather than through cancel_exercise_schedules:
+    an autouse fixture here also applies to test_ui.py's *synchronous* Playwright tests, so
+    an async one fails them all with "Runner.run() cannot be called from a running event
+    loop" — and the service helper calls asyncio.current_task(), which needs a running loop
+    that a sync teardown does not have. Task.cancel() itself does not.
+    """
+    from app.services import schedule_service
+
+    yield
+    for timers in schedule_service._scheduled.values():
+        for timer in timers.values():
+            timer.task.cancel()
+    schedule_service._scheduled.clear()
+    for tasks in schedule_service._scheduled_comms.values():
+        for task in tasks.values():
+            task.cancel()
+    schedule_service._scheduled_comms.clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_llm_provider_cache():
     """Drop the cached active AI provider so tests that monkeypatch LLM_PROVIDER /
     settings see a freshly-built provider (#26)."""

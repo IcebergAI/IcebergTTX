@@ -233,34 +233,31 @@ auto-releases that many minutes after the exercise **starts**.
 ```
 
 **What the facilitator sees** — `detect` is released by hand as usual. `escalate` shows a
-live **countdown** in the inject tree and, **provided the team has reached it**, releases
-itself 30 minutes after the exercise started. The facilitator can still hit **Release** to
-bring it forward, or cancel the schedule to make it manual again.
+live **countdown** in the inject tree and releases itself 30 minutes after the exercise
+started. The facilitator can still hit **Release** to bring it forward, or cancel the
+schedule to make it manual again.
 
-!!! warning "A timer only fires on an inject the team has actually reached"
-    This is the part that will catch you out. `release_at_minutes` does not exempt an inject
-    from the progression cursor: an inject can only be released when it is the **current
-    branch for its group**. In the scenario above, the team reaches `escalate` only by
-    responding to `detect`.
+!!! note "A timer says *when*, the branch still says *whether*"
+    A schedule never jumps the participants' choices. `escalate` is on the team's path
+    because they responded to `detect`; the countdown only decides the moment it lands.
 
-    So if nobody has responded to `detect` when the 30-minute mark arrives, the scheduled
-    release is **rejected and silently skipped** — and the timer is **one-shot**, so it does
-    not re-arm when the team catches up later. The inject stays `pending` and you must
-    release it by hand.
+    If the 30-minute mark arrives and the team is **still working on `detect`**, the release
+    is **deferred**, not lost. The moment their response advances the cursor onto `escalate`,
+    its timer is re-armed — and since the offset has already passed, it releases
+    **immediately**. A slow room gets the inject late rather than not at all.
 
-    Two practical consequences:
+    On a **branch**, a timer can only ever fire on the branch the team actually chose. If
+    both options' successors are scheduled, only the one they picked is armed.
 
-    - **Leave slack.** Pick an offset the team will comfortably have reached by, not the
-      earliest moment the inject *could* make sense.
-    - **Don't rely on it for the critical path.** Treat a schedule as a convenience that
-      saves you watching a stopwatch, not as a guarantee the inject will appear.
+!!! tip "A timed inject needs no branch at all"
+    An **unreferenced** node — one nothing links to — is the natural shape for a parallel
+    timeline: *at T+40, the press calls*, regardless of what the team decided. Give it a
+    `release_at_minutes` and no `next_inject_id` pointing at it, and it fires on its clock.
 
-    The **start inject** is the one node whose schedule can never be skipped: a cursor points
-    at it from `t=0` and cannot move off it until it has been released and answered.
-
-    An *unreferenced* node (like `legal_task` above) is releasable at the start too — but
-    only until the **first response anywhere in the exercise**, after which it is refused
-    like any other off-cursor node. So it is not a safe thing to schedule.
+    Its **countdown** is exempt from the progression cursor, because it is declared in the
+    scenario before the exercise runs and picks no branch. Releasing it **by hand** is not:
+    once any team has responded to anything, the manual **Release** button refuses an
+    off-cursor node, as it does for any node the participants did not choose their way to.
 
 !!! note "The countdown is pause-aware"
     The offset is measured in *elapsed exercise time*, not wall-clock time. Pausing the

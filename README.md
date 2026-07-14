@@ -625,8 +625,9 @@ k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, 
 2. **Create an exercise** — Exercises → New, select a scenario, optionally enable LLM
 3. **Enrol participants** — Facilitator console → Participants panel, search and add users
 4. **Start and release injects** — Hit Start, then Release each inject when ready. An inject
-   carrying `release_at_minutes` auto-releases on a pause-aware countdown once the team has
-   reached it; you can still release it early or cancel the schedule
+   carrying `release_at_minutes` auto-releases on a pause-aware countdown (deferred, not
+   lost, if the team hasn't reached it yet); you can still release it early or cancel the
+   schedule
 5. **Review responses** — Middle pane. The team's selected option settles *which* branch
    follows; you decide whether and when to release it (the branch they didn't pick is
    rejected with a 409)

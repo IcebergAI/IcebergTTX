@@ -1,33 +1,66 @@
-"""Pause-aware, restart-safe exercise scheduling (#116, #194).
+"""Pause-aware, restart-safe exercise scheduling (#116, #194, #211, #218).
 
-An inject may carry a ``release_offset_minutes`` — minutes after the exercise's
-effective start at which it auto-releases. The registry also covers scenario
-``triggers_communications``, so every
-pending timer is deferred on pause, cancelled on completion, and rehydrated after restart.
+An inject may carry a ``release_offset_minutes`` — minutes after the exercise's effective
+start at which it auto-releases. The registry also covers scenario
+``triggers_communications`` (#211), so every pending timer is deferred on pause, cancelled
+on completion, and rehydrated after restart.
 
-Single-process only: the registry is in-memory, so a
-multi-process deployment would need a task queue (Celery/ARQ) — see the single-replica
-note in CLAUDE.md. Startup rehydration (``app/main.py``) re-arms schedules for active
-exercises after a single-process restart; it does not survive across replicas.
+A timer says *when* an inject may release; the progression cursor still says *whether* it
+may. Three mechanisms compose to keep a schedule from silently evaporating when the room
+runs slow (#218):
+
+* **the clock** — ``schedule_exercise_injects`` arms *every* scheduled inject on start,
+  resume, and restart, whether or not a cursor has reached it yet.
+* **not yet** — a timer that comes due on a node no cursor points at is *deferred*:
+  ``_release_when_due`` checks the gate itself and returns without releasing. It is a
+  one-shot task, so it ends there.
+* **the gate opened** — ``arm_cursor_reached_injects`` brings that timer back the moment a
+  response advances a cursor onto its node, at delay 0 if the offset has already elapsed,
+  so an overdue inject releases at once rather than never.
+
+Single-process only: the registry is in-memory, so a multi-process deployment would need a
+task queue (Celery/ARQ) — see the single-replica note in CLAUDE.md. Startup rehydration
+(``app/main.py``) re-arms schedules for active exercises after a single-process restart; it
+does not survive across replicas.
 """
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.communication import Communication
-from app.models.exercise import Exercise, ExerciseState, ExerciseStateTransition
+from app.models.exercise import (
+    Exercise,
+    ExerciseProgress,
+    ExerciseState,
+    ExerciseStateTransition,
+)
 from app.models.inject import Inject, InjectState
 from app.services import audit_service
 
 logger = logging.getLogger(__name__)
 
-# exercise_id -> {inject_id -> pending release task}. Holds a strong reference so the
+@dataclass
+class _Timer:
+    """A pending release, plus the one bit of coordination re-arming needs.
+
+    ``rearm_requested`` is set when a cursor advances onto this inject while its worker is
+    *already running*. The worker cannot trust its own gate query in that case — the query
+    may have read the cursor from before the response committed — so it re-arms instead of
+    dropping the only timer there is. See ``_consume_rearm_or_deregister``.
+    """
+
+    task: asyncio.Task
+    rearm_requested: bool = False
+
+
+# exercise_id -> {inject_id -> pending release timer}. Holds a strong reference so the
 # task isn't GC'd (cf. background.spawn) *and* lets us cancel a specific timer.
-_scheduled: dict[int, dict[int, asyncio.Task]] = {}
+_scheduled: dict[int, dict[int, _Timer]] = {}
 _scheduled_comms: dict[int, dict[str, asyncio.Task]] = {}
 
 
@@ -45,8 +78,9 @@ def _effective_elapsed_seconds(exercise: Exercise) -> float:
 
 def _forget(exercise_id: int, inject_id: int, task: asyncio.Task) -> None:
     ex_tasks = _scheduled.get(exercise_id)
+    timer = ex_tasks.get(inject_id) if ex_tasks else None
     # Only drop if this is still the registered task — a re-arm may have replaced it.
-    if ex_tasks and ex_tasks.get(inject_id) is task:
+    if ex_tasks and timer is not None and timer.task is task:
         ex_tasks.pop(inject_id, None)
         if not ex_tasks:
             _scheduled.pop(exercise_id, None)
@@ -54,8 +88,39 @@ def _forget(exercise_id: int, inject_id: int, task: asyncio.Task) -> None:
 
 def _arm(exercise_id: int, inject_id: int, delay: float) -> None:
     task = asyncio.ensure_future(_release_when_due(exercise_id, inject_id, delay))
-    _scheduled.setdefault(exercise_id, {})[inject_id] = task
+    _scheduled.setdefault(exercise_id, {})[inject_id] = _Timer(task=task)
     task.add_done_callback(lambda t: _forget(exercise_id, inject_id, t))
+
+
+def _consume_rearm_or_deregister(exercise_id: int, inject_id: int) -> bool:
+    """Settle, in one await-free step, whether a deferring worker must re-arm itself.
+
+    The registry entry outlives the worker's decision to defer — it is only dropped by the
+    done-callback — so between "the gate said no" and "the task finished" there is a window
+    in which ``arm_cursor_reached_injects`` would see a live-looking timer and skip. If the
+    worker's gate query had read the cursor from *before* that response committed, both
+    sides stand down and the inject is stranded pending: the exact failure #218 exists to
+    fix, just narrower.
+
+    Closing it needs no lock, only the absence of an ``await``. The event loop cannot
+    interleave the arm handler between the check and the write here, so exactly one of two
+    things is true:
+
+    * the flag is already set — the arm handler got here first; take it and re-arm.
+    * it is not — deregister *now*, so an arm handler arriving later finds no timer to skip
+      and arms a fresh one itself.
+    """
+    ex_tasks = _scheduled.get(exercise_id)
+    timer = ex_tasks.get(inject_id) if ex_tasks else None
+    if timer is None or timer.task is not asyncio.current_task():
+        return False
+    if timer.rearm_requested:
+        timer.rearm_requested = False
+        return True
+    ex_tasks.pop(inject_id, None)  # type: ignore[union-attr]
+    if not ex_tasks:
+        _scheduled.pop(exercise_id, None)
+    return False
 
 
 def _forget_comm(exercise_id: int, trigger_key: str, task: asyncio.Task) -> None:
@@ -103,12 +168,12 @@ def cancel_inject_schedule(exercise_id: int, inject_id: int | None) -> None:
     ex_tasks = _scheduled.get(exercise_id)
     if not ex_tasks:
         return
-    task = ex_tasks.pop(inject_id, None)
+    timer = ex_tasks.pop(inject_id, None)
     if not ex_tasks:
         _scheduled.pop(exercise_id, None)
     # Never cancel the worker that is itself calling this (via release_inject on fire).
-    if task is not None and task is not asyncio.current_task():
-        task.cancel()
+    if timer is not None and timer.task is not asyncio.current_task():
+        timer.task.cancel()
 
 
 def cancel_exercise_schedules(exercise_id: int) -> None:
@@ -116,7 +181,8 @@ def cancel_exercise_schedules(exercise_id: int) -> None:
     ex_tasks = _scheduled.pop(exercise_id, None) or {}
     comm_tasks = _scheduled_comms.pop(exercise_id, None) or {}
     current = asyncio.current_task()
-    for task in (*ex_tasks.values(), *comm_tasks.values()):
+    tasks = [timer.task for timer in ex_tasks.values()] + list(comm_tasks.values())
+    for task in tasks:
         if task is not current:
             task.cancel()
 
@@ -250,6 +316,57 @@ async def schedule_exercise_injects(session: AsyncSession, exercise: Exercise) -
     await _schedule_exercise_communications(session, exercise)
 
 
+async def arm_cursor_reached_injects(session: AsyncSession, exercise: Exercise) -> None:
+    """Arm scheduled injects a progression cursor now points at (#218).
+
+    A timer is one-shot, so one that came due before the team reached its node was
+    deferred and dropped (``_release_when_due``). This brings it back the moment a
+    response advances a cursor onto that node — ``arm_inject_schedule`` computes the delay
+    from the offset's absolute basis, so an inject whose offset has already elapsed arms at
+    0 and releases immediately rather than never.
+
+    Matches on ``current_node_id`` because that is what ``release_is_allowed`` matches on;
+    the two are the same predicate seen from either end and have to stay in lockstep.
+    ``current_inject_id`` would be wrong — it points at the inject just *resolved*.
+    """
+    if exercise.state != ExerciseState.active or exercise.started_at is None or exercise.id is None:
+        return
+    cursors = (
+        await session.exec(
+            select(ExerciseProgress).where(ExerciseProgress.exercise_id == exercise.id)
+        )
+    ).all()
+    node_ids = {cursor.current_node_id for cursor in cursors if cursor.current_node_id}
+    if not node_ids:
+        return
+    # No group filter: a branch may hand off between teams, so release_is_allowed honours
+    # *any* cursor sitting on the node. Filtering here would under-arm that handoff. One
+    # node can also seed a physical inject per target team — both need arming.
+    injects = (
+        await session.exec(
+            select(Inject).where(
+                Inject.exercise_id == exercise.id,
+                Inject.state == InjectState.pending,
+                col(Inject.release_offset_minutes).is_not(None),
+                col(Inject.scenario_node_id).in_(node_ids),
+            )
+        )
+    ).all()
+    armed = _scheduled.get(exercise.id, {})
+    for inject in injects:
+        timer = armed.get(inject.id) if inject.id is not None else None
+        if timer is not None:
+            # Never cancel a live timer to replace it. arm_inject_schedule cancels before it
+            # arms, so a response landing while this inject's worker is mid-release would
+            # kill it between its commit and its dispatch — an inject released with no frame
+            # and no triggered comms. Its deadline cannot have moved, so there is nothing to
+            # replace anyway; the worker only needs to know a cursor reached it, in case its
+            # own gate query answered from before this response committed.
+            timer.rearm_requested = True
+            continue
+        arm_inject_schedule(exercise, inject)
+
+
 async def rehydrate_schedules() -> None:
     """Re-arm pending exercise timers for every active exercise on startup.
 
@@ -276,6 +393,7 @@ async def _release_when_due(exercise_id: int, inject_id: int, delay: float) -> N
 
         from app.database import engine
         from app.services.inject_service import release_inject
+        from app.services.progression_service import release_is_allowed
 
         async with AsyncSession(engine, expire_on_commit=False) as session:
             inject = await session.get(Inject, inject_id)
@@ -290,7 +408,31 @@ async def _release_when_due(exercise_id: int, inject_id: int, delay: float) -> N
                 or inject.release_offset_minutes is None
             ):
                 return
-            await release_inject(session, inject, released_by=None)
+            # Not a failure, so not an exception: the team simply has not reached this
+            # node yet. Checking the gate here rather than letting release_inject raise
+            # keeps the case distinguishable from a real one, and arm_cursor_reached_injects
+            # brings the timer back when a response advances a cursor onto the node —
+            # at delay 0 if the offset has already passed (#218).
+            if not await release_is_allowed(session, inject, scheduled=True):
+                # No await between the gate's answer and this: a response committing in that
+                # gap would otherwise find this timer still registered, skip it, and leave
+                # the inject with no timer at all once we drop out (see the docstring).
+                if _consume_rearm_or_deregister(exercise_id, inject_id):
+                    arm_inject_schedule(exercise, inject)
+                    return
+                logger.info(
+                    "Scheduled release deferred for inject %d: no cursor has reached it",
+                    inject_id,
+                )
+                audit_service.emit(
+                    "inject.release_deferred",
+                    actor=None,
+                    target_type="inject",
+                    target_id=inject_id,
+                    reason="cursor_not_reached",
+                )
+                return
+            await release_inject(session, inject, released_by=None, scheduled=True)
             audit_service.emit(
                 "inject.release",
                 actor=None,
