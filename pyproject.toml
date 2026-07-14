@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iceberg-ttx"
-version = "0.1.0b2"
+version = "0.1.0b3"
 description = "A tabletop exercise (TTX) platform for running cyber incident and business resilience scenarios."
 readme = "README.md"
 requires-python = ">=3.14"
