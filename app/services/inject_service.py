@@ -74,6 +74,8 @@ async def release_inject(
     session: AsyncSession,
     inject: Inject,
     released_by: int | None,
+    *,
+    scheduled: bool = False,
 ) -> Inject:
     from app.services.progression_service import (
         lock_exercise_for_audience_snapshot,
@@ -83,7 +85,7 @@ async def release_inject(
 
     await lock_exercise_for_audience_snapshot(session, inject.exercise_id)
 
-    if not await release_is_allowed(session, inject):
+    if not await release_is_allowed(session, inject, scheduled=scheduled):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Inject is not the current branch for its group",

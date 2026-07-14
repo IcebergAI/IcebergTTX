@@ -238,3 +238,23 @@ async def schedule_triggered_communications(session: AsyncSession, ev: InjectRel
     node = get_inject_node(definition, inject.scenario_node_id)
     if node and node.triggers_communications:
         schedule_triggered_comms(inject, node.triggers_communications, node.id)
+
+
+@subscribe(ResponseSubmitted)
+async def arm_schedules_the_response_unlocked(session: AsyncSession, ev: ResponseSubmitted) -> None:
+    """A response is the only thing that advances a progression cursor, and a cursor
+    advance is the only thing that unlocks a scheduled inject the team had not reached
+    (#218). So the re-arm belongs here, on the same post-commit seam as the frame: arming a
+    timer against a cursor advance that then rolled back would release an inject the
+    participants never chose.
+
+    Registered after ``on_response_submitted`` — subscriber order is registration order, so
+    the ``response_submitted`` frame still lists the newly-armed inject as pending, and any
+    immediate ``inject_released`` follows it rather than racing it.
+    """
+    from app.models.exercise import Exercise
+    from app.services.schedule_service import arm_cursor_reached_injects
+
+    exercise = await session.get(Exercise, ev.exercise_id)
+    if exercise is not None:
+        await arm_cursor_reached_injects(session, exercise)

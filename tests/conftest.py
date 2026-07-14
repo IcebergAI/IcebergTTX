@@ -122,6 +122,22 @@ def _reset_login_rate_limiter():
     password_reset_rate_limiter.clear()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _clear_schedules():
+    """Cancel any timers a test armed so sleeping tasks don't leak between tests.
+
+    Global rather than local to test_pacing, because arming is no longer something only
+    that module provokes: since #218 *any* response submitted in an exercise with a
+    scheduled inject arms a real task, from whichever test file happens to do it.
+    """
+    from app.services import schedule_service
+
+    yield
+    exercise_ids = set(schedule_service._scheduled) | set(schedule_service._scheduled_comms)
+    for exercise_id in exercise_ids:
+        schedule_service.cancel_exercise_schedules(exercise_id)
+
+
 @pytest.fixture(autouse=True)
 def _reset_llm_provider_cache():
     """Drop the cached active AI provider so tests that monkeypatch LLM_PROVIDER /

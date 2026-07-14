@@ -1,14 +1,27 @@
-"""Pause-aware, restart-safe exercise scheduling (#116, #194).
+"""Pause-aware, restart-safe exercise scheduling (#116, #194, #211, #218).
 
-An inject may carry a ``release_offset_minutes`` — minutes after the exercise's
-effective start at which it auto-releases. The registry also covers scenario
-``triggers_communications``, so every
-pending timer is deferred on pause, cancelled on completion, and rehydrated after restart.
+An inject may carry a ``release_offset_minutes`` — minutes after the exercise's effective
+start at which it auto-releases. The registry also covers scenario
+``triggers_communications`` (#211), so every pending timer is deferred on pause, cancelled
+on completion, and rehydrated after restart.
 
-Single-process only: the registry is in-memory, so a
-multi-process deployment would need a task queue (Celery/ARQ) — see the single-replica
-note in CLAUDE.md. Startup rehydration (``app/main.py``) re-arms schedules for active
-exercises after a single-process restart; it does not survive across replicas.
+A timer says *when* an inject may release; the progression cursor still says *whether* it
+may. Three mechanisms compose to keep a schedule from silently evaporating when the room
+runs slow (#218):
+
+* **the clock** — ``schedule_exercise_injects`` arms *every* scheduled inject on start,
+  resume, and restart, whether or not a cursor has reached it yet.
+* **not yet** — a timer that comes due on a node no cursor points at is *deferred*:
+  ``_release_when_due`` checks the gate itself and returns without releasing. It is a
+  one-shot task, so it ends there.
+* **the gate opened** — ``arm_cursor_reached_injects`` brings that timer back the moment a
+  response advances a cursor onto its node, at delay 0 if the offset has already elapsed,
+  so an overdue inject releases at once rather than never.
+
+Single-process only: the registry is in-memory, so a multi-process deployment would need a
+task queue (Celery/ARQ) — see the single-replica note in CLAUDE.md. Startup rehydration
+(``app/main.py``) re-arms schedules for active exercises after a single-process restart; it
+does not survive across replicas.
 """
 
 import asyncio
@@ -19,7 +32,12 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.communication import Communication
-from app.models.exercise import Exercise, ExerciseState, ExerciseStateTransition
+from app.models.exercise import (
+    Exercise,
+    ExerciseProgress,
+    ExerciseState,
+    ExerciseStateTransition,
+)
 from app.models.inject import Inject, InjectState
 from app.services import audit_service
 
@@ -250,6 +268,54 @@ async def schedule_exercise_injects(session: AsyncSession, exercise: Exercise) -
     await _schedule_exercise_communications(session, exercise)
 
 
+async def arm_cursor_reached_injects(session: AsyncSession, exercise: Exercise) -> None:
+    """Arm scheduled injects a progression cursor now points at (#218).
+
+    A timer is one-shot, so one that came due before the team reached its node was
+    deferred and dropped (``_release_when_due``). This brings it back the moment a
+    response advances a cursor onto that node — ``arm_inject_schedule`` computes the delay
+    from the offset's absolute basis, so an inject whose offset has already elapsed arms at
+    0 and releases immediately rather than never.
+
+    Matches on ``current_node_id`` because that is what ``release_is_allowed`` matches on;
+    the two are the same predicate seen from either end and have to stay in lockstep.
+    ``current_inject_id`` would be wrong — it points at the inject just *resolved*.
+    """
+    if exercise.state != ExerciseState.active or exercise.started_at is None or exercise.id is None:
+        return
+    cursors = (
+        await session.exec(
+            select(ExerciseProgress).where(ExerciseProgress.exercise_id == exercise.id)
+        )
+    ).all()
+    node_ids = {cursor.current_node_id for cursor in cursors if cursor.current_node_id}
+    if not node_ids:
+        return
+    # No group filter: a branch may hand off between teams, so release_is_allowed honours
+    # *any* cursor sitting on the node. Filtering here would under-arm that handoff. One
+    # node can also seed a physical inject per target team — both need arming.
+    injects = (
+        await session.exec(
+            select(Inject).where(
+                Inject.exercise_id == exercise.id,
+                Inject.state == InjectState.pending,
+                col(Inject.release_offset_minutes).is_not(None),
+                col(Inject.scenario_node_id).in_(node_ids),
+            )
+        )
+    ).all()
+    armed = _scheduled.get(exercise.id, {})
+    for inject in injects:
+        # Never re-arm a live timer. arm_inject_schedule cancels before it arms, and a
+        # second team's response landing while this inject's worker is mid-release would
+        # cancel it between its commit and its dispatch — leaving the inject released with
+        # no frame and no triggered comms. The deadline cannot have moved anyway, so
+        # skipping costs nothing (cf. arm_triggered_communication).
+        if inject.id in armed:
+            continue
+        arm_inject_schedule(exercise, inject)
+
+
 async def rehydrate_schedules() -> None:
     """Re-arm pending exercise timers for every active exercise on startup.
 
@@ -276,6 +342,7 @@ async def _release_when_due(exercise_id: int, inject_id: int, delay: float) -> N
 
         from app.database import engine
         from app.services.inject_service import release_inject
+        from app.services.progression_service import release_is_allowed
 
         async with AsyncSession(engine, expire_on_commit=False) as session:
             inject = await session.get(Inject, inject_id)
@@ -290,7 +357,25 @@ async def _release_when_due(exercise_id: int, inject_id: int, delay: float) -> N
                 or inject.release_offset_minutes is None
             ):
                 return
-            await release_inject(session, inject, released_by=None)
+            # Not a failure, so not an exception: the team simply has not reached this
+            # node yet. Checking the gate here rather than letting release_inject raise
+            # keeps the case distinguishable from a real one, and arm_cursor_reached_injects
+            # brings the timer back when a response advances a cursor onto the node —
+            # at delay 0 if the offset has already passed (#218).
+            if not await release_is_allowed(session, inject, scheduled=True):
+                logger.info(
+                    "Scheduled release deferred for inject %d: no cursor has reached it",
+                    inject_id,
+                )
+                audit_service.emit(
+                    "inject.release_deferred",
+                    actor=None,
+                    target_type="inject",
+                    target_id=inject_id,
+                    reason="cursor_not_reached",
+                )
+                return
+            await release_inject(session, inject, released_by=None, scheduled=True)
             audit_service.emit(
                 "inject.release",
                 actor=None,

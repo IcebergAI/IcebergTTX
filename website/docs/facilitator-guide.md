@@ -91,14 +91,14 @@ early**, and its schedule can be **cancelled** outright, from the same control:
 - **Release early** — the ordinary **Release** button, which cancels the pending timer.
 - **Cancel the schedule** — reverts the inject to manual-only release.
 
-!!! warning "A timer only fires on an inject the team has actually reached"
-    A schedule does not exempt an inject from the progression cursor. If the team has not yet
-    reached that inject when its countdown expires — because they haven't responded to the
-    inject before it — the release is **skipped**, and the timer does **not** re-arm when
-    they catch up. The inject simply stays `pending` for you to release by hand.
+!!! note "A slow room gets the inject late, not never"
+    A timer decides *when* an inject lands, never *which* branch the team is on. If the
+    countdown expires while they are still working on the inject before it, the release is
+    **deferred** — and lands the moment their response advances the team onto it, since the
+    offset has by then already passed.
 
-    Leave slack in your offsets, and treat a schedule as a convenience that saves you
-    watching a stopwatch rather than a guarantee the inject will appear. See the
+    So you can set an offset for when the inject should ideally arrive, without having to
+    guess how fast the room will move. See the
     [scheduled-release recipe](cookbook.md#recipe-scheduled-release-put-an-inject-on-a-clock).
 
 #### Who chooses the branch
@@ -117,8 +117,8 @@ is rejected with `409 Inject is not the current branch for its group`.
 
 So the scenario never picks a branch on its own — the route through the tree is theirs, and
 the pace is yours. The one thing that *can* reach participants without you is a **scheduled
-inject** (above): its countdown fires by itself, but only on a node the team's cursor has
-already reached. A timer never chooses a branch, and never jumps ahead of the room.
+inject** (above): its countdown fires by itself, but only on a node the team has reached, or
+on one no branch links to at all. A timer never chooses a branch, and never jumps the room.
 
 ![Reviewing a response and its suggested next branch](assets/inject-release.png){ .shot }
 

@@ -138,9 +138,11 @@ participants' to choose. That is the point — their decisions have to actually 
 consequences.
 
 *Delivery*, on the other hand, can be automatic. An inject carrying
-[`release_at_minutes`](#fields) releases itself on a countdown once the team's cursor has
-reached it, with no facilitator action. That is a timer on an inject the participants have
-already unlocked — it never selects a branch, and it can never jump the cursor.
+[`release_at_minutes`](#fields) releases itself on a countdown, with no facilitator action.
+A timer decides only *when* an inject lands: it never selects a branch. On a node the team
+has not reached yet, the release is deferred until their response unlocks it — arriving
+immediately, if the offset has passed by then. On an **unreferenced** node — one no branch
+links to — it simply fires on its clock, which is how you run a parallel timeline.
 
 !!! note "One response settles the branch for the whole team"
     The cursor is per team, not per person. The first response resolves the inject for the
@@ -170,10 +172,9 @@ rated as poor.
    enrol them; each is assigned a team. Share `/exercises/{id}/participate`.
 4. **Start and release injects** — press **Release** to push an inject; participants
    receive it instantly over WebSocket. An inject carrying `release_at_minutes` also
-   auto-releases on a pause-aware countdown once the team has reached it, and you can
-   pre-empt or cancel that. Review responses and team comments, then release the branch the
-   team's choice resolved to. **Pause** halts new submissions (and defers any pending
-   timers).
+   auto-releases on a pause-aware countdown, and you can pre-empt or cancel that. Review
+   responses and team comments, then release the branch the team's choice resolved to.
+   **Pause** halts new submissions (and defers any pending timers).
 5. **Inject communications** — from **Communications**, click *Inject inbound* to
    simulate a message from an external entity (ICO, NCSC, CEO…) targeted at specific
    teams.

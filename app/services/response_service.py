@@ -104,6 +104,10 @@ async def submit_response(
             inject=inject,
             group_id=group_id,
             actor_id=user_id,
+            # The guard looks like it hides a multi-successor case, but there isn't one:
+            # response_next_inject_ids resolves at most one id on every path. A null cursor
+            # therefore means a genuine dead end (a leaf, or an option going nowhere), so
+            # there is nothing downstream for #218's re-arm to reach.
             next_node_id=next_ids[0] if len(next_ids) == 1 else None,
         )
         # Inside the transaction: the IntegrityError branch below rolls back, which
