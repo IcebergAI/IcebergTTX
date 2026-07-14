@@ -139,11 +139,14 @@ def _clear_schedules():
     from app.services import schedule_service
 
     yield
-    for registry in (schedule_service._scheduled, schedule_service._scheduled_comms):
-        for tasks in registry.values():
-            for task in tasks.values():
-                task.cancel()
-        registry.clear()
+    for timers in schedule_service._scheduled.values():
+        for timer in timers.values():
+            timer.task.cancel()
+    schedule_service._scheduled.clear()
+    for tasks in schedule_service._scheduled_comms.values():
+        for task in tasks.values():
+            task.cancel()
+    schedule_service._scheduled_comms.clear()
 
 
 @pytest.fixture(autouse=True)

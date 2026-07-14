@@ -1,5 +1,6 @@
-"""Pacing: exercise clock and durable exercise schedules (#116, #194)."""
+"""Pacing: exercise clock and durable exercise schedules (#116, #194, #218)."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -13,12 +14,13 @@ from app.models.exercise import Exercise, ExerciseState, ExerciseStateTransition
 from app.models.inject import Inject, InjectState
 from app.models.user import User
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition, TriggerComm
-from app.services import schedule_service
+from app.services import progression_service, schedule_service
 from app.services.exercise_service import (
     create_exercise,
     enrol_member,
     transition_state,
 )
+from app.services.response_service import submit_response
 from app.services.scenario_service import create_scenario
 
 AUTH = lambda t: {"Authorization": f"Bearer {t}"}  # noqa: E731
@@ -683,14 +685,89 @@ async def test_rearming_does_not_replace_a_live_timer(
         json={"inject_id": detect.id, "content": "Investigating."},
         headers=AUTH(participant_token),
     )
-    task = schedule_service._scheduled[exercise.id][escalate.id]
+    timer = schedule_service._scheduled[exercise.id][escalate.id]
 
     # A second cursor advance over the same node — here, the same team replaying its way
     # through the exercise via a fresh response on the next inject — re-runs the arming.
     await schedule_service.arm_cursor_reached_injects(session, exercise)
 
-    assert schedule_service._scheduled[exercise.id][escalate.id] is task
-    assert not task.cancelled()
+    assert schedule_service._scheduled[exercise.id][escalate.id] is timer
+    assert not timer.task.cancelled()
+
+
+async def test_a_response_landing_mid_deferral_still_leaves_a_timer(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+    participant_token: str,
+    facilitator_token: str,
+    monkeypatch,
+):
+    """Both sides must not stand down at once, or the inject is stranded after all.
+
+    The registry entry outlives the worker's decision to defer, so there is a window where
+    a response can commit, see a live-looking timer, and skip arming — while that worker's
+    gate query had already read the *pre-commit* cursor and is about to defer and vanish.
+    Neither side arms, and the inject sits pending forever: #218 again, just narrower.
+
+    Drive the interleaving precisely by blocking the worker inside the gate, advancing the
+    cursor, and running the arm handler while it is still registered.
+    """
+    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=0)
+    detect = await _inject_by_node(session, exercise.id, "detect")
+    escalate = await _inject_by_node(session, exercise.id, "escalate")
+    await client.post(
+        f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
+        headers=AUTH(facilitator_token),
+    )
+
+    in_gate = asyncio.Event()
+    resume_gate = asyncio.Event()
+    real_gate = progression_service.release_is_allowed
+
+    async def blocking_gate(session_, inject, *, scheduled=False):
+        allowed = await real_gate(session_, inject, scheduled=scheduled)
+        if inject.id == escalate.id:
+            # The answer is now fixed on the pre-response cursor — exactly the stale read.
+            in_gate.set()
+            await resume_gate.wait()
+        return allowed
+
+    monkeypatch.setattr(progression_service, "release_is_allowed", blocking_gate)
+    monkeypatch.setattr(
+        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
+    )
+
+    schedule_service._arm(exercise.id, escalate.id, 0)
+    worker = schedule_service._scheduled[exercise.id][escalate.id].task
+    await asyncio.wait_for(in_gate.wait(), timeout=5)
+
+    # The response commits and dispatches (arming the cursor-reached injects as it goes)
+    # while the worker sits blocked on its stale answer.
+    await submit_response(
+        session,
+        inject_id=detect.id,
+        exercise_id=exercise.id,
+        user_id=participant.id,
+        content="Investigating.",
+        group_id="it_ops",
+    )
+
+    # Spy the re-arm rather than letting it run: a second delay-0 worker would re-enter this
+    # test's session while it is still in use (see the _CtxSession note above).
+    rearmed: list[tuple[int, int, float]] = []
+    monkeypatch.setattr(
+        schedule_service,
+        "_arm",
+        lambda ex_id, inject_id, delay: rearmed.append((ex_id, inject_id, delay)),
+    )
+    resume_gate.set()
+    await asyncio.wait_for(worker, timeout=5)
+
+    # The worker took the news the response left it and re-armed, instead of both sides
+    # standing down. Delay 0, because the offset has long since passed.
+    assert rearmed == [(exercise.id, escalate.id, 0.0)]
 
 
 async def test_scheduled_release_of_an_unreferenced_node_survives_the_first_response(
