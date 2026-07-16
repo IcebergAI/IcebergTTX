@@ -10,9 +10,14 @@
 #
 # PREREQUISITES (all AWS-side, done before `kubectl apply -k`):
 #   - AWS Load Balancer Controller installed in the cluster (it owns this CRD).
-#   - An ALB with an HTTPS listener (ACM cert) — terminate TLS at the ALB. Do NOT
-#     forward plaintext HTTP to caddy: the app sets Secure cookies and the auth
-#     flow breaks over HTTP. The listener forwards to the target group below.
+#   - An ALB whose PUBLIC listener is HTTPS (ACM cert) — terminate TLS at the ALB.
+#     Do NOT expose a plaintext public :80 listener that serves the app: the app
+#     sets Secure cookies and the auth flow breaks over public HTTP (add an :80
+#     listener only to 301-redirect to :443). The ALB then forwards over the
+#     cluster-internal network to the target group below as plain HTTP — that
+#     private hop is correct and required: caddy listens only on plain HTTP :8080
+#     (TLS is already terminated at the ALB), so the target group's protocol must
+#     be HTTP, not HTTPS.
 #   - A target group of type `ip` (see targetType) whose health check points at a
 #     path caddy serves — e.g. /static/css/output.css (the same path caddy's
 #     readiness probe uses). The ALB default of `/` will flap.

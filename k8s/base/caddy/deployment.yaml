@@ -20,7 +20,7 @@ spec:
       automountServiceAccountToken: false
       # Runs as a non-root uid; fsGroup lets the initContainer and Caddy share the
       # static emptyDir. Caddy listens on 8080 (unprivileged) so no NET_BIND_SERVICE
-      # is needed here — TLS is terminated at the Ingress.
+      # is needed here — TLS is terminated at the overlay's edge (Ingress or ALB).
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -48,8 +48,9 @@ spec:
               mountPath: /app/static
       containers:
         - name: caddy
-          # TLS is terminated at the Ingress in front (see ingress.yaml); Caddy
-          # listens plain HTTP on 8080 with no privileged-port bind. The caddy
+          # TLS is terminated at the overlay's edge in front (overlays/nginx
+          # Ingress or overlays/eks ALB); Caddy listens plain HTTP on 8080 with no
+          # privileged-port bind — this private hop is HTTP by design. The caddy
           # binary ships with the cap_net_bind_service FILE capability, so that
           # cap must stay in the bounding set (add below) or exec of the setcap
           # binary fails with EPERM under drop ALL — even though :8080 itself

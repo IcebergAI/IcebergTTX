@@ -7,10 +7,12 @@ metadata:
     app.kubernetes.io/name: caddy
     app.kubernetes.io/part-of: iceberg-ttx
 spec:
-  # ClusterIP: TLS is terminated by the Ingress in front (ingress.yaml), which
-  # routes to this service. Do NOT expose this directly as a LoadBalancer on :80
-  # — that serves the auth flow over plaintext HTTP. If you have no Ingress
-  # controller, put a TLS-terminating LB in front and keep this ClusterIP.
+  # ClusterIP: TLS is terminated by the edge the overlay provides — an Ingress
+  # (overlays/nginx/ingress.yaml) or an AWS ALB fronting a TargetGroupBinding
+  # (overlays/eks/) — which routes to this service. Do NOT expose this directly as
+  # a LoadBalancer on :80 — that serves the auth flow over plaintext HTTP. If you
+  # have no Ingress controller, put a TLS-terminating LB in front and keep this
+  # ClusterIP.
   type: ClusterIP
   selector:
     app.kubernetes.io/name: caddy

@@ -2,7 +2,7 @@
 
 Deploys IcebergTTX on AWS EKS fronted by an Application Load Balancer, using the
 [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/).
-It is the cloud-agnostic base (`k8s/kustomization.yaml`) plus a single
+It is the cloud-agnostic base (`k8s/base/kustomization.yaml`) plus a single
 `TargetGroupBinding` — nothing else changes, and the CRD dependency is confined
 to this directory so the base and `overlays/nginx` stay portable.
 
@@ -32,9 +32,12 @@ change either way.
 1. **AWS Load Balancer Controller** installed in the cluster — it owns the
    `elbv2.k8s.aws` CRDs. Without it, `kubectl apply -k` fails with
    `no matches for kind "TargetGroupBinding"`.
-2. **An ALB with an HTTPS listener** (ACM certificate). Terminate TLS at the ALB
-   and forward HTTP to caddy. **Do not serve plaintext HTTP** — the app sets
-   `Secure` cookies and the auth flow breaks over HTTP.
+2. **An ALB whose public listener is HTTPS** (ACM certificate). Terminate TLS at
+   the ALB, then forward over the internal network to caddy as plain HTTP — that
+   private hop is correct (caddy listens only on HTTP :8080), so the target group
+   protocol is HTTP, not HTTPS. **Do not expose a public plaintext listener that
+   serves the app** — the app sets `Secure` cookies and the auth flow breaks over
+   public HTTP (a public :80 listener should only 301-redirect to :443).
 3. **A target group of type `ip`** whose health check path is one caddy serves,
    e.g. `/static/css/output.css` (matches caddy's readiness probe). The ALB
    default `/` will flap.
