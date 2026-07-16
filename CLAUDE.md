@@ -109,7 +109,7 @@ app/samples/         # Bundled scenario JSON definitions (ransomware_response, v
 Dockerfile           # Multi-stage: Tailwind build → Python runtime (non-root, static_src/ trick)
 docker-compose.yml   # app + postgres:17 + caddy (auto-HTTPS); hardened (non-root, cap_drop, read-only)
 docker/Caddyfile     # Caddy reverse proxy (automatic HTTPS) + direct static serving
-k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, caddy)
+k8s/                 # Kustomize base/ (cloud-agnostic: namespace, secrets, postgres, app, caddy) + overlays/ (nginx Ingress · eks ALB TargetGroupBinding)
 ```
 
 ---

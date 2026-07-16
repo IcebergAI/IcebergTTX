@@ -89,22 +89,29 @@ rebuilt stack must re-issue them and will re-consume rate limit quota.
 
 ## Kubernetes
 
-Manifests live in `k8s/`. Apply in order:
+Manifests live in `k8s/`, laid out as a Kustomize **base + overlays**:
+
+- `k8s/base/` — the cloud-agnostic stack (namespace, config, secrets,
+  NetworkPolicies, app/postgres/caddy workloads and their ClusterIP Services). It
+  references no CRDs, so it applies on any conformant cluster.
+- `k8s/overlays/nginx/` — base **+ a standard Ingress** (ingress-nginx by
+  default). The portable default.
+- `k8s/overlays/eks/` — base **+ an AWS ALB `TargetGroupBinding`** (requires the
+  AWS Load Balancer Controller). The sole AWS-specific object lives here, so the
+  base and the nginx overlay stay usable everywhere. See
+  `k8s/overlays/eks/README.md`.
+
+Pick your overlay and apply the whole stack in one build:
 
 ```bash
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/secrets.yaml -f k8s/configmap.yaml
+# Generic clusters (Ingress controller):
+kubectl apply -k k8s/overlays/nginx
+# AWS EKS (ALB via the AWS Load Balancer Controller):
+kubectl apply -k k8s/overlays/eks
 
-kubectl apply -f k8s/postgres/
 kubectl rollout status statefulset/postgres -n iceberg-ttx
-
-kubectl apply -f k8s/app/
 kubectl rollout status deployment/iceberg-ttx-app -n iceberg-ttx
-
-kubectl apply -f k8s/caddy/     # Deployment + ClusterIP Service + TLS Ingress
 kubectl rollout status deployment/caddy -n iceberg-ttx
-
-kubectl apply -f k8s/networkpolicy.yaml   # requires a NetworkPolicy-enforcing CNI
 
 # -it is required: with no --password and no ADMIN_PASSWORD, the tool prompts for one
 # (never echoed), and without a TTY it has nothing to read from.
@@ -112,18 +119,22 @@ kubectl exec -it -n iceberg-ttx deploy/iceberg-ttx-app -- \
     python -m app.bootstrap_admin --email you@example.com --name "You"
 ```
 
-Before applying, fill in the placeholders in `k8s/secrets.yaml` and set the
-hostname / issuer / `ingressClassName` in `k8s/caddy/ingress.yaml`. The manifests
-already reference the published image `ghcr.io/icebergai/iceberg-ttx` in
-`k8s/app/deployment.yaml` and `k8s/caddy/deployment.yaml` (the copy-static init
-container reuses the app image) — set the release tag you want and **pin by digest**
-(`ghcr.io/icebergai/iceberg-ttx@sha256:…`) in production for reproducible rollouts.
+Before applying, fill in the placeholders in `k8s/base/secrets.yaml` and set the
+hostname / issuer / `ingressClassName` in your chosen overlay
+(`k8s/overlays/nginx/ingress.yaml` or `k8s/overlays/eks/targetgroupbinding.yaml`).
+The manifests already reference the published image `ghcr.io/icebergai/iceberg-ttx`
+in `k8s/base/app/deployment.yaml` and `k8s/base/caddy/deployment.yaml` (the
+copy-static init container reuses the app image) — set the release tag you want and
+**pin by digest** (`ghcr.io/icebergai/iceberg-ttx@sha256:…`) in production for
+reproducible rollouts. Prefer plain `kubectl apply -f`? Apply the files under
+`k8s/base/` in order (namespace → secrets + configmap → `postgres/` → `app/` →
+`caddy/` → `networkpolicy.yaml`), then your ingress from `k8s/overlays/`.
 
 !!! note "TLS in Kubernetes"
     Caddy runs as a plain-HTTP (`:8080`) **internal** reverse proxy; TLS is
-    terminated by the cluster **Ingress** (cert-manager + `force-ssl-redirect`).
-    The `caddy` Service is `ClusterIP`. Do **not** switch it to a `LoadBalancer` on
-    `:80` — that serves auth over plaintext.
+    terminated by the cluster **Ingress** (cert-manager + `force-ssl-redirect`),
+    or by the **ALB** on EKS. The `caddy` Service is `ClusterIP`. Do **not** switch
+    it to a `LoadBalancer` on `:80` — that serves auth over plaintext.
 
 ### Pod hardening
 
@@ -138,7 +149,7 @@ which needs a StorageClass that honours `fsGroup`.
 Browser WebSocket auth verifies the upgrade's `Origin` against the request `Host`
 (plus `TRUSTED_ORIGINS`). This works out of the box because every hop preserves
 `Host`. If your Ingress or proxy chain rewrites it, set `TRUSTED_ORIGINS` in
-`k8s/configmap.yaml` to your public hostname so live updates keep working.
+`k8s/base/configmap.yaml` to your public hostname so live updates keep working.
 
 ## Health probes
 

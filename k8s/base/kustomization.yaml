@@ -1,0 +1,38 @@
+# Cloud-agnostic BASE for IcebergTTX.
+#
+# This lists every manifest that is portable across any conformant Kubernetes
+# cluster — namespace, config, secrets, NetworkPolicies, the app/postgres/caddy
+# workloads, and their ClusterIP Services. It deliberately does NOT include an
+# Ingress or any cloud-specific load-balancer wiring: how traffic reaches the
+# caddy Service is an environment concern, so each overlay under overlays/ layers
+# that on top (overlays/nginx = a standard Ingress, overlays/eks = an AWS ALB
+# TargetGroupBinding). Nothing here references a CRD, so `kubectl apply -k
+# k8s/base` succeeds on kind/minikube/GKE/AKS/on-prem with no controller
+# preinstalled.
+#
+# The plain per-file `kubectl apply -f` flow in the README still works; this
+# kustomization is additive. Apply an overlay (which pulls this base in via
+# `resources: - ../../base`) — not this base directly — so you also get an
+# ingress.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - secrets.yaml
+  - configmap.yaml
+  - networkpolicy.yaml
+  # App
+  - app/deployment.yaml
+  - app/service.yaml
+  - app/pvc.yaml
+  # Postgres
+  - postgres/statefulset.yaml
+  - postgres/service.yaml
+  - postgres/pvc.yaml
+  - postgres/backup-cronjob.yaml
+  # Caddy (reverse proxy + static). Ingress is intentionally excluded — see the
+  # overlays/ note above.
+  - caddy/deployment.yaml
+  - caddy/service.yaml
+  - caddy/configmap.yaml
