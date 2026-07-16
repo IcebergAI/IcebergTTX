@@ -1,0 +1,56 @@
+# AWS EKS ingress via the AWS Load Balancer Controller.
+#
+# TargetGroupBinding tells the controller to keep an EXISTING ALB target group's
+# registered targets in sync with the caddy Service's pods. Use this when you
+# provision the ALB + listener + target group yourself (Terraform/CDK/console)
+# and want Kubernetes only to manage target registration. If you'd rather have
+# the controller create and own the ALB for you, delete this file and use an ALB
+# Ingress instead (ingressClassName: alb + alb.ingress.kubernetes.io/* annotations)
+# — see README.md in this directory.
+#
+# PREREQUISITES (all AWS-side, done before `kubectl apply -k`):
+#   - AWS Load Balancer Controller installed in the cluster (it owns this CRD).
+#   - An ALB with an HTTPS listener (ACM cert) — terminate TLS at the ALB. Do NOT
+#     forward plaintext HTTP to caddy: the app sets Secure cookies and the auth
+#     flow breaks over HTTP. The listener forwards to the target group below.
+#   - A target group of type `ip` (see targetType) whose health check points at a
+#     path caddy serves — e.g. /static/css/output.css (the same path caddy's
+#     readiness probe uses). The ALB default of `/` will flap.
+#   - Consider raising the target group's deregistration delay / the listener's
+#     idle timeout above the 60s default: the app holds live WebSocket
+#     connections (facilitator/participant updates) that a short idle timeout
+#     silently drops.
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: caddy
+  # MUST be the same namespace as the target Service. The base sets this on every
+  # object; keep it aligned if you rename the namespace.
+  namespace: iceberg-ttx
+  labels:
+    app.kubernetes.io/name: caddy
+    app.kubernetes.io/part-of: iceberg-ttx
+spec:
+  # Points at the base's ClusterIP caddy Service (port 80 → containerPort 8080).
+  serviceRef:
+    name: caddy
+    port: 80
+  # `ip`: the ALB routes straight to pod IPs via the AWS VPC CNI. This is what
+  # makes a plain ClusterIP Service work — no NodePort needed. `instance` mode
+  # would require switching the caddy Service to type: NodePort (see README.md).
+  targetType: ip
+  # REPLACE with the ARN of the target group you provisioned. The controller
+  # registers/deregisters caddy pods here as they come and go.
+  targetGroupARN: REPLACE_WITH_TARGET_GROUP_ARN
+  # In `ip` mode the controller manages the pods' security-group rules so the ALB
+  # can reach caddy on 8080. Allow the ALB's security group inbound on the target
+  # port. (The in-cluster NetworkPolicy already permits caddy:8080 from any
+  # source, so it does not block this.)
+  networking:
+    ingress:
+      - from:
+          - securityGroup:
+              groupID: REPLACE_WITH_ALB_SECURITY_GROUP_ID
+        ports:
+          - protocol: TCP
+            port: 8080

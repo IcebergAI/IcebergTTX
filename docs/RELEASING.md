@@ -81,7 +81,7 @@ gh attestation verify oci://ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.1 --repo Ic
 ## Deploying a release
 
 - **Docker Compose**: swap the `build:` block for `image: ghcr.io/icebergai/iceberg-ttx:<version>`.
-- **Kubernetes**: the image is already referenced in `k8s/app/deployment.yaml` (app + the
-  `copy-static` init container) and `k8s/caddy/deployment.yaml`. Update the tag, and **pin
+- **Kubernetes**: the image is already referenced in `k8s/base/app/deployment.yaml` (app + the
+  `copy-static` init container) and `k8s/base/caddy/deployment.yaml`. Update the tag, and **pin
   by digest** (`ghcr.io/icebergai/iceberg-ttx@sha256:…`) for reproducible rollouts. The app
   runs single-replica (`strategy: Recreate`) and self-applies Alembic migrations on startup.

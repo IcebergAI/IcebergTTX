@@ -15,7 +15,7 @@ def _documents(path: str) -> list[dict]:
 def test_backup_script_is_posix_sh_compatible() -> None:
     cronjob = next(
         document
-        for document in _documents("k8s/postgres/backup-cronjob.yaml")
+        for document in _documents("k8s/base/postgres/backup-cronjob.yaml")
         if document["kind"] == "CronJob"
     )
     container = cronjob["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]
@@ -28,7 +28,7 @@ def test_backup_script_is_posix_sh_compatible() -> None:
 def test_network_policy_allows_backup_job_to_reach_postgres() -> None:
     policies = {
         document["metadata"]["name"]: document
-        for document in _documents("k8s/networkpolicy.yaml")
+        for document in _documents("k8s/base/networkpolicy.yaml")
     }
     policy = policies["allow-postgres-from-backup"]
 
@@ -50,7 +50,7 @@ def test_network_policy_allows_backup_job_to_reach_postgres() -> None:
 
 
 def test_postgres_creates_pgdata_below_the_fs_group_owned_volume() -> None:
-    statefulset = _documents("k8s/postgres/statefulset.yaml")[0]
+    statefulset = _documents("k8s/base/postgres/statefulset.yaml")[0]
     container = statefulset["spec"]["template"]["spec"]["containers"][0]
     env = {item["name"]: item for item in container["env"]}
     mounts = {item["name"]: item for item in container["volumeMounts"]}
@@ -60,7 +60,7 @@ def test_postgres_creates_pgdata_below_the_fs_group_owned_volume() -> None:
 
 
 def test_static_init_containers_do_not_preserve_root_owned_metadata() -> None:
-    for path in ("k8s/app/deployment.yaml", "k8s/caddy/deployment.yaml"):
+    for path in ("k8s/base/app/deployment.yaml", "k8s/base/caddy/deployment.yaml"):
         deployment = _documents(path)[0]
         init = deployment["spec"]["template"]["spec"]["initContainers"][0]
         command = init["command"][-1]
