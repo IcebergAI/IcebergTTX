@@ -714,3 +714,227 @@ async def test_unlinked_inject_is_releasable_only_before_the_first_response(
     )
     assert r.status_code == 409
     assert r.json()["detail"] == "Inject is not the current branch for its group"
+
+
+async def test_adhoc_inject_response_does_not_move_the_cursor(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+):
+    """An inject outside the scenario graph resolves without touching any cursor (#256).
+
+    Ad-hoc injects (and approved LLM suggestions, which share the no-scenario_node_id
+    shape) are interruptions, not steps on a path. Before the fix, responding to one
+    overwrote the team cursor with current_node_id=None and a non-null
+    current_inject_id -- the exact state release_is_allowed reads as "advanced to a
+    dead end", refusing the team's real branch forever, manually and on schedule.
+    """
+    from app.models.exercise import ExerciseState
+    from app.services.exercise_service import create_exercise, enrol_member, transition_state
+    from app.services.scenario_service import create_scenario
+
+    scenario = await create_scenario(
+        session,
+        definition=ScenarioDefinition(
+            title="Interrupted branch",
+            participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+            injects=[
+                InjectNode(
+                    id="start",
+                    title="Start",
+                    content="c",
+                    target_teams=["it_ops"],
+                    options=[InjectOption(id="go", label="Go", next_inject_id="followup")],
+                ),
+                InjectNode(id="followup", title="Followup", content="c", target_teams=["it_ops"]),
+            ],
+            start_inject_id="start",
+        ),
+        created_by=facilitator.id,
+    )
+    exercise = await create_exercise(
+        session, title="Interrupted branch", scenario_id=scenario.id, created_by=facilitator.id
+    )
+    await enrol_member(session, exercise=exercise, user_id=participant.id, group_id="it_ops")
+    await transition_state(session, exercise, ExerciseState.active)
+
+    headers = {"Authorization": f"Bearer {facilitator_token}"}
+    injects = (
+        await client.get(f"/api/exercises/{exercise.id}/injects", headers=headers)
+    ).json()
+    by_node = {inject["scenario_node_id"]: inject for inject in injects}
+
+    # Walk the scenario one step: the cursor lands on the followup node.
+    await client.post(
+        f"/api/exercises/{exercise.id}/injects/{by_node['start']['id']}/release",
+        headers=headers,
+    )
+    assert (
+        await _submit(
+            client, participant_token, exercise.id, by_node["start"]["id"], selected_option="go"
+        )
+    ).status_code == 201
+
+    # Interrupt with an ad-hoc inject and let the team answer it.
+    adhoc = await client.post(
+        f"/api/exercises/{exercise.id}/injects",
+        json={"title": "Breaking news", "content": "c", "target_teams": ["it_ops"]},
+        headers=headers,
+    )
+    assert adhoc.status_code == 201
+    adhoc_id = adhoc.json()["id"]
+    assert (
+        await client.post(
+            f"/api/exercises/{exercise.id}/injects/{adhoc_id}/release", headers=headers
+        )
+    ).status_code == 200
+    assert (
+        await _submit(
+            client, participant_token, exercise.id, adhoc_id, selected_option=None
+        )
+    ).status_code == 201
+
+    # The ad-hoc inject resolved like any other...
+    refreshed = (
+        await client.get(f"/api/exercises/{exercise.id}/injects", headers=headers)
+    ).json()
+    assert next(i for i in refreshed if i["id"] == adhoc_id)["state"] == "resolved"
+
+    # ...but the cursor still points where the scenario response left it.
+    cursor = (
+        await session.exec(
+            select(ExerciseProgress).where(
+                ExerciseProgress.exercise_id == exercise.id,
+                ExerciseProgress.group_id == "it_ops",
+            )
+        )
+    ).one()
+    assert cursor.current_node_id == "followup"
+    assert cursor.current_inject_id == by_node["start"]["id"]
+
+    # End to end: the branch the participants chose is still releasable.
+    r = await client.post(
+        f"/api/exercises/{exercise.id}/injects/{by_node['followup']['id']}/release",
+        headers=headers,
+    )
+    assert r.status_code == 200
+
+
+async def test_out_of_audience_response_does_not_resolve_or_advance(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+):
+    """A response from a context outside the release audience moves nothing (#256).
+
+    Scenario nodes materialize as group-scoped physical injects, so the only
+    fallback-visible shape is an ad-hoc inject with several target teams
+    (group_id stays None). The User.team visibility fallback lets a member
+    enrolled in one group *see* such an inject targeted at their global team --
+    but their response submits under their enrolment group, which the release
+    never seeded. Before the fix, resolve_response_progression invented an
+    InjectProgress row for that context (corrupting the shared-close audience)
+    and advanced that context's cursor.
+    """
+    from app.models.exercise import ExerciseState
+    from app.models.inject import InjectProgress
+    from app.models.user import UserRole
+    from app.services.auth_service import create_access_token, hash_password
+    from app.services.exercise_service import create_exercise, enrol_member, transition_state
+    from app.services.scenario_service import create_scenario
+
+    scenario = await create_scenario(
+        session,
+        definition=ScenarioDefinition(
+            title="Audience gate",
+            participant_teams=[
+                {"id": "it_ops", "label": "IT Ops"},
+                {"id": "legal", "label": "Legal"},
+                # declared so the ad-hoc inject can target two teams, enrolled by nobody
+                {"id": "comms", "label": "Comms"},
+            ],
+            injects=[InjectNode(id="start", title="Start", content="c", target_teams=["it_ops"])],
+            start_inject_id="start",
+        ),
+        created_by=facilitator.id,
+    )
+    exercise = await create_exercise(
+        session, title="Audience gate", scenario_id=scenario.id, created_by=facilitator.id
+    )
+    # The fixture participant's global team is it_ops, but they are enrolled into
+    # legal -- the fallback makes the it_ops-targeted inject visible to them.
+    await enrol_member(session, exercise=exercise, user_id=participant.id, group_id="legal")
+    insider = User(
+        email="insider@example.com",
+        display_name="Insider",
+        hashed_password=hash_password("password1234"),
+        role=UserRole.participant,
+        team="it_ops",
+    )
+    session.add(insider)
+    await session.commit()
+    await session.refresh(insider)
+    insider_token = create_access_token(subject=insider.email, role=insider.role.value)
+    await enrol_member(session, exercise=exercise, user_id=insider.id, group_id="it_ops")
+    await transition_state(session, exercise, ExerciseState.active)
+
+    headers = {"Authorization": f"Bearer {facilitator_token}"}
+    # Two target teams keep group_id None; the audience is enrolled contexts only:
+    # {legal, it_ops} & {it_ops, comms} == {it_ops}.
+    created = await client.post(
+        f"/api/exercises/{exercise.id}/injects",
+        json={"title": "All hands", "content": "c", "target_teams": ["it_ops", "comms"]},
+        headers=headers,
+    )
+    assert created.status_code == 201
+    inject_id = created.json()["id"]
+    assert (
+        await client.post(
+            f"/api/exercises/{exercise.id}/injects/{inject_id}/release", headers=headers
+        )
+    ).status_code == 200
+
+    # The legal-enrolled member can see and answer it, and the response is recorded...
+    r = await _submit(client, participant_token, exercise.id, inject_id, selected_option=None)
+    assert r.status_code == 201
+    assert r.json()["group_id"] == "legal"
+
+    # ...but it resolves no context the release opened and moves no cursor.
+    legal_rows = (
+        await session.exec(
+            select(InjectProgress).where(
+                InjectProgress.inject_id == inject_id,
+                InjectProgress.group_id == "legal",
+            )
+        )
+    ).all()
+    assert legal_rows == []
+    legal_cursor = (
+        await session.exec(
+            select(ExerciseProgress).where(
+                ExerciseProgress.exercise_id == exercise.id,
+                ExerciseProgress.group_id == "legal",
+            )
+        )
+    ).one()
+    assert legal_cursor.current_node_id == "start"
+    assert legal_cursor.current_inject_id is None
+    refreshed = (
+        await client.get(f"/api/exercises/{exercise.id}/injects", headers=headers)
+    ).json()
+    assert next(i for i in refreshed if i["id"] == inject_id)["state"] == "released"
+
+    # The seeded audience still owns the inject: the it_ops response resolves it.
+    assert (
+        await _submit(client, insider_token, exercise.id, inject_id, selected_option=None)
+    ).status_code == 201
+    refreshed = (
+        await client.get(f"/api/exercises/{exercise.id}/injects", headers=headers)
+    ).json()
+    assert next(i for i in refreshed if i["id"] == inject_id)["state"] == "resolved"
