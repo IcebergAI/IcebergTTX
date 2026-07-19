@@ -116,7 +116,8 @@ async def resolve_response_progression(
     """Resolve one group path and atomically advance its cursor.
 
     Returns ``True`` only when this call performed the transition; replayed
-    deliveries observe the existing resolution without changing the cursor.
+    deliveries — and responses from contexts outside the release audience —
+    observe the existing state without changing any cursor.
     """
     # Serialize shared-inject resolution. Without the row lock, two teams could each
     # observe only their own uncommitted progress and neither would close the scalar.
@@ -128,16 +129,6 @@ async def resolve_response_progression(
     inject = locked_inject
     context = group_id or inject.group_id
     await seed_inject_resolution_contexts(session, inject)
-    await session.exec(
-        insert(InjectProgress)
-        .values(
-            exercise_id=inject.exercise_id,
-            inject_id=inject.id,
-            group_id=context,
-            state=InjectState.released,
-        )
-        .on_conflict_do_nothing(constraint="uq_inject_progress_group")
-    )
     progress = (
         await session.exec(
             select(InjectProgress)
@@ -145,7 +136,14 @@ async def resolve_response_progression(
             .where(InjectProgress.group_id == context)
             .with_for_update()
         )
-    ).one()
+    ).one_or_none()
+    if progress is None:
+        # No seeded row means this context was never in the release audience —
+        # e.g. an unassigned member (group_id NULL) who can see a team-targeted
+        # inject via the User.team visibility fallback (#256). Inventing a row
+        # here would advance a cursor for a path the release never opened; the
+        # response itself is still recorded by the caller.
+        return False
     if progress.state == InjectState.resolved:
         return False
 
@@ -173,6 +171,14 @@ async def resolve_response_progression(
         inject.resolved_by = actor_id
         inject.resolution_reason = "participant_response"
         session.add(inject)
+
+    # Ad-hoc and approved-suggested injects have no scenario node: they resolve
+    # like any inject, but they are interruptions, not steps on a path (#256).
+    # Writing the cursor here would set current_node_id=None and current_inject_id
+    # to this inject, which release_is_allowed reads as "advanced to a dead end" —
+    # permanently refusing the branch the team was actually on.
+    if inject.scenario_node_id is None:
+        return True
 
     cursor = (
         await session.exec(
