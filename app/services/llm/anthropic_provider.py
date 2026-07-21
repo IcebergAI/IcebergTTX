@@ -91,25 +91,30 @@ class AnthropicFamilyAdapter:
         self, system: str, cached_context: str, user_prompt: str, max_tokens: int
     ) -> str:
         client = self._get_client()
-        if self.cfg.backend == "bedrock":
-            # Bedrock: send a plain two-part message (no cache_control / beta header).
-            context_block: dict = {"type": "text", "text": cached_context}
-        else:
-            context_block = {
-                "type": "text",
-                "text": cached_context,
-                "cache_control": {"type": "ephemeral"},
-            }
+        # Only prepend a context block when there's actually cached context. An empty
+        # string is a non-empty text content block on the wire, which the Anthropic API
+        # rejects with a 400 ("text content blocks must be non-empty") — and on the
+        # direct path it would also carry a pointless cache_control. Omitting it keeps
+        # any empty-context caller working, notably the admin connectivity check (#261).
+        content: list[dict] = []
+        if cached_context:
+            if self.cfg.backend == "bedrock":
+                # Bedrock: a plain text block (no cache_control / beta header).
+                content.append({"type": "text", "text": cached_context})
+            else:
+                content.append(
+                    {
+                        "type": "text",
+                        "text": cached_context,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                )
+        content.append({"type": "text", "text": user_prompt})
         msg = await client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
             system=system,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [context_block, {"type": "text", "text": user_prompt}],
-                }
-            ],
+            messages=[{"role": "user", "content": content}],
         )
         for block in msg.content:
             text = getattr(block, "text", None)
