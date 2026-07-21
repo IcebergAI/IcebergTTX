@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -278,11 +279,33 @@ async def enrol_member(
         role_at_enrolment=user.role,
     )
     session.add(member)
-    if commit:
-        await session.commit()
-        await session.refresh(member)
-    else:
-        await session.flush()
+    try:
+        if commit:
+            await session.commit()
+            await session.refresh(member)
+        else:
+            await session.flush()
+    except IntegrityError:
+        # A concurrent enrolment (double-click, two facilitator tabs) won the race
+        # between the pre-check above and this insert. The unique constraint
+        # uq_exercisemember_exercise_user (#262) turns that into a clean idempotent
+        # return instead of a divergent duplicate row, matching the established
+        # Response/ResponseAssessment on-conflict pattern. We can only recover when we
+        # own the transaction; a caller committing later (commit=False) must roll back
+        # and handle it itself.
+        if not commit:
+            raise
+        await session.rollback()
+        existing = (
+            await session.exec(
+                select(ExerciseMember)
+                .where(ExerciseMember.exercise_id == exercise.id)
+                .where(ExerciseMember.user_id == user_id)
+            )
+        ).first()
+        if existing is not None:
+            return existing
+        raise
     return member
 
 
