@@ -35,6 +35,15 @@ PostgreSQL 17 instance with `testcontainers`, so the Docker daemon must be runni
 After changing dependencies in `pyproject.toml`, run `uv lock` and commit the
 updated `uv.lock` (CI runs `uv lock --check`).
 
+Optionally install the pre-commit hooks, which mirror the CI static gate (ruff,
+pyright, bandit, plus djlint/Biome for templates and CSS/JS) so failures surface
+before you push. They reuse the locked dev toolchain and skip the slow suites:
+
+```bash
+uv tool install pre-commit       # or: pipx install pre-commit
+pre-commit install               # run: pre-commit run --all-files
+```
+
 ## Before you open a pull request
 
 Run these locally and make sure they pass:
