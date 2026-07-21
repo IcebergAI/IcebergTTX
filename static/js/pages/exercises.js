@@ -57,7 +57,7 @@ document.addEventListener('alpine:init', () => {
         method: 'POST',
         body: JSON.stringify({
           title: this.newTitle,
-          scenario_id: parseInt(this.newScenarioId),
+          scenario_id: parseInt(this.newScenarioId, 10),
           llm_enabled: this.newLlmEnabled,
         }),
       });
@@ -593,7 +593,7 @@ document.addEventListener('alpine:init', () => {
     async saveSchedule(inj) {
       const raw = this.scheduleDraft[inj.id];
       const minutes = (raw === '' || raw == null) ? null : parseInt(raw, 10);
-      await this._patchSchedule(inj, (minutes != null && !isNaN(minutes) && minutes >= 0) ? minutes : null);
+      await this._patchSchedule(inj, (minutes != null && !Number.isNaN(minutes) && minutes >= 0) ? minutes : null);
     },
 
     async cancelSchedule(inj) {

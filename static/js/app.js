@@ -31,7 +31,7 @@ async function apiFetch(path, options = {}) {
   if (!(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
-  if (token) headers['Authorization'] = 'Bearer ' + token;
+  if (token) headers.Authorization = 'Bearer ' + token;
   const apiPath = path.startsWith('/api/') ? path : '/api' + path;
   let resp;
   try {
@@ -204,7 +204,7 @@ const uiHelpers = {
   },
   // Exercise clock (#116): whole seconds → H:MM:SS (drops the hours field under an hour).
   fmtClock(seconds) {
-    if (seconds == null || isNaN(seconds)) return '—';
+    if (seconds == null || Number.isNaN(seconds)) return '—';
     const s = Math.max(0, Math.floor(seconds));
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
     const mm = String(m).padStart(2, '0'), ss = String(sec).padStart(2, '0');
@@ -212,7 +212,7 @@ const uiHelpers = {
   },
   // Scheduled-release countdown (#116): remaining seconds → M:SS, or "due" once elapsed.
   fmtCountdown(seconds) {
-    if (seconds == null || isNaN(seconds)) return '—';
+    if (seconds == null || Number.isNaN(seconds)) return '—';
     if (seconds <= 0) return 'due';
     const s = Math.floor(seconds);
     const m = Math.floor(s / 60), sec = s % 60;

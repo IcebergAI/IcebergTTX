@@ -154,3 +154,18 @@ ignore_names = [
     "schema_version",
     "debrief_notes",
 ]
+
+[tool.djlint]
+# Structural Jinja/HTML linting for the templates (#278). The ignored rules below
+# are opinions that fight this stack rather than catch defects, so they're
+# disabled while the structural checks (unclosed tags, malformed blocks) stay on:
+#   H021 — inline `style` attributes carry genuinely dynamic values (grid templates,
+#          status-dot colours) that aren't expressible as Tailwind utility classes.
+#   H023 — HTML entity references (&rarr; etc.) are used deliberately.
+#   H030 — meta-description guidance is irrelevant to an authenticated app shell.
+#   H037 — misfires on Alpine event modifiers (@keydown.enter.prevent reads as a
+#          duplicate "prevent" attribute).
+#   J004/J018 — url_for() static/link patterns are Flask idioms; this is FastAPI.
+#   T028 — spaceless-tag preference, cosmetic.
+profile = "jinja"
+ignore = "H021,H023,H030,H037,J004,J018,T028"
