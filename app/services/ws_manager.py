@@ -92,11 +92,26 @@ class ConnectionManager:
             out.append(c)
         return out
 
-    async def broadcast_to_exercise(self, exercise_id: int, message: dict) -> None:
-        await self._send_to_many(self._rooms.get(exercise_id, []), message)
+    async def broadcast_to_exercise(
+        self, exercise_id: int, message: dict, facilitator_message: dict | None = None
+    ) -> None:
+        conns = self._rooms.get(exercise_id, [])
+        if facilitator_message is None:
+            await self._send_to_many(conns, message)
+            return
+        # Facilitators get their own frame (e.g. the topology-bearing inject_released,
+        # #266); everyone else gets the redacted `message`.
+        facilitators = [c for c in conns if c.role == "facilitator"]
+        others = [c for c in conns if c.role != "facilitator"]
+        await self._send_to_many(others, message)
+        await self._send_to_many(facilitators, facilitator_message)
 
     async def broadcast_to_groups(
-        self, exercise_id: int, group_ids: list[str], message: dict
+        self,
+        exercise_id: int,
+        group_ids: list[str],
+        message: dict,
+        facilitator_message: dict | None = None,
     ) -> None:
         # Facilitators and observers have global read-visibility of injects/comments
         # (see is_inject_visible_to_user), so they receive group-scoped pushes too —
@@ -107,7 +122,16 @@ class ConnectionManager:
             for c in self._rooms.get(exercise_id, [])
             if c.group_id in group_ids or c.role in ("facilitator", "observer")
         ]
-        await self._send_to_many(conns, message)
+        if facilitator_message is None:
+            await self._send_to_many(conns, message)
+            return
+        # Facilitators get the full frame; participants-in-group AND observers get the
+        # redacted `message` — observers keep their group-scoped push (#38) without the
+        # branch topology (#266).
+        facilitators = [c for c in conns if c.role == "facilitator"]
+        others = [c for c in conns if c.role != "facilitator"]
+        await self._send_to_many(others, message)
+        await self._send_to_many(facilitators, facilitator_message)
 
     async def send_to_facilitators(self, exercise_id: int, message: dict) -> None:
         conns = self._matching(exercise_id, lambda c: c.role == "facilitator")

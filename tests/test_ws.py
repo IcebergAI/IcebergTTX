@@ -238,6 +238,65 @@ async def test_ws_receives_inject_released(
     assert "options" in msg["payload"]
 
 
+async def test_ws_inject_released_redacts_branch_topology(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+):
+    """The inject_released frame must not leak next_inject_id (branch topology) to
+    participants or observers — node-level or per-option — while facilitators still
+    receive it (#266). Exercises the broadcast facilitator_message role split."""
+    from app.services.exercise_service import enrol_member
+
+    # inject_01 is a scenario-backed it_ops inject whose opt_a maps to inject_02.
+    injects = (await client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )).json()
+    inject_id = next(i["id"] for i in injects if i["scenario_node_id"] == "inject_01")
+
+    observer = User(
+        email="ws-redact-observer@example.com",
+        display_name="Observer",
+        hashed_password=hash_password("pw"),
+        role=UserRole.observer,
+    )
+    session.add(observer)
+    await session.commit()
+    await session.refresh(observer)
+    await enrol_member(session, exercise=active_exercise, user_id=observer.id)
+    observer_token = create_access_token(subject=observer.email, role=observer.role.value)
+
+    async with (
+        aconnect_ws(_ws_url(active_exercise.id, participant_token), client) as participant_ws,
+        aconnect_ws(_ws_url(active_exercise.id, observer_token), client) as observer_ws,
+        aconnect_ws(_ws_url(active_exercise.id, facilitator_token), client) as facilitator_ws,
+    ):
+        await client.post(
+            f"/api/exercises/{active_exercise.id}/injects/{inject_id}/release",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+        participant_msg = await asyncio.wait_for(participant_ws.receive_json(), timeout=5)
+        observer_msg = await asyncio.wait_for(observer_ws.receive_json(), timeout=5)
+        facilitator_msg = await asyncio.wait_for(facilitator_ws.receive_json(), timeout=5)
+
+    # Participant + observer: redacted — no branch topology, node-level or per-option.
+    for msg in (participant_msg, observer_msg):
+        assert msg["type"] == "inject_released"
+        assert "next_inject_id" not in msg["payload"]
+        assert msg["payload"]["options"], "options still present for choosing"
+        for opt in msg["payload"]["options"]:
+            assert "next_inject_id" not in opt
+
+    # Facilitator: full frame retains the branch topology (console data).
+    assert facilitator_msg["type"] == "inject_released"
+    assert "next_inject_id" in facilitator_msg["payload"]
+    opt_a = next(o for o in facilitator_msg["payload"]["options"] if o["id"] == "opt_a")
+    assert opt_a["next_inject_id"] == "inject_02"
+
+
 async def test_ws_team_targeted_inject_reaches_team_member(
     client: AsyncClient,
     facilitator_token: str,
