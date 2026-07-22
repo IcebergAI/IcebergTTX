@@ -102,8 +102,13 @@ class ExerciseMember(SQLModel, table=True):
     # The (exercise_id, user_id) pair is the app's hottest lookup — every
     # exercise_group_for_user() and sender-team resolution goes through it. Its leading
     # column also serves the exercise_id-only roster scan, so exercise_id needs no
-    # index of its own.
-    __table_args__ = (Index("ix_exercisemember_exercise_user", "exercise_id", "user_id"),)
+    # index of its own. It is also an identity pair: enrolment must be unique per
+    # (exercise, user), so a unique constraint (which backs the same lookup) replaces
+    # the plain index and closes the concurrent-enrolment duplicate race (#262) at the
+    # DB level, matching Response/ExerciseProgress/InjectProgress and friends.
+    __table_args__ = (
+        UniqueConstraint("exercise_id", "user_id", name="uq_exercisemember_exercise_user"),
+    )
 
     id: int | None = Field(default=None, primary_key=True)
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE")

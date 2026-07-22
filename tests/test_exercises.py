@@ -1005,6 +1005,104 @@ async def test_enrol_member_idempotent(
     assert sum(1 for m in members if m["user_id"] == participant.id) == 1
 
 
+async def test_concurrent_enrolment_collapses_to_one_membership(session: AsyncSession):
+    """Two simultaneous enrolments of the same user create exactly one row (#262).
+
+    The pre-check in enrol_member can't stop a double-click / two-tab race on its
+    own; the DB-level unique constraint plus the IntegrityError -> return-existing
+    branch must collapse the loser to an idempotent success instead of a divergent
+    duplicate membership.
+    """
+    from uuid import uuid4
+
+    from app.database import engine
+    from app.services.exercise_service import create_exercise, enrol_member
+    from app.services.scenario_service import create_scenario
+
+    user_ids: list[int] = []
+    scenario_id = exercise_id = None
+    unique = uuid4().hex
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as setup:
+            facilitator = User(
+                email=f"enrol-race-owner-{unique}@example.test",
+                display_name="Enrol Race Owner",
+                role=UserRole.facilitator,
+            )
+            participant = User(
+                email=f"enrol-race-participant-{unique}@example.test",
+                display_name="Enrol Race Participant",
+                role=UserRole.participant,
+                team="it_ops",
+            )
+            setup.add_all([facilitator, participant])
+            await setup.commit()
+            for user in (facilitator, participant):
+                await setup.refresh(user)
+                assert user.id is not None
+                user_ids.append(user.id)
+            participant_id = participant.id
+            scenario = await create_scenario(
+                setup,
+                definition=ScenarioDefinition(
+                    title="Enrolment race",
+                    participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+                    injects=[InjectNode(id="shared", title="Shared", content="Respond")],
+                    start_inject_id="shared",
+                ),
+                created_by=facilitator.id,
+            )
+            scenario_id = scenario.id
+            exercise = await create_exercise(
+                setup,
+                scenario_id=scenario.id,
+                title="Enrolment race",
+                created_by=facilitator.id,
+            )
+            exercise_id = exercise.id
+
+        async def _enrol() -> int | None:
+            async with AsyncSession(engine, expire_on_commit=False) as s:
+                ex = await s.get(Exercise, exercise_id)
+                assert ex is not None
+                member = await enrol_member(s, exercise=ex, user_id=participant_id)
+                return member.id
+
+        # Both racers must return a member and neither may raise: the loser hits the
+        # unique constraint and recovers the winner's row.
+        ids = await asyncio.gather(_enrol(), _enrol())
+        assert all(member_id is not None for member_id in ids)
+
+        async with AsyncSession(engine, expire_on_commit=False) as verify:
+            members = (
+                await verify.exec(
+                    select(ExerciseMember).where(
+                        ExerciseMember.exercise_id == exercise_id
+                    )
+                )
+            ).all()
+            assert len(members) == 1
+    finally:
+        async with AsyncSession(engine, expire_on_commit=False) as cleanup:
+            if exercise_id is not None:
+                exercise = await cleanup.get(Exercise, exercise_id)
+                if exercise is not None:
+                    await cleanup.delete(exercise)
+                    await cleanup.commit()
+            if scenario_id is not None:
+                from app.models.scenario import Scenario
+
+                scenario = await cleanup.get(Scenario, scenario_id)
+                if scenario is not None:
+                    await cleanup.delete(scenario)
+                    await cleanup.commit()
+            for user_id in user_ids:
+                user = await cleanup.get(User, user_id)
+                if user is not None:
+                    await cleanup.delete(user)
+                    await cleanup.commit()
+
+
 async def test_list_members(
     client: AsyncClient, facilitator_token: str, draft_exercise, participant: User
 ):

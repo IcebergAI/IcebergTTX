@@ -23,6 +23,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -57,12 +58,43 @@ RETINA = {"width": 1440, "height": 960, "scale": 2, "full_page": True}
 FLAT = {"width": 1440, "height": 900, "scale": 1, "full_page": False}
 
 
+# Per-shot staging: put the page into the state the caption promises before the
+# capture. Named so each Shot can point at its own, instead of a name-keyed
+# if/elif chain that has to be kept in sync with the SHOTS list.
+def _stage_open_first_comm(page: Page) -> None:
+    page.locator(".comm-list-row").first.click()
+
+
+def _stage_open_samples(page: Page) -> None:
+    page.get_by_role("button", name="Sample data").click()
+
+
+def _stage_create_exercise(page: Page) -> None:
+    # Fill it in — the caption promises "creating an exercise from a scenario",
+    # and an empty form shows neither.
+    page.get_by_role("button", name="New exercise").first.click()
+    page.wait_for_timeout(400)
+    page.locator("#create-exercise-title-input").fill("Q4 Ransomware Tabletop")
+    page.locator("#create-exercise-scenario").select_option(index=1)
+
+
+def _stage_show_ops_panel(page: Page) -> None:
+    # The ops panel is off by default; the console shots read better with the
+    # three panes the layout is actually built around.
+    page.get_by_role("button", name="Ops panel").click()
+
+
 @dataclass
 class Shot:
     name: str
     profile: dict
+    # A route template formatted against the seeded id map, e.g.
+    # "/exercises/{exercise_id}/facilitate". Static routes format to themselves.
+    route: str
     theme: str = "light"
     as_participant: bool = False
+    # Optional page setup run after navigation, before the capture.
+    stage: Callable[[Page], None] | None = None
     # Extra destinations beyond the primary one; docs/ and the website keep
     # byte-identical copies of the five images they share.
     also: list[Path] = field(default_factory=list)
@@ -71,20 +103,24 @@ class Shot:
 
 SHOTS: list[Shot] = [
     # README hero + the light/dark pair of the console.
-    Shot("screenshot", RETINA),
-    Shot("facilitator-dark", RETINA, theme="dark", also=[SITE]),
-    Shot("dashboard", RETINA, also=[SITE]),
-    Shot("scenarios", RETINA),
-    Shot("scenario-detail", RETINA, also=[SITE]),
-    Shot("communications", RETINA, also=[SITE]),
-    Shot("participant", RETINA, as_participant=True, also=[SITE]),
-    Shot("settings", RETINA),
+    Shot("screenshot", RETINA, "/exercises/{exercise_id}/facilitate", stage=_stage_show_ops_panel),
+    Shot("facilitator-dark", RETINA, "/exercises/{exercise_id}/facilitate",
+         theme="dark", stage=_stage_show_ops_panel, also=[SITE]),
+    Shot("dashboard", RETINA, "/dashboard", also=[SITE]),
+    Shot("scenarios", RETINA, "/scenarios"),
+    Shot("scenario-detail", RETINA, "/scenarios/{scenario_id}", also=[SITE]),
+    Shot("communications", RETINA, "/exercises/{exercise_id}/communications",
+         stage=_stage_open_first_comm, also=[SITE]),
+    Shot("participant", RETINA, "/exercises/{viewer_exercise_id}/participate",
+         as_participant=True, also=[SITE]),
+    Shot("settings", RETINA, "/settings"),
     # Website-only, viewport-cropped.
-    Shot("settings-samples", FLAT, dest=SITE),
-    Shot("exercise-create", FLAT, dest=SITE),
-    Shot("inject-release", FLAT, dest=SITE),
-    Shot("review-timeline", FLAT, dest=SITE),
-    Shot("report", FLAT, dest=SITE),
+    Shot("settings-samples", FLAT, "/settings", stage=_stage_open_samples, dest=SITE),
+    Shot("exercise-create", FLAT, "/exercises", stage=_stage_create_exercise, dest=SITE),
+    Shot("inject-release", FLAT, "/exercises/{exercise_id}/facilitate",
+         stage=_stage_show_ops_panel, dest=SITE),
+    Shot("review-timeline", FLAT, "/exercises/{completed_id}/review", dest=SITE),
+    Shot("report", FLAT, "/exercises/{completed_id}/report", dest=SITE),
 ]
 
 
@@ -115,6 +151,19 @@ class Api:
         return self.ctx.request.put(
             f"{self.base}/api{path}", data=data if data is not None else {}, headers=self._headers()
         )
+
+
+def new_demo_exercise(api: Api) -> int:
+    """POST the ransomware demo-exercise sample and return the new exercise id.
+
+    The endpoint returns the created exercise inline; some response shapes omit it,
+    so fall back to the newest exercise id. One place, so a change to the response
+    shape is a one-line edit instead of three.
+    """
+    result = api.post("/settings/samples/scenarios/ransomware_response/demo-exercise").json()
+    if "exercise" in result:
+        return result["exercise"]["id"]
+    return max(e["id"] for e in api.get("/exercises").json())
 
 
 def seed(ctx, base: str) -> dict:
@@ -162,17 +211,13 @@ def seed(ctx, base: str) -> dict:
     released = [i for i in api.get(f"/exercises/{exercise_id}/injects").json()
                 if i["state"] == "released"]
     if released:
+        # Same opening move Sam plays in the played-out exercise, so the console
+        # and report screenshots quote him identically — kept in PLAYBOOK, not
+        # restated here.
+        option, content = PLAYBOOK["initial_alert"]
         p.post(
             f"/exercises/{exercise_id}/responses",
-            {
-                "inject_id": released[0]["id"],
-                "selected_option": "isolate",
-                "content": (
-                    "Isolated the three affected workstations from the network and preserved "
-                    "memory images for forensics. Escalated to the incident commander and "
-                    "opened a bridge with IT Ops and Legal."
-                ),
-            },
+            {"inject_id": released[0]["id"], "selected_option": option, "content": content},
         )
 
     # No extra release here: Containment Window has to stay *pending* for the
@@ -201,20 +246,14 @@ def seed(ctx, base: str) -> dict:
     # A second exercise, played through to completion — review/report are only
     # worth a screenshot if they have a real timeline in them. Completing a
     # freshly-seeded exercise gives "Duration 0m / no responses recorded".
-    done = api.post("/settings/samples/scenarios/ransomware_response/demo-exercise").json()
-    done_id = done["exercise"]["id"] if "exercise" in done else None
-    if done_id is None:
-        done_id = max(e["id"] for e in api.get("/exercises").json())
+    done_id = new_demo_exercise(api)
     play_out(api, p, participant_id, done_id)
 
     # A third, deliberately untouched exercise for the participant view. It needs a
     # released brief that *nobody* has answered, and a response resolves the inject
     # for the whole team — so it can't be the exercise Sam already responded in, no
     # matter which member we log in as.
-    fresh = api.post("/settings/samples/scenarios/ransomware_response/demo-exercise").json()
-    viewer_ex = fresh["exercise"]["id"] if "exercise" in fresh else max(
-        e["id"] for e in api.get("/exercises").json()
-    )
+    viewer_ex = new_demo_exercise(api)
     api.put(f"/exercises/{viewer_ex}", {"title": "IT Ops Dry Run"})
     enrol(viewer_ex, VIEWER["email"], "Maria Chen", "it_ops")
 
@@ -335,45 +374,6 @@ def backdate(exercise_ids: list[int], minutes: int) -> None:
         print(f"  backdated exercises {ids} by {minutes}m")
 
 
-def route_for(shot: Shot, ids: dict) -> str:
-    ex, sc, done = ids["exercise_id"], ids["scenario_id"], ids["completed_id"]
-    return {
-        "screenshot": f"/exercises/{ex}/facilitate",
-        "facilitator-dark": f"/exercises/{ex}/facilitate",
-        "inject-release": f"/exercises/{ex}/facilitate",
-        "dashboard": "/dashboard",
-        "scenarios": "/scenarios",
-        "scenario-detail": f"/scenarios/{sc}",
-        "communications": f"/exercises/{ex}/communications",
-        "participant": f"/exercises/{ids['viewer_exercise_id']}/participate",
-        "settings": "/settings",
-        "settings-samples": "/settings",
-        "exercise-create": "/exercises",
-        "review-timeline": f"/exercises/{done}/review",
-        "report": f"/exercises/{done}/report",
-    }[shot.name]
-
-
-def stage(page: Page, shot: Shot) -> None:
-    """Put the page into the state the caption promises before we capture it."""
-    if shot.name == "communications":
-        page.locator(".comm-list-row").first.click()
-    elif shot.name == "settings-samples":
-        page.get_by_role("button", name="Sample data").click()
-    elif shot.name == "exercise-create":
-        # Fill it in — the caption promises "creating an exercise from a
-        # scenario", and an empty form shows neither.
-        page.get_by_role("button", name="New exercise").first.click()
-        page.wait_for_timeout(400)
-        page.locator("#create-exercise-title-input").fill("Q4 Ransomware Tabletop")
-        page.locator("#create-exercise-scenario").select_option(index=1)
-    elif shot.name in {"screenshot", "facilitator-dark", "inject-release"}:
-        # The ops panel is off by default; the console shots read better with the
-        # three panes the layout is actually built around.
-        page.get_by_role("button", name="Ops panel").click()
-    page.wait_for_timeout(900)
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="https://localhost")
@@ -418,11 +418,14 @@ def main() -> int:
             )
 
             page = ctx.new_page()
-            resp = page.goto(args.base + route_for(shot, ids), wait_until="networkidle")
+            route = shot.route.format(**ids)
+            resp = page.goto(args.base + route, wait_until="networkidle")
             if resp is None or resp.status != 200:
-                raise SystemExit(f"{shot.name}: {route_for(shot, ids)} -> {resp and resp.status}")
+                raise SystemExit(f"{shot.name}: {route} -> {resp and resp.status}")
             page.wait_for_timeout(1200)
-            stage(page, shot)
+            if shot.stage:
+                shot.stage(page)
+            page.wait_for_timeout(900)
 
             out = shot.dest / f"{shot.name}.png"
             page.screenshot(path=out, full_page=p["full_page"])
