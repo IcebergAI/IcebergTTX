@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -69,7 +69,7 @@ from app.routers import (
     settings as settings_router,
 )
 from app.routers.ui import UIRedirect
-from app.services import audit_service
+from app.services import audit_service, background
 from app.services.ws_manager import heartbeat_task
 
 logger = logging.getLogger("iceberg_ttx")
@@ -191,8 +191,28 @@ async def lifespan(app: FastAPI):
     audit_service.emit("app.startup", severity="info")
     task = asyncio.create_task(heartbeat_task())
     yield
-    task.cancel()
+    # Graceful teardown (#250), strictly ordered:
+    # 1. Record app.shutdown FIRST, while the loop is still live, so its audit-persist and
+    #    SIEM-forward tasks are spawned in time to join the drain below instead of being
+    #    abandoned into a dying loop (which reliably lost the shutdown record to stdout).
     audit_service.emit("app.shutdown", severity="info")
+    # 2. Stop the heartbeat loop and await its cancellation.
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+    # 3. Cancel armed schedule timers. Sleeping workers are cancelled outright (rehydration
+    #    re-arms them next boot); a worker already mid-release is returned to finish in the
+    #    drain rather than be killed between its commit and dispatch (#218).
+    from app.services.schedule_service import cancel_all_schedules
+
+    schedule_tasks = cancel_all_schedules()
+    # 4. Drain in-flight background work (mail, audit persist, SIEM forward, LLM runs) plus
+    #    any past-sleep timer worker within one bounded grace period, then cancel stragglers.
+    await background.drain(extra=schedule_tasks)
+    # 5. Close the asyncpg pool cleanly so Postgres doesn't log unexpected EOFs on deploy.
+    from app.database import engine
+
+    await engine.dispose()
 
 
 app = FastAPI(title="IcebergTTX", lifespan=lifespan)

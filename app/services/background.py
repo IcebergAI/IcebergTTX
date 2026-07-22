@@ -16,7 +16,7 @@ process is alive.
 """
 
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Iterable
 from typing import Any
 
 _tasks: set[asyncio.Task] = set()
@@ -43,3 +43,26 @@ def spawn_limited(
     tasks.add(task)
     task.add_done_callback(tasks.discard)
     return task
+
+
+async def drain(*, timeout: float = 10.0, extra: Iterable[asyncio.Task] = ()) -> None:
+    """Wait for in-flight spawned tasks to settle, then cancel any stragglers (#250).
+
+    Called by the lifespan shutdown so queued background work — mail delivery, audit
+    persistence, SIEM forwarding, LLM runs — and any schedule worker already past its
+    sleep (passed via ``extra``) can commit before the loop closes. Bounded by ``timeout``
+    so a wedged task can't hang shutdown; folding ``extra`` in keeps everything inside one
+    grace period rather than serialising two waits.
+    """
+    pending = [t for t in _tasks if not t.done()]
+    pending.extend(
+        task for tasks in _limited_tasks.values() for task in tasks if not task.done()
+    )
+    pending.extend(t for t in extra if not t.done())
+    if not pending:
+        return
+    _, still_pending = await asyncio.wait(pending, timeout=timeout)
+    for task in still_pending:
+        task.cancel()
+    if still_pending:
+        await asyncio.gather(*still_pending, return_exceptions=True)
