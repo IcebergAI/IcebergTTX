@@ -410,8 +410,10 @@ def main() -> int:
             # active, so without this the rail can highlight a different exercise
             # from the one on screen — the shell contradicting the page.
             current = ids["viewer_exercise_id"] if shot.as_participant else ids["exercise_id"]
+            # No dt_token injection (#264): api.login() already set the httpOnly
+            # access_token cookie on this shared context, so the page authenticates
+            # via the cookie exactly as a real browser session does.
             ctx.add_init_script(
-                f"localStorage.setItem('dt_token', {api.token!r});"
                 f"localStorage.setItem('dt_theme', {shot.theme!r});"
                 f"document.cookie = 'dt_resolved_theme={shot.theme};path=/';"
                 f"document.cookie = 'dt_current_exercise={current};path=/';"

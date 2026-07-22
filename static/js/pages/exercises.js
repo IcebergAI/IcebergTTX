@@ -107,6 +107,7 @@ document.addEventListener('alpine:init', () => {
     commentErrors: {},
     ws: null,
     wsConnected: false,
+    wsAccessDenied: false,  // set on a terminal 4003 close (removed/denied) (#264)
     pingInterval: null,
     reconnectTimeout: null,
     destroyed: false,
@@ -359,6 +360,7 @@ document.addEventListener('alpine:init', () => {
     responseFilter: 'all',
     ws: null,
     wsConnected: false,
+    wsAccessDenied: false,  // set on a terminal 4003 close (removed/denied) (#264)
     pingInterval: null,
     reconnectTimeout: null,
     destroyed: false,

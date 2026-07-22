@@ -165,9 +165,13 @@ async def test_ws_heartbeat_rechecks_token_authorization(
             _ws_url(active_exercise.id, facilitator_token), client
         ) as ws:
             await ws.send_json({"type": "ping"})
-            with pytest.raises(WebSocketDisconnect):
+            with pytest.raises(WebSocketDisconnect) as exc_info:
                 await ws.receive_json()
     assert resolver.await_count == 2
+    # Token invalid/expired/revoked mid-session is a "who are you" failure, so it
+    # closes 4001 (matching connect-time), not 4003 — the client redirects 4001 to
+    # /login rather than showing an access-denied state (#264).
+    assert exc_info.value.code == 4001
 
 
 async def test_ws_broadcasts_canonical_exercise_state_change_after_commit(

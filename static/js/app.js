@@ -7,10 +7,6 @@
 
 // ── Shared auth helpers ──────────────────────────────────────────────────
 
-function getToken() {
-  return localStorage.getItem('dt_token');
-}
-
 function isAuthPage() {
   return ['/login', '/register', '/forgot-password', '/reset-password', '/accept-invite'].includes(window.location.pathname);
 }
@@ -26,12 +22,13 @@ function clearAuthState() {
 }
 
 async function apiFetch(path, options = {}) {
-  const token = getToken();
+  // Auth rides on the httpOnly `access_token` cookie the browser sends on every
+  // same-origin request — the JWT is never stored in JS-readable localStorage (#264),
+  // so no Authorization header is set here.
   const headers = { ...(options.headers || {}) };
   if (!(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
-  if (token) headers.Authorization = 'Bearer ' + token;
   const apiPath = path.startsWith('/api/') ? path : '/api' + path;
   let resp;
   try {
@@ -279,13 +276,12 @@ const uiHelpers = {
 
 // ── Shared exercise WebSocket (#68) ──────────────────────────────────────
 // Auth rides on the httpOnly access_token cookie the browser sends on the
-// upgrade — no token in the URL, and no localStorage gate (SSO sessions have
-// the cookie but never a dt_token). Manages the component's ws / wsConnected /
-// pingInterval / reconnectTimeout fields so each page's destroy() teardown
-// works unchanged. Auth-refused closes (4001 invalid/expired/revoked token,
-// 4003 origin/access denied) are terminal: retrying can never succeed, and
-// each retry would emit a server-side audit event — so no reconnect loop.
-const WS_NO_RETRY_CODES = [4001, 4003];
+// upgrade — no token in the URL, and the JWT is never mirrored to localStorage
+// (#264; SSO sessions have the cookie too). Manages the component's ws /
+// wsConnected / wsAccessDenied / pingInterval / reconnectTimeout fields so each
+// page's destroy() teardown works unchanged. Auth-refused closes are terminal
+// (retrying can't succeed and each retry emits a server-side audit event), and
+// are handled per-code in onclose (4001 -> re-auth, 4003 -> access-denied).
 
 function connectExerciseWs(exerciseId, component, { viewParams = false, onMessage = null } = {}) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -319,7 +315,23 @@ function connectExerciseWs(exerciseId, component, { viewParams = false, onMessag
     component.wsConnected = false;
     clearInterval(component.pingInterval);
     component.pingInterval = null;
-    if (component.destroyed || WS_NO_RETRY_CODES.includes(ev.code)) return;
+    if (component.destroyed) return;
+    // 4001 = token missing/expired/revoked: mirror the apiFetch 401 branch so a
+    // live page can't sit silently frozen past token expiry — clear state and
+    // bounce to /login. This is the fix for the "looks alive but nothing arrives"
+    // symptom (#264).
+    if (ev.code === 4001) {
+      clearAuthState();
+      if (!isAuthPage()) window.location.href = '/login';
+      return;
+    }
+    // 4003 = origin / exercise-access / membership denied: the user is authenticated
+    // but not allowed here, so redirecting to /login would be wrong — surface an
+    // explicit access-denied state that the status label renders instead.
+    if (ev.code === 4003) {
+      component.wsAccessDenied = true;
+      return;
+    }
     component.reconnectTimeout = setTimeout(
       () => connectExerciseWs(exerciseId, component, { viewParams, onMessage }),
       3000,
@@ -387,7 +399,6 @@ const dialogHelpers = {
 };
 
 window.DT = {
-  getToken,
   isAuthPage,
   clearAuthState,
   apiFetch,
