@@ -172,7 +172,7 @@ async def _inject_options(
         return []
     options: list[dict] = []
     for option in node.options:
-        entry = {"id": option.id, "label": option.label}
+        entry: dict[str, str | None] = {"id": option.id, "label": option.label}
         # next_inject_id maps this option to an unreleased future node — the branch
         # topology. Omit it unless the caller opts in (facilitator paths), so a
         # participant can't read which option leads where before choosing (#266).
