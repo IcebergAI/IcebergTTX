@@ -32,7 +32,8 @@
       <span class="fac-console__connection smallcaps flex items-center gap-1.5"
             :class="wsConnected ? 'text-ok' : 'text-crit'">
         <span class="dot" :class="wsConnected ? 'dot-ok' : 'dot-crit'" aria-hidden="true"></span>
-        <span x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
+        <span x-show="!wsAccessDenied" x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
+        <span x-show="wsAccessDenied">Access denied</span>
       </span>
       <div class="fac-console__action-divider w-px h-5 border-l rule-2 mx-1"></div>
       <button @click="showOpsPanel = !showOpsPanel"

@@ -113,9 +113,9 @@ document.addEventListener('alpine:init', () => {
       if (resp && resp.ok) {
         this.newPassword = '';
         this.confirmPassword = '';
-        // The change revoked our old bearer token, but update_me re-issued a fresh
-        // httpOnly cookie. Drop the now-stale localStorage token so apiFetch falls
-        // back to that cookie (never expose the token to JS) instead of 401ing.
+        // The JWT is no longer stored in JS (#264) — auth rides on the httpOnly
+        // cookie update_me re-issued. Clear any stale dt_token left by a pre-#264
+        // session so it can't shadow the fresh cookie; a no-op for new sessions.
         localStorage.removeItem('dt_token');
         const wasForced = this.mustChangePassword;
         if (this.me) this.me.must_change_password = false;

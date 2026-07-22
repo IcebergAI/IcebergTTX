@@ -39,7 +39,8 @@
              class="text-[12.5px] text-muted hover:text-ink">Communications</a>
           <span class="flex items-center gap-1.5 smallcaps"
                 :class="wsConnected ? 'text-faint' : 'text-red-400'">
-            <span x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
+            <span x-show="!wsAccessDenied" x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
+            <span x-show="wsAccessDenied">Access denied</span>
           </span>
         </div>
       </div>

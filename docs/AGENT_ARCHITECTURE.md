@@ -19,7 +19,7 @@ API-first architecture.
 
 - **Backend**: Python >= 3.14, FastAPI (fully async), SQLModel + async SQLAlchemy, PostgreSQL (asyncpg)
 - **Frontend**: Jinja2 templates (served by FastAPI) + Tailwind CSS v4 (CLI-compiled) + AlpineJS
-- **Auth**: JWT tokens (python-jose) stored in httpOnly cookie + localStorage
+- **Auth**: JWT (pyjwt) in an httpOnly cookie for the browser; the server also accepts an `Authorization: Bearer` header for non-browser API clients
 - **Real-time**: WebSockets (FastAPI native)
 - **Testing**: Pytest (`pytest-asyncio`, `httpx`/`httpx-ws`, `testcontainers` Postgres)
 
@@ -53,7 +53,7 @@ API-first architecture.
 
 **Linear inject flows**: In addition to per-option `next_inject_id` branching, an `InjectNode` may set a node-level `next_inject_id` (in `scenario_json.py`) to chain to the next inject without requiring a participant decision — i.e. a straight-line sequence. The `ScenarioDefinition` validator checks the referenced ID exists, and `_check_no_cycles()` includes node-level `next_inject_id` edges in its adjacency graph so linear chains can't form a cycle.
 
-**JWT auth**: Stored in both an `httpOnly` cookie (for page navigation/Jinja2 routes) and `localStorage` (for Alpine/fetch calls). The `get_current_user` FastAPI dependency checks both; the `Authorization` header takes precedence.
+**JWT auth**: The browser holds the JWT **only** in an `httpOnly` cookie — never JS-readable storage (#264) — and authenticates page navigation, `apiFetch` calls, and the WebSocket upgrade with it. The `get_current_user` FastAPI dependency still also accepts an `Authorization: Bearer` header (which takes precedence) for non-browser API clients; browser code never sets one. Because the app's own fetch calls are now cookie-authenticated, their state-changing requests go through the `CSRFOriginMiddleware` `Origin`/`Referer` check (same-origin, so they pass) instead of the old Bearer exemption.
 
 **Email / SMTP (#117, #186)**: Feature-flagged on cached `MailConfig.smtp_enabled` (`enabled` plus host and From address) — dependent endpoints 404 and their UI entry points hide when off. Non-secret values live in the `EmailSettings` singleton, seed once from `SMTP_*`, and are editable at `/admin/email`; `SMTP_PASSWORD` stays env-only and is read live per delivery. `mail_service.send` is a best-effort async `aiosmtplib` call fired via `background.spawn`; SMTP is a raw socket and goes **direct**, NOT through the httpx proxy (#97). Self-service password reset and participant invites use single-use, expiring, SHA-256-hashed `AuthToken` rows. `POST /api/email/test` can only send to the requesting admin and reports only an exception class. The cache is per-process, so the single-replica constraint applies.
 
