@@ -898,7 +898,7 @@ async def test_shutdown_cancels_a_still_sleeping_timer(
     assert worker in pending
     assert not schedule_service._scheduled  # registry emptied
     assert not schedule_service._scheduled_comms
-    await background.drain(extra=pending)
+    await background.drain(collect_extra=lambda: pending)
     assert worker.cancelled()
     assert inject.state == InjectState.pending
 
@@ -957,7 +957,9 @@ async def test_shutdown_lets_a_mid_release_worker_finish(
         assert not schedule_service._scheduled  # registry still emptied
 
         resume.set()
-        await background.drain(extra=pending)
+        # Re-feed the already-collected worker each round (the registry is cleared, so a
+        # bare cancel_all_schedules would no longer surface it) and let the drain await it.
+        await background.drain(collect_extra=lambda: pending)
         msg = await asyncio.wait_for(ws.receive_json(), timeout=5)
 
     assert worker.done() and worker.exception() is None

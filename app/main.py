@@ -200,16 +200,17 @@ async def lifespan(app: FastAPI):
     task.cancel()
     with suppress(asyncio.CancelledError):
         await task
-    # 3. Cancel armed schedule timers. Sleeping workers are cancelled outright (rehydration
-    #    re-arms them next boot); a worker already mid-release is returned to finish in the
-    #    drain rather than be killed between its commit and dispatch (#218).
+    # 3. Drain in-flight background work (mail, audit persist, SIEM forward, LLM runs) and
+    #    armed timers in one bounded, converging pass. cancel_all_schedules, re-invoked each
+    #    round, cancels still-sleeping timers (rehydration re-arms them next boot) and hands
+    #    back any worker already mid-release so it finishes its commit and dispatch atomically
+    #    (#218); the drain re-collects the task sets after each wait so audit/SIEM writes and
+    #    triggered-comm timers spawned *by* those releases are drained too, not disposed out
+    #    from under (see background.drain).
     from app.services.schedule_service import cancel_all_schedules
 
-    schedule_tasks = cancel_all_schedules()
-    # 4. Drain in-flight background work (mail, audit persist, SIEM forward, LLM runs) plus
-    #    any past-sleep timer worker within one bounded grace period, then cancel stragglers.
-    await background.drain(extra=schedule_tasks)
-    # 5. Close the asyncpg pool cleanly so Postgres doesn't log unexpected EOFs on deploy.
+    await background.drain(collect_extra=cancel_all_schedules)
+    # 4. Close the asyncpg pool cleanly so Postgres doesn't log unexpected EOFs on deploy.
     from app.database import engine
 
     await engine.dispose()
