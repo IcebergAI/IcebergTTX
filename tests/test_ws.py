@@ -102,6 +102,11 @@ async def test_send_to_many_prunes_stalled_socket_and_delivers_to_others(monkeyp
     remaining = {id(c.ws) for room in manager._rooms.values() for c in room}
     assert id(stalled) not in remaining  # timed-out socket pruned
     assert {id(healthy_one), id(healthy_two)} <= remaining
+    # The timed-out socket is CLOSED (not just removed) so its handler exits and the
+    # client reconnects instead of becoming a zombie that misses every broadcast.
+    stalled.close.assert_awaited_once()
+    healthy_one.close.assert_not_awaited()
+    healthy_two.close.assert_not_awaited()
 
 
 async def test_prune_stale_bounds_hung_close_and_drops_empty_room(monkeypatch):

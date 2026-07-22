@@ -225,7 +225,15 @@ class ConnectionManager:
         results = await asyncio.gather(*(_send(c) for c in conns))
         dead = [c for c in results if c is not None]
         if dead:
+            # Remove first (so a concurrent broadcast won't treat them as live), then
+            # close. A timed-out socket is still OPEN — dropping it without closing
+            # leaves a zombie whose receive loop keeps answering pings (the client
+            # believes it's healthy) while it silently misses every future broadcast
+            # and is unreachable by prune. Closing makes its handler exit so the client
+            # reconnects and resyncs. Bounded + concurrent so a wedged close can't hang
+            # the fan-out (#252).
             self._drop(dead)
+            await asyncio.gather(*(self._safe_close(c.ws) for c in dead))
 
     async def prune_stale(self, max_idle_seconds: int = 90) -> None:
         """Close and remove connections that haven't pinged recently.
