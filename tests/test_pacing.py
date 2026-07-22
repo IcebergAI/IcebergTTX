@@ -14,7 +14,7 @@ from app.models.exercise import Exercise, ExerciseState, ExerciseStateTransition
 from app.models.inject import Inject, InjectState
 from app.models.user import User
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition, TriggerComm
-from app.services import progression_service, schedule_service
+from app.services import background, progression_service, schedule_service
 from app.services.exercise_service import (
     create_exercise,
     enrol_member,
@@ -871,3 +871,102 @@ async def test_scheduled_release_fires_once_the_team_has_reached_the_inject(
     await schedule_service._release_when_due(exercise.id, escalate.id, 0)
 
     assert escalate.state == InjectState.released
+
+
+# ── Graceful shutdown drains armed timers (#250) ───────────────────────────────
+
+
+async def test_shutdown_cancels_a_still_sleeping_timer(
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+):
+    """A timer still in its sleep is cancelled outright on shutdown (restart re-arms it).
+
+    cancel_all_schedules empties the registry and returns the worker so the caller can
+    await its settling; the worker resolves as cancelled without ever touching the DB.
+    """
+    ex = await _make_exercise(session, facilitator, participant, offset=5, active=True)
+    inject = await _first_inject(session, ex.id)
+
+    schedule_service._arm(ex.id, inject.id, 3600)  # long sleep — nowhere near due
+    worker = schedule_service._scheduled[ex.id][inject.id].task
+    await asyncio.sleep(0)  # let the worker reach its sleep
+
+    pending = schedule_service.cancel_all_schedules()
+
+    assert worker in pending
+    assert not schedule_service._scheduled  # registry emptied
+    assert not schedule_service._scheduled_comms
+    await background.drain(collect_extra=lambda: pending)
+    assert worker.cancelled()
+    assert inject.state == InjectState.pending
+
+
+async def test_shutdown_lets_a_mid_release_worker_finish(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+    monkeypatch,
+):
+    """A worker past its sleep is drained, not killed between its commit and dispatch.
+
+    This is the shutdown face of the released-with-no-frame window #218 closed: once a
+    scheduled worker has entered its critical section, cancel_all_schedules must leave it
+    running — no cancellation even requested — and background.drain must let it commit and
+    broadcast its ``inject_released`` frame before shutdown proceeds (#250).
+    """
+    ex = await _make_exercise(session, facilitator, participant, offset=5, active=True)
+    inject = await _first_inject(session, ex.id)
+
+    monkeypatch.setattr(
+        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
+    )
+
+    in_gate = asyncio.Event()
+    resume = asyncio.Event()
+    real_gate = progression_service.release_is_allowed
+
+    async def blocking_gate(session_, inject_, *, scheduled=False):
+        # Answer the gate, then park the worker *inside* its critical section (it has
+        # already marked itself releasing) so shutdown races it exactly mid-release.
+        allowed = await real_gate(session_, inject_, scheduled=scheduled)
+        in_gate.set()
+        await resume.wait()
+        return allowed
+
+    monkeypatch.setattr(progression_service, "release_is_allowed", blocking_gate)
+
+    async with aconnect_ws(
+        f"/ws/exercises/{ex.id}",
+        client,
+        headers={
+            "origin": "http://testserver",
+            "cookie": f"access_token={facilitator_token}",
+        },
+    ) as ws:
+        schedule_service._arm(ex.id, inject.id, 0)
+        worker = schedule_service._scheduled[ex.id][inject.id].task
+        await asyncio.wait_for(in_gate.wait(), timeout=5)
+
+        pending = schedule_service.cancel_all_schedules()
+        assert worker in pending
+        assert worker.cancelling() == 0  # left running, not even a cancel requested
+        assert not schedule_service._scheduled  # registry still emptied
+
+        resume.set()
+        # Re-feed the already-collected worker each round (the registry is cleared, so a
+        # bare cancel_all_schedules would no longer surface it) and let the drain await it.
+        await background.drain(collect_extra=lambda: pending)
+        msg = await asyncio.wait_for(ws.receive_json(), timeout=5)
+
+    assert worker.done() and worker.exception() is None
+    assert msg["type"] == "inject_released"
+    assert msg["payload"]["id"] == inject.id
+    assert msg["payload"]["state"] == "released"
+
+    session.expire_all()
+    refreshed = await session.get(Inject, inject.id)
+    assert refreshed.state == InjectState.released

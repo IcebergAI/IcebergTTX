@@ -63,6 +63,14 @@ class _Timer:
 _scheduled: dict[int, dict[int, _Timer]] = {}
 _scheduled_comms: dict[int, dict[str, asyncio.Task]] = {}
 
+# Workers that have passed their sleep and entered the release/deliver critical section.
+# A graceful shutdown (cancel_all_schedules) must leave these running so they finish their
+# commit *and* dispatch atomically (#218) instead of being killed mid-release; a worker
+# still sleeping is safe to cancel outright — rehydrate_schedules re-arms it next boot.
+# The worker adds itself with no intervening await, and cancel_all_schedules reads the set
+# without yielding, so the two never interleave and the check is race-free (#250).
+_releasing: set[asyncio.Task] = set()
+
 
 def _effective_elapsed_seconds(exercise: Exercise) -> float:
     """Seconds of *running* time since start, excluding completed pause spans (#116).
@@ -185,6 +193,37 @@ def cancel_exercise_schedules(exercise_id: int) -> None:
     for task in tasks:
         if task is not current:
             task.cancel()
+
+
+def cancel_all_schedules() -> list[asyncio.Task]:
+    """Tear down every armed timer for a graceful shutdown (#250).
+
+    Sleeping (pre-release) workers are cancelled outright — they are restart-safe, since
+    rehydrate_schedules re-arms them on the next boot. A worker already past its sleep is
+    left running so it can finish its commit and dispatch atomically rather than be killed
+    mid-release (#218); the caller drains those with a bounded grace period. Returns every
+    worker task — the cancelled sleepers included — so the caller can await their settling
+    inside that same drain and no task is destroyed while still pending.
+    """
+    current = asyncio.current_task()
+    tasks: list[asyncio.Task] = []
+    for ex_tasks in list(_scheduled.values()):
+        for timer in list(ex_tasks.values()):
+            if timer.task is current:
+                continue
+            tasks.append(timer.task)
+            if timer.task not in _releasing:
+                timer.task.cancel()
+    for comm_tasks in list(_scheduled_comms.values()):
+        for task in list(comm_tasks.values()):
+            if task is current:
+                continue
+            tasks.append(task)
+            if task not in _releasing:
+                task.cancel()
+    _scheduled.clear()
+    _scheduled_comms.clear()
+    return tasks
 
 
 def _active_elapsed_since(
@@ -391,55 +430,65 @@ async def _release_when_due(exercise_id: int, inject_id: int, delay: float) -> N
         if delay > 0:
             await asyncio.sleep(delay)
 
-        from app.database import engine
-        from app.services.inject_service import release_inject
-        from app.services.progression_service import release_is_allowed
+        # Past the sleep: mark this worker in-release so a shutdown cancel-all lets it
+        # finish its commit and dispatch rather than kill it mid-release (#218, #250). Set
+        # with no await before it so the read in cancel_all_schedules cannot interleave.
+        current = asyncio.current_task()
+        if current is not None:
+            _releasing.add(current)
+        try:
+            from app.database import engine
+            from app.services.inject_service import release_inject
+            from app.services.progression_service import release_is_allowed
 
-        async with AsyncSession(engine, expire_on_commit=False) as session:
-            inject = await session.get(Inject, inject_id)
-            exercise = await session.get(Exercise, exercise_id)
-            # Guard the pause/cancel/manual-release race: only fire if still pending,
-            # still active, and still scheduled.
-            if (
-                inject is None
-                or exercise is None
-                or inject.state != InjectState.pending
-                or exercise.state != ExerciseState.active
-                or inject.release_offset_minutes is None
-            ):
-                return
-            # Not a failure, so not an exception: the team simply has not reached this
-            # node yet. Checking the gate here rather than letting release_inject raise
-            # keeps the case distinguishable from a real one, and arm_cursor_reached_injects
-            # brings the timer back when a response advances a cursor onto the node —
-            # at delay 0 if the offset has already passed (#218).
-            if not await release_is_allowed(session, inject, scheduled=True):
-                # No await between the gate's answer and this: a response committing in that
-                # gap would otherwise find this timer still registered, skip it, and leave
-                # the inject with no timer at all once we drop out (see the docstring).
-                if _consume_rearm_or_deregister(exercise_id, inject_id):
-                    arm_inject_schedule(exercise, inject)
+            async with AsyncSession(engine, expire_on_commit=False) as session:
+                inject = await session.get(Inject, inject_id)
+                exercise = await session.get(Exercise, exercise_id)
+                # Guard the pause/cancel/manual-release race: only fire if still pending,
+                # still active, and still scheduled.
+                if (
+                    inject is None
+                    or exercise is None
+                    or inject.state != InjectState.pending
+                    or exercise.state != ExerciseState.active
+                    or inject.release_offset_minutes is None
+                ):
                     return
-                logger.info(
-                    "Scheduled release deferred for inject %d: no cursor has reached it",
-                    inject_id,
-                )
+                # Not a failure, so not an exception: the team simply has not reached this
+                # node yet. Checking the gate here rather than letting release_inject raise
+                # keeps the case distinguishable from a real one, and
+                # arm_cursor_reached_injects brings the timer back when a response advances
+                # a cursor onto the node — at delay 0 if the offset has already passed (#218).
+                if not await release_is_allowed(session, inject, scheduled=True):
+                    # No await between the gate's answer and this: a response committing in
+                    # that gap would otherwise find this timer still registered, skip it, and
+                    # leave the inject with no timer at all once we drop out (see docstring).
+                    if _consume_rearm_or_deregister(exercise_id, inject_id):
+                        arm_inject_schedule(exercise, inject)
+                        return
+                    logger.info(
+                        "Scheduled release deferred for inject %d: no cursor has reached it",
+                        inject_id,
+                    )
+                    audit_service.emit(
+                        "inject.release_deferred",
+                        actor=None,
+                        target_type="inject",
+                        target_id=inject_id,
+                        reason="cursor_not_reached",
+                    )
+                    return
+                await release_inject(session, inject, released_by=None, scheduled=True)
                 audit_service.emit(
-                    "inject.release_deferred",
+                    "inject.release",
                     actor=None,
                     target_type="inject",
                     target_id=inject_id,
-                    reason="cursor_not_reached",
+                    reason="scheduled",
                 )
-                return
-            await release_inject(session, inject, released_by=None, scheduled=True)
-            audit_service.emit(
-                "inject.release",
-                actor=None,
-                target_type="inject",
-                target_id=inject_id,
-                reason="scheduled",
-            )
+        finally:
+            if current is not None:
+                _releasing.discard(current)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -461,23 +510,33 @@ async def _communication_when_due(
     try:
         if delay > 0:
             await asyncio.sleep(delay)
-        from app.database import engine
-        from app.services.communication_service import deliver_triggered_communication
+        # Past the sleep: mark in-release so a shutdown cancel-all lets the idempotent
+        # delivery commit rather than kill it mid-write (#218, #250). Set with no await
+        # before it so the read in cancel_all_schedules cannot interleave.
+        current = asyncio.current_task()
+        if current is not None:
+            _releasing.add(current)
+        try:
+            from app.database import engine
+            from app.services.communication_service import deliver_triggered_communication
 
-        async with AsyncSession(engine, expire_on_commit=False) as session:
-            exercise = await session.get(Exercise, exercise_id)
-            if exercise is None or exercise.state != ExerciseState.active:
-                return
-            await deliver_triggered_communication(
-                session,
-                exercise_id=exercise_id,
-                inject_id=inject_id,
-                direction=direction,
-                external_entity=external_entity,
-                subject=subject,
-                body=body,
-                trigger_key=trigger_key,
-            )
+            async with AsyncSession(engine, expire_on_commit=False) as session:
+                exercise = await session.get(Exercise, exercise_id)
+                if exercise is None or exercise.state != ExerciseState.active:
+                    return
+                await deliver_triggered_communication(
+                    session,
+                    exercise_id=exercise_id,
+                    inject_id=inject_id,
+                    direction=direction,
+                    external_entity=external_entity,
+                    subject=subject,
+                    body=body,
+                    trigger_key=trigger_key,
+                )
+        finally:
+            if current is not None:
+                _releasing.discard(current)
     except asyncio.CancelledError:
         raise
     except Exception:
