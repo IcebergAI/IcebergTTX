@@ -508,9 +508,10 @@ async def test_delete_released_inject_refused_and_evidence_survives(
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
     assert release.status_code == 200
+    # Ad-hoc inject has no scenario node / options, so the response is free-text only.
     response = await client.post(
         f"/api/exercises/{active_exercise.id}/responses",
-        json={"inject_id": created["id"], "content": "Isolate hosts.", "selected_option": "opt_a"},
+        json={"inject_id": created["id"], "content": "Isolate hosts."},
         headers={"Authorization": f"Bearer {participant_token}"},
     )
     assert response.status_code == 201

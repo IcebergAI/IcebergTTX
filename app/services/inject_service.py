@@ -90,7 +90,9 @@ async def release_inject(
     # exercise (#265). The lock is already held, so this costs nothing extra.
     exercise = await lock_exercise_for_audience_snapshot(session, inject.exercise_id)
     if exercise.state != ExerciseState.active:
-        await session.rollback()
+        # Nothing has been written yet (only the row lock is held), so raise without a
+        # rollback — matching the release_is_allowed guard just below. The caller's / worker's
+        # transaction releases the lock on exit.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only active exercises can release injects",
