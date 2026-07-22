@@ -6,6 +6,7 @@ from sqlalchemy import update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.exercise import ExerciseState
 from app.models.inject import Inject, InjectState
 from app.models.scenario import Scenario
 from app.schemas.api import InjectPublic
@@ -83,7 +84,17 @@ async def release_inject(
         seed_inject_resolution_contexts,
     )
 
-    await lock_exercise_for_audience_snapshot(session, inject.exercise_id)
+    # Re-read state from the locked exercise row. Both callers (manual route and scheduled
+    # worker) check state == active *before* this lock, so a pause committing in that window
+    # would otherwise land a release — frame broadcast, triggered comms armed — into a paused
+    # exercise (#265). The lock is already held, so this costs nothing extra.
+    exercise = await lock_exercise_for_audience_snapshot(session, inject.exercise_id)
+    if exercise.state != ExerciseState.active:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only active exercises can release injects",
+        )
 
     if not await release_is_allowed(session, inject, scheduled=scheduled):
         raise HTTPException(

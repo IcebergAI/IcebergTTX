@@ -492,6 +492,48 @@ async def test_delete_inject(
     assert r.status_code == 204
 
 
+async def test_delete_released_inject_refused_and_evidence_survives(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+):
+    """A released inject carries after-action evidence and is on participant screens, so
+    deleting it is refused (409) rather than silently cascading away responses (#265)."""
+    created = (await _create_inject(
+        client, facilitator_token, active_exercise.id, target_teams=["it_ops"]
+    )).json()
+    release = await client.post(
+        f"/api/exercises/{active_exercise.id}/injects/{created['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert release.status_code == 200
+    response = await client.post(
+        f"/api/exercises/{active_exercise.id}/responses",
+        json={"inject_id": created["id"], "content": "Isolate hosts.", "selected_option": "opt_a"},
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert response.status_code == 201
+
+    deleted = await client.delete(
+        f"/api/exercises/{active_exercise.id}/injects/{created['id']}",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert deleted.status_code == 409
+
+    # The inject and the participant response it carries both survive the refused delete.
+    still_there = await client.get(
+        f"/api/exercises/{active_exercise.id}/injects/{created['id']}",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert still_there.status_code == 200
+    responses = (await client.get(
+        f"/api/exercises/{active_exercise.id}/responses",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )).json()
+    assert any(r["inject_id"] == created["id"] for r in responses)
+
+
 # ── Release ───────────────────────────────────────────────────────────────────
 
 async def test_release_inject(

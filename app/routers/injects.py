@@ -271,6 +271,15 @@ async def delete_inject(
     exercise = await require_exercise_owner(session, exercise_id, current_user)
     require_operational_mutability(exercise)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
+    # A released inject carries after-action evidence (participant responses, comments, and
+    # per-group resolution progress all cascade off the inject row) and is on participant
+    # screens. Deleting it would silently destroy that record, so refuse once it has left
+    # the pending state — resolve it or let it stand (#265).
+    if inject.state != InjectState.pending:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Released injects cannot be deleted; resolve them or let them stand",
+        )
     await session.delete(inject)
     await session.commit()
     _delete_attachment_file(inject)

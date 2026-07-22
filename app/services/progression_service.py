@@ -98,11 +98,14 @@ async def roster_changes_allowed(session: AsyncSession, exercise_id: int) -> boo
 
 async def lock_exercise_for_audience_snapshot(
     session: AsyncSession, exercise_id: int
-) -> None:
-    """Serialize inject release with roster mutation on the exercise row."""
-    await session.exec(
-        select(Exercise.id).where(Exercise.id == exercise_id).with_for_update()
-    )
+) -> Exercise:
+    """Serialize inject release with roster mutation on the exercise row, and return the
+    locked row so the release path can re-validate its state without a second read (#265)."""
+    return (
+        await session.exec(
+            select(Exercise).where(Exercise.id == exercise_id).with_for_update()
+        )
+    ).one()
 
 
 async def resolve_response_progression(

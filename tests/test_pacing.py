@@ -427,6 +427,28 @@ async def test_worker_skips_when_paused(
     assert inject.state == InjectState.pending
 
 
+async def test_release_inject_refused_when_exercise_paused(
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+):
+    """The state re-read under the release lock closes the pause/release TOCTOU window:
+    even past a stale caller check, a release into a non-active exercise is refused (#265).
+    Callers check state before the lock; this asserts the guard inside the lock too."""
+    from fastapi import HTTPException
+
+    from app.services.inject_service import release_inject
+
+    ex = await _make_exercise(session, facilitator, participant, offset=5, active=True)
+    inject = await _first_inject(session, ex.id)
+    await transition_state(session, ex, ExerciseState.paused)
+
+    with pytest.raises(HTTPException) as exc:
+        await release_inject(session, inject, released_by=facilitator.id)
+    assert exc.value.status_code == 409
+    assert inject.state == InjectState.pending
+
+
 # ── The progression cursor gates a scheduled release ──────────────────────────
 
 
