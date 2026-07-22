@@ -5,6 +5,12 @@
 // the CSP build resolves directive identifiers against component scope only —
 // helpers used from directives must be component members (see DT.uiHelpers).
 
+// One-time migration (#264): the JWT is no longer mirrored to JS-readable storage.
+// This module loads on every page, so unconditionally drop any dt_token a pre-#264
+// session persisted — otherwise an already-logged-in user who upgrades to this build
+// keeps a still-valid bearer readable by injected JS until their next logout/401.
+localStorage.removeItem('dt_token');
+
 // ── Shared auth helpers ──────────────────────────────────────────────────
 
 function isAuthPage() {

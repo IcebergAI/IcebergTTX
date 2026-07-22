@@ -60,7 +60,7 @@ The UI ships with a light/dark theme toggle (system-aware):
 - **Backend**: Python 3.14+, FastAPI (fully async), SQLModel + async SQLAlchemy, PostgreSQL (asyncpg)
 - **Frontend**: Jinja2 templates, Tailwind CSS v4 (CLI-compiled), Alpine.js
 - **Real-time**: WebSockets (FastAPI native)
-- **Auth**: JWT tokens (httpOnly cookie + localStorage)
+- **Auth**: JWT in an httpOnly cookie (never JS-readable; the server also accepts an `Authorization: Bearer` header for non-browser API clients)
 - **LLM**: pluggable AI backend — Anthropic (direct), Amazon Bedrock, OpenAI, Ollama, or Gemini, selected by `LLM_PROVIDER` (async; prompt caching on the Anthropic path)
 
 ## Setup
