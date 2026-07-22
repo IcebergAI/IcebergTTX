@@ -1,9 +1,20 @@
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import WebSocket
+
+logger = logging.getLogger("iceberg_ttx.ws")
+
+# Bound every per-socket send/close so one stalled client (TCP backpressure from a
+# suspended tab, dead NAT path, or locked phone — send_json/close blocks and never
+# raises) can't block the fan-out, and thus the committing request and the timer
+# worker, or wedge the prune loop (#252). A socket that doesn't drain within the
+# timeout is treated as dead and pruned, exactly like a send exception.
+_SEND_TIMEOUT = 5.0
+_CLOSE_TIMEOUT = 5.0
 
 
 @dataclass
@@ -40,8 +51,15 @@ class ConnectionManager:
         )
 
     def disconnect(self, ws: WebSocket, exercise_id: int) -> None:
-        conns = self._rooms.get(exercise_id, [])
-        self._rooms[exercise_id] = [c for c in conns if c.ws is not ws]
+        conns = self._rooms.get(exercise_id)
+        if conns is None:
+            return
+        remaining = [c for c in conns if c.ws is not ws]
+        if remaining:
+            self._rooms[exercise_id] = remaining
+        else:
+            # Drop the emptied room instead of leaving a dead key behind (#252).
+            del self._rooms[exercise_id]
 
     async def close_user_connections(self, user_id: int, code: int = 4003) -> None:
         """Close every live socket for a user after authorization changes.
@@ -51,17 +69,22 @@ class ConnectionManager:
         cached WebSocket role as authoritative.
         """
         targets: dict[int, Connection] = {}
-        for exercise_id, conns in self._rooms.items():
+        for exercise_id in list(self._rooms):
+            conns = self._rooms[exercise_id]
             for connection in conns:
                 if connection.user_id == user_id:
                     targets[id(connection.ws)] = connection
-            self._rooms[exercise_id] = [c for c in conns if c.user_id != user_id]
+            remaining = [c for c in conns if c.user_id != user_id]
+            if remaining:
+                self._rooms[exercise_id] = remaining
+            else:
+                del self._rooms[exercise_id]
 
-        for connection in targets.values():
-            try:
-                await connection.ws.close(code=code)
-            except Exception:  # nosec B110 - best-effort close of a dead socket
-                pass
+        # Bounded + concurrent so a wedged close can't stall the others (#252).
+        if targets:
+            await asyncio.gather(
+                *(self._safe_close(c.ws, code=code) for c in targets.values())
+            )
 
     def ping(self, ws: WebSocket, exercise_id: int) -> None:
         for c in self._rooms.get(exercise_id, []):
@@ -162,36 +185,71 @@ class ConnectionManager:
         )
         await self._send_to_many(conns, message)
 
+    async def _safe_close(self, ws: WebSocket, code: int | None = None) -> None:
+        """Close a socket, bounded by _CLOSE_TIMEOUT so a wedged close can't hang the
+        caller (prune loop / auth-change close). Best-effort — a dead socket is fine."""
+        try:
+            closer = ws.close(code=code) if code is not None else ws.close()
+            await asyncio.wait_for(closer, timeout=_CLOSE_TIMEOUT)
+        except Exception:  # nosec B110 - best-effort, timeout-bounded close
+            pass
+
+    def _drop(self, dead: list[Connection]) -> None:
+        """Remove dead connections from every room (by socket identity) and drop any
+        room that becomes empty (#252). Synchronous, so it's atomic w.r.t. the loop."""
+        dead_ids = {id(c.ws) for c in dead}
+        for exercise_id in list(self._rooms):
+            kept = [c for c in self._rooms[exercise_id] if id(c.ws) not in dead_ids]
+            if kept:
+                self._rooms[exercise_id] = kept
+            else:
+                del self._rooms[exercise_id]
+
     async def _send_to_many(self, conns: list[Connection], message: dict) -> None:
-        dead: list[Connection] = []
-        for c in conns:
+        # Fan out concurrently, each send bounded by _SEND_TIMEOUT: a stalled client
+        # (never drains, never raises) is cancelled at the timeout and pruned instead
+        # of blocking every other recipient and the awaiting request/worker (#252).
+        # Rooms are tens of sockets, so gather-all needs no semaphore.
+        if not conns:
+            return
+
+        async def _send(c: Connection) -> Connection | None:
             try:
-                await c.ws.send_json(message)
+                await asyncio.wait_for(c.ws.send_json(message), timeout=_SEND_TIMEOUT)
+                return None
             except Exception:
-                dead.append(c)
-        for c in dead:
-            for room in self._rooms.values():
-                try:
-                    room.remove(c)
-                except ValueError:
-                    pass
+                # Errored or stalled past the timeout — mark dead. (CancelledError is
+                # BaseException, so shutdown cancellation still propagates.)
+                return c
+
+        results = await asyncio.gather(*(_send(c) for c in conns))
+        dead = [c for c in results if c is not None]
+        if dead:
+            self._drop(dead)
 
     async def prune_stale(self, max_idle_seconds: int = 90) -> None:
-        """Close and remove connections that haven't pinged recently."""
+        """Close and remove connections that haven't pinged recently.
+
+        Remove-then-close (like close_user_connections) so a stale socket is no longer
+        treated as authoritative mid-broadcast, and close concurrently with a bounded
+        timeout so a wedged close can't stall pruning — which would otherwise stop the
+        heartbeat loop for good (#252)."""
         now = datetime.now(UTC)
-        for exercise_id, conns in list(self._rooms.items()):
+        stale: list[Connection] = []
+        for exercise_id in list(self._rooms):
+            conns = self._rooms[exercise_id]
             live: list[Connection] = []
             for c in conns:
-                idle = (now - c.last_ping).total_seconds()
-                if idle > max_idle_seconds:
-                    try:
-                        await c.ws.close()
-                    # best-effort close of an already-dead socket
-                    except Exception:  # nosec B110
-                        pass
+                if (now - c.last_ping).total_seconds() > max_idle_seconds:
+                    stale.append(c)
                 else:
                     live.append(c)
-            self._rooms[exercise_id] = live
+            if live:
+                self._rooms[exercise_id] = live
+            else:
+                del self._rooms[exercise_id]
+        if stale:
+            await asyncio.gather(*(self._safe_close(c.ws) for c in stale))
 
 
 manager = ConnectionManager()
@@ -201,4 +259,9 @@ async def heartbeat_task() -> None:
     """Background task: prune stale connections every 30 s."""
     while True:
         await asyncio.sleep(30)
-        await manager.prune_stale()
+        try:
+            await manager.prune_stale()
+        except Exception:
+            # A prune failure must never kill the loop (#252). CancelledError is
+            # BaseException, so the lifespan's task.cancel() still stops shutdown.
+            logger.exception("heartbeat prune_stale failed; continuing")

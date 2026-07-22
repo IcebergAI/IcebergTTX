@@ -72,6 +72,67 @@ async def test_close_user_connections_removes_and_closes_only_target_user():
     assert all(c.user_id != 42 for room in manager._rooms.values() for c in room)
     assert any(c.user_id == 7 for room in manager._rooms.values() for c in room)
 
+
+async def _never_returns(*args, **kwargs):
+    """A coroutine that blocks forever — models a socket that never drains (TCP
+    backpressure) or a close that hangs. wait_for cancels it at the timeout."""
+    await asyncio.Event().wait()
+
+
+async def test_send_to_many_prunes_stalled_socket_and_delivers_to_others(monkeypatch):
+    """One stalled client must not block delivery to the others, and is pruned (#252)."""
+    monkeypatch.setattr("app.services.ws_manager._SEND_TIMEOUT", 0.05)
+
+    manager = ConnectionManager()
+    stalled = AsyncMock()
+    stalled.send_json = _never_returns
+    healthy_one = AsyncMock()
+    healthy_two = AsyncMock()
+    # Stalled first: with the old serial loop the healthy sockets would never be reached.
+    await manager.connect(stalled, 1, user_id=1, role="participant", group_id="it_ops")
+    await manager.connect(healthy_one, 1, user_id=2, role="participant", group_id="it_ops")
+    await manager.connect(healthy_two, 1, user_id=3, role="facilitator", group_id=None)
+
+    msg = {"type": "inject_released"}
+    # Outer bound: if the fan-out were still serial/unbounded this would hang, not pass.
+    await asyncio.wait_for(manager.broadcast_to_exercise(1, msg), timeout=2)
+
+    healthy_one.send_json.assert_awaited_once_with(msg)
+    healthy_two.send_json.assert_awaited_once_with(msg)
+    remaining = {id(c.ws) for room in manager._rooms.values() for c in room}
+    assert id(stalled) not in remaining  # timed-out socket pruned
+    assert {id(healthy_one), id(healthy_two)} <= remaining
+
+
+async def test_prune_stale_bounds_hung_close_and_drops_empty_room(monkeypatch):
+    """A hung ws.close() must not stall pruning (which would wedge the heartbeat loop),
+    and an emptied room is dropped (#252)."""
+    monkeypatch.setattr("app.services.ws_manager._CLOSE_TIMEOUT", 0.05)
+
+    manager = ConnectionManager()
+    hung = AsyncMock()
+    hung.close = _never_returns
+    fresh = AsyncMock()
+    await manager.connect(hung, 1, user_id=1, role="participant", group_id="it_ops")
+    await manager.connect(fresh, 2, user_id=2, role="participant", group_id="it_ops")
+    manager._rooms[1][0].last_ping = datetime.now(UTC) - timedelta(seconds=200)
+
+    await asyncio.wait_for(manager.prune_stale(), timeout=2)
+
+    assert 1 not in manager._rooms  # stale socket's room removed despite the hung close
+    assert 2 in manager._rooms and manager._rooms[2][0].ws is fresh
+
+
+async def test_disconnect_drops_empty_room():
+    """disconnect must not leave an empty room entry behind (#252)."""
+    manager = ConnectionManager()
+    ws = AsyncMock()
+    await manager.connect(ws, 1, user_id=1, role="participant", group_id="it_ops")
+    assert 1 in manager._rooms
+    manager.disconnect(ws, 1)
+    assert 1 not in manager._rooms
+
+
 async def test_ws_connect_valid_token(
     client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
