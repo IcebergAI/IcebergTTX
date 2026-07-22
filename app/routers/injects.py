@@ -29,6 +29,7 @@ from app.services.exercise_service import validate_group_id, validate_team_ids
 from app.services.inject_service import (
     AttachmentMeta,
     create_inject,
+    delete_pending_inject,
     get_inject_or_404,
     inject_payload,
     release_inject,
@@ -273,15 +274,10 @@ async def delete_inject(
     inject = await get_inject_or_404(session, exercise_id, inject_id)
     # A released inject carries after-action evidence (participant responses, comments, and
     # per-group resolution progress all cascade off the inject row) and is on participant
-    # screens. Deleting it would silently destroy that record, so refuse once it has left
-    # the pending state — resolve it or let it stand (#265).
-    if inject.state != InjectState.pending:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Released injects cannot be deleted; resolve them or let them stand",
-        )
-    await session.delete(inject)
-    await session.commit()
+    # screens. Deleting it would silently destroy that record, so the delete is conditional on
+    # the inject still being pending — a compare-and-swap that also closes the race against a
+    # concurrent release (#265).
+    await delete_pending_inject(session, inject)
     _delete_attachment_file(inject)
     audit_service.emit(
         "inject.delete",

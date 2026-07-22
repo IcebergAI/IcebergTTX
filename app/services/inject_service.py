@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -69,6 +69,32 @@ async def get_inject_or_404(session: AsyncSession, exercise_id: int, inject_id: 
     if not inject or inject.exercise_id != exercise_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inject not found")
     return inject
+
+
+async def delete_pending_inject(session: AsyncSession, inject: Inject) -> None:
+    """Delete an inject only while it is still pending, else 409.
+
+    Conditional on ``state == pending`` so a release committing between the caller's read and
+    this delete cannot slip through: once released, the inject carries after-action evidence
+    (responses, comments, per-group resolution progress) and is on participant screens (#265).
+    A released inject matches zero rows here and is left fully intact; a genuinely-pending one
+    has no such dependents, so the ``ondelete="CASCADE"`` FKs never destroy evidence. Mirrors
+    the compare-and-swap in ``release_inject``."""
+    assert inject.id is not None
+    deleted = (
+        await session.exec(
+            delete(Inject)
+            .where(col(Inject.id) == inject.id, col(Inject.state) == InjectState.pending)
+            .returning(col(Inject.id))
+            .execution_options(synchronize_session=False)
+        )
+    ).scalar_one_or_none()
+    if deleted is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Released injects cannot be deleted; resolve them or let them stand",
+        )
+    await session.commit()
 
 
 async def release_inject(

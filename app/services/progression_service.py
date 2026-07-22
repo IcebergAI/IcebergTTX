@@ -100,10 +100,18 @@ async def lock_exercise_for_audience_snapshot(
     session: AsyncSession, exercise_id: int
 ) -> Exercise:
     """Serialize inject release with roster mutation on the exercise row, and return the
-    locked row so the release path can re-validate its state without a second read (#265)."""
+    locked row so the release path can re-validate its state without a second read (#265).
+
+    ``populate_existing`` is essential: both callers pre-load the exercise into this session
+    (the manual route and the scheduled worker), so a plain locked select would return the
+    identity-map instance with its stale pre-pause ``state``. This overwrites it from the
+    locked row, so the caller sees the state as of the moment the lock was acquired."""
     return (
         await session.exec(
-            select(Exercise).where(Exercise.id == exercise_id).with_for_update()
+            select(Exercise)
+            .where(Exercise.id == exercise_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).one()
 
