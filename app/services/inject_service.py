@@ -2,10 +2,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.exercise import ExerciseState
 from app.models.inject import Inject, InjectState
 from app.models.scenario import Scenario
 from app.schemas.api import InjectPublic
@@ -70,6 +71,32 @@ async def get_inject_or_404(session: AsyncSession, exercise_id: int, inject_id: 
     return inject
 
 
+async def delete_pending_inject(session: AsyncSession, inject: Inject) -> None:
+    """Delete an inject only while it is still pending, else 409.
+
+    Conditional on ``state == pending`` so a release committing between the caller's read and
+    this delete cannot slip through: once released, the inject carries after-action evidence
+    (responses, comments, per-group resolution progress) and is on participant screens (#265).
+    A released inject matches zero rows here and is left fully intact; a genuinely-pending one
+    has no such dependents, so the ``ondelete="CASCADE"`` FKs never destroy evidence. Mirrors
+    the compare-and-swap in ``release_inject``."""
+    assert inject.id is not None
+    deleted = (
+        await session.exec(
+            delete(Inject)
+            .where(col(Inject.id) == inject.id, col(Inject.state) == InjectState.pending)
+            .returning(col(Inject.id))
+            .execution_options(synchronize_session=False)
+        )
+    ).scalar_one_or_none()
+    if deleted is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Released injects cannot be deleted; resolve them or let them stand",
+        )
+    await session.commit()
+
+
 async def release_inject(
     session: AsyncSession,
     inject: Inject,
@@ -83,7 +110,19 @@ async def release_inject(
         seed_inject_resolution_contexts,
     )
 
-    await lock_exercise_for_audience_snapshot(session, inject.exercise_id)
+    # Re-read state from the locked exercise row. Both callers (manual route and scheduled
+    # worker) check state == active *before* this lock, so a pause committing in that window
+    # would otherwise land a release — frame broadcast, triggered comms armed — into a paused
+    # exercise (#265). The lock is already held, so this costs nothing extra.
+    exercise = await lock_exercise_for_audience_snapshot(session, inject.exercise_id)
+    if exercise.state != ExerciseState.active:
+        # Nothing has been written yet (only the row lock is held), so raise without a
+        # rollback — matching the release_is_allowed guard just below. The caller's / worker's
+        # transaction releases the lock on exit.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only active exercises can release injects",
+        )
 
     if not await release_is_allowed(session, inject, scheduled=scheduled):
         raise HTTPException(

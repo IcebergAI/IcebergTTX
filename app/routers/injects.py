@@ -29,6 +29,7 @@ from app.services.exercise_service import validate_group_id, validate_team_ids
 from app.services.inject_service import (
     AttachmentMeta,
     create_inject,
+    delete_pending_inject,
     get_inject_or_404,
     inject_payload,
     release_inject,
@@ -271,8 +272,12 @@ async def delete_inject(
     exercise = await require_exercise_owner(session, exercise_id, current_user)
     require_operational_mutability(exercise)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
-    await session.delete(inject)
-    await session.commit()
+    # A released inject carries after-action evidence (participant responses, comments, and
+    # per-group resolution progress all cascade off the inject row) and is on participant
+    # screens. Deleting it would silently destroy that record, so the delete is conditional on
+    # the inject still being pending — a compare-and-swap that also closes the race against a
+    # concurrent release (#265).
+    await delete_pending_inject(session, inject)
     _delete_attachment_file(inject)
     audit_service.emit(
         "inject.delete",

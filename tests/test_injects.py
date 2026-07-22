@@ -492,6 +492,88 @@ async def test_delete_inject(
     assert r.status_code == 204
 
 
+async def test_delete_released_inject_refused_and_evidence_survives(
+    client: AsyncClient,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+):
+    """A released inject carries after-action evidence and is on participant screens, so
+    deleting it is refused (409) rather than silently cascading away responses (#265)."""
+    created = (await _create_inject(
+        client, facilitator_token, active_exercise.id, target_teams=["it_ops"]
+    )).json()
+    release = await client.post(
+        f"/api/exercises/{active_exercise.id}/injects/{created['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert release.status_code == 200
+    # Ad-hoc inject has no scenario node / options, so the response is free-text only.
+    response = await client.post(
+        f"/api/exercises/{active_exercise.id}/responses",
+        json={"inject_id": created["id"], "content": "Isolate hosts."},
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert response.status_code == 201
+
+    deleted = await client.delete(
+        f"/api/exercises/{active_exercise.id}/injects/{created['id']}",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert deleted.status_code == 409
+
+    # The inject and the participant response it carries both survive the refused delete.
+    still_there = await client.get(
+        f"/api/exercises/{active_exercise.id}/injects/{created['id']}",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert still_there.status_code == 200
+    responses = (await client.get(
+        f"/api/exercises/{active_exercise.id}/responses",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )).json()
+    assert any(r["inject_id"] == created["id"] for r in responses)
+
+
+async def test_delete_pending_inject_loses_race_to_release(
+    client: AsyncClient,
+    facilitator_token: str,
+    active_exercise: Exercise,
+    session: AsyncSession,
+):
+    """delete_pending_inject is a compare-and-swap: if a release commits after the caller read
+    the inject as pending, the conditional delete matches no row and refuses — the released
+    inject and its evidence are left intact (#265)."""
+    from fastapi import HTTPException
+    from sqlalchemy import update
+    from sqlmodel import select
+
+    from app.models.inject import Inject, InjectState
+    from app.services.inject_service import delete_pending_inject
+
+    created = (await _create_inject(client, facilitator_token, active_exercise.id)).json()
+    inject = await session.get(Inject, created["id"])
+
+    # A release commits after our read: flip the row to released without updating the
+    # in-session object, so the caller still holds a stale 'pending'.
+    await session.exec(
+        update(Inject)
+        .where(Inject.id == inject.id)
+        .values(state=InjectState.released)
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()
+    assert inject.state == InjectState.pending  # stale
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_pending_inject(session, inject)
+    assert exc.value.status_code == 409
+    surviving = (
+        await session.exec(select(Inject.id).where(Inject.id == inject.id))
+    ).one_or_none()
+    assert surviving is not None
+
+
 # ── Release ───────────────────────────────────────────────────────────────────
 
 async def test_release_inject(

@@ -427,6 +427,43 @@ async def test_worker_skips_when_paused(
     assert inject.state == InjectState.pending
 
 
+async def test_release_inject_refused_when_exercise_paused(
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+):
+    """The state re-read under the release lock closes the pause/release TOCTOU window (#265).
+
+    Reproduces the real cross-session race: the exercise is pre-loaded as ``active`` (as both
+    callers load it), then a pause commits via a Core UPDATE that leaves the identity-mapped
+    object stale. release_inject must still refuse — it re-reads the locked row with
+    populate_existing, not the cached ``active`` attribute."""
+    from fastapi import HTTPException
+    from sqlalchemy import update
+
+    from app.services.inject_service import release_inject
+
+    ex = await _make_exercise(session, facilitator, participant, offset=5, active=True)
+    inject = await _first_inject(session, ex.id)
+
+    # Pause the row without touching the in-session Exercise, mimicking a pause committed by a
+    # separate request. The cached object stays 'active' — the exact stale read that a plain
+    # locked select would return.
+    await session.exec(
+        update(Exercise)
+        .where(Exercise.id == ex.id)
+        .values(state=ExerciseState.paused)
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()
+    assert ex.state == ExerciseState.active  # identity-map instance is stale
+
+    with pytest.raises(HTTPException) as exc:
+        await release_inject(session, inject, released_by=facilitator.id)
+    assert exc.value.status_code == 409
+    assert inject.state == InjectState.pending
+
+
 # ── The progression cursor gates a scheduled release ──────────────────────────
 
 
