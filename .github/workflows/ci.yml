@@ -13,7 +13,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # zizmor artipacked: don't leave the repo token in .git/config —
           # nothing in this job pushes.
@@ -83,7 +83,7 @@ jobs:
       DEV_MODE: "true"
       ICEBERG_TTX_UI_BASE: http://127.0.0.1:8765
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -189,7 +189,7 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -202,6 +202,9 @@ jobs:
         run: uvx djlint@1.42.1 app/templates --lint
 
       - name: Lint hand-authored CSS/JS (Biome)
+        # Biome ships as a standalone binary with no project lockfile; installing the
+        # pinned version ad hoc is intentional (same as actionlint below).
+        # zizmor: ignore[adhoc-packages]
         run: |
           npm install -g @biomejs/biome@2.5.5
           biome lint
@@ -213,7 +216,7 @@ jobs:
   lint-workflows:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
