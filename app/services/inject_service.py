@@ -164,25 +164,40 @@ async def _inject_node(session: AsyncSession, inject: Inject):
     return get_inject_node(definition, inject.scenario_node_id)
 
 
-async def _inject_options(session: AsyncSession, inject: Inject) -> list[dict]:
+async def _inject_options(
+    session: AsyncSession, inject: Inject, *, include_progression: bool = False
+) -> list[dict]:
     node = await _inject_node(session, inject)
     if not node:
         return []
-    return [
-        {"id": option.id, "label": option.label, "next_inject_id": option.next_inject_id}
-        for option in node.options
-    ]
+    options: list[dict] = []
+    for option in node.options:
+        entry = {"id": option.id, "label": option.label}
+        # next_inject_id maps this option to an unreleased future node — the branch
+        # topology. Omit it unless the caller opts in (facilitator paths), so a
+        # participant can't read which option leads where before choosing (#266).
+        if include_progression:
+            entry["next_inject_id"] = option.next_inject_id
+        options.append(entry)
+    return options
 
 
-async def inject_payload(session: AsyncSession, inject: Inject) -> dict:
+async def inject_payload(
+    session: AsyncSession, inject: Inject, *, include_progression: bool = False
+) -> dict:
     """Canonical inject serialization shared by the API responses and WS broadcasts.
 
     Built via the ``InjectPublic`` schema so the HTTP and WebSocket payloads cannot
     drift (#21, #31).
+
+    ``next_inject_id`` (node-level and per-option) points at unreleased future nodes —
+    the exercise's branch topology. It is redacted by **default** (#266) and included
+    only when ``include_progression`` is set, which facilitator-facing paths opt into.
+    Redacting by default means a forgotten caller over-redacts (safe) rather than leaks.
     """
     assert inject.id is not None
     node = await _inject_node(session, inject)
-    return InjectPublic(
+    payload = InjectPublic(
         id=inject.id,
         exercise_id=inject.exercise_id,
         scenario_node_id=inject.scenario_node_id,
@@ -198,11 +213,17 @@ async def inject_payload(session: AsyncSession, inject: Inject) -> dict:
         resolved_by=inject.resolved_by,
         resolution_reason=inject.resolution_reason,
         release_offset_minutes=inject.release_offset_minutes,
-        options=await _inject_options(session, inject),
-        next_inject_id=node.next_inject_id if node else None,
+        options=await _inject_options(session, inject, include_progression=include_progression),
+        next_inject_id=(node.next_inject_id if node and include_progression else None),
         free_text_response=node.free_text_response if node else True,
         attachment=inject_attachment_payload(inject),
     ).model_dump(mode="json")
+    if not include_progression:
+        # Drop the node-level key entirely so the WS frame (no response_model) omits it.
+        # HTTP routes keep response_model=InjectPublic, which re-adds it as null — a
+        # participant sees no future node either way (#266).
+        payload.pop("next_inject_id", None)
+    return payload
 
 
 async def seed_injects_from_scenario(

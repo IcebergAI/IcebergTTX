@@ -280,6 +280,42 @@ async def test_participant_sees_only_released_visible_injects(
     assert payload[0]["group_id"] == "it_ops"
 
 
+async def test_participant_inject_payload_redacts_branch_topology(
+    client: AsyncClient, participant_token: str, facilitator_token: str, active_exercise: Exercise
+):
+    """A released inject must not leak next_inject_id (the branch map) to participants,
+    node-level or per-option — but the facilitator still gets it (#266)."""
+    injects = (await client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )).json()
+    it_ops_inject = next(i for i in injects if i["scenario_node_id"] == "inject_01")
+    await client.post(
+        f"/api/exercises/{active_exercise.id}/injects/{it_ops_inject['id']}/release",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+
+    # Participant: neither the node-level topology nor any option→future-node mapping.
+    participant = (await client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )).json()
+    inj = next(i for i in participant if i["scenario_node_id"] == "inject_01")
+    assert inj.get("next_inject_id") is None
+    assert inj["options"], "options should still be present for choosing"
+    for opt in inj["options"]:
+        assert "next_inject_id" not in opt
+
+    # Facilitator: the same inject still carries the branch topology (console data).
+    fac = (await client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )).json()
+    fac_inj = next(i for i in fac if i["scenario_node_id"] == "inject_01")
+    opt_a = next(o for o in fac_inj["options"] if o["id"] == "opt_a")
+    assert opt_a["next_inject_id"] == "inject_02"
+
+
 async def test_facilitator_preview_participant_uses_preview_team_for_visibility(
     client: AsyncClient,
     session: AsyncSession,

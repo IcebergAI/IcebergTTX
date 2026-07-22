@@ -199,13 +199,15 @@ async def list_injects(exercise_id: int, current_user: CurrentUserDep, session: 
             .order_by(cast(Any, Inject.sequence_order))
         )
     ).all()
+    is_facilitator = current_user.role == UserRole.facilitator
     visible = [
         i
         for i in injects
-        if current_user.role == UserRole.facilitator
-        or await require_visible_bool(session, i, current_user)
+        if is_facilitator or await require_visible_bool(session, i, current_user)
     ]
-    return [await inject_payload(session, i) for i in visible]
+    # Only facilitators get branch topology (next_inject_id); participants/observers
+    # get the redacted payload so they can't read the branch map ahead of choosing (#266).
+    return [await inject_payload(session, i, include_progression=is_facilitator) for i in visible]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=InjectPublic)
@@ -247,7 +249,7 @@ async def create(
         if attachment_meta:
             _delete_attachment_path(attachment_meta.path)
         raise
-    return await inject_payload(session, inject)
+    return await inject_payload(session, inject, include_progression=True)
 
 
 @router.get("/{inject_id}", response_model=InjectPublic)
@@ -257,7 +259,9 @@ async def get_inject(
     await require_exercise_access(session, exercise_id, current_user)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
     await require_inject_visible(session, inject, current_user)
-    return await inject_payload(session, inject)
+    return await inject_payload(
+        session, inject, include_progression=current_user.role == UserRole.facilitator
+    )
 
 
 @router.delete("/{inject_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -329,7 +333,7 @@ async def release(
         target_id=inject_id,
         reason=f"exercise={exercise_id}",
     )
-    return await inject_payload(session, released)
+    return await inject_payload(session, released, include_progression=True)
 
 
 class UpdateScheduleRequest(BaseModel):
@@ -381,7 +385,7 @@ async def update_schedule(
         reason=f"exercise={exercise_id} offset={body.release_offset_minutes}",
     )
     await dispatch(session)
-    return await inject_payload(session, inject)
+    return await inject_payload(session, inject, include_progression=True)
 
 
 async def require_visible_bool(session: AsyncSession, inject: Inject, user: User) -> bool:
