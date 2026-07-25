@@ -7,7 +7,11 @@ from sqlmodel import Field, SQLModel
 
 
 class AuditEvent(SQLModel, table=True):
-    """Append-only record of a security-relevant action (#23).
+    """Record of a security-relevant action (#23).
+
+    Append-only in the request path: nothing in the app updates a row. The one
+    writer that removes them is the retention sweep in ``retention_service`` (#251),
+    which is opt-in and off by default.
 
     Never store secrets or payload bodies here — only identifiers and metadata.
     """

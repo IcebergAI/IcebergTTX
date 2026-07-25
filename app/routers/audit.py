@@ -1,14 +1,14 @@
 """Admin audit-log + SIEM-forwarding API (#24).
 
 All routes are admin-only (``require_admin`` — the real ``User.is_admin`` column).
-Reads the persisted ``AuditEvent`` trail and edits the runtime SIEM routing
-config; the HTTP bearer token is env-only and never exposed here.
+Reads the persisted ``AuditEvent`` trail and edits the runtime SIEM routing plus
+retention config (#251); the HTTP bearer token is env-only and never exposed here.
 """
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -30,8 +30,11 @@ _ALLOWED_SEVERITY = {"info", "warning", "critical"}
 
 
 class AuditSettingsUpdate(BaseModel):
-    """Whitelisted, validated patch to the routing config (no secret token)."""
+    """Whitelisted, validated patch to the audit config (no secret token)."""
 
+    # Days of audit history to keep; 0 = keep forever (#251). Bounded here because
+    # update_settings only skips None — an unbounded negative would otherwise persist.
+    retention_days: int | None = Field(default=None, ge=0, le=3650)
     enabled: bool | None = None
     methods: list[str] | None = None
     min_severity: str | None = None
@@ -99,14 +102,16 @@ async def update_audit_settings(
     current_user: AdminDep,
     session: SessionDep,
 ) -> AuditSettings:
-    row = await audit_settings_service.update_settings(
-        session, body.model_dump(exclude_unset=True)
-    )
+    changes = body.model_dump(exclude_unset=True)
+    row = await audit_settings_service.update_settings(session, changes)
+    # Name the changed fields: "who shortened retention, and when" has to be answerable
+    # from the trail, and every save was otherwise indistinguishable (mirrors general.py).
     audit_service.emit(
         "audit.settings_updated",
         actor=current_user,
         target_type="audit_settings",
         target_id=row.id,
+        reason="fields=" + ",".join(sorted(changes)),
         severity="warning",
     )
     return row
