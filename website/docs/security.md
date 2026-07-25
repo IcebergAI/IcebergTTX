@@ -88,8 +88,9 @@ remain in scope.
     ---
 
     Structured JSON audit events (login, register, inject release, exports, authz
-    denials, CSRF blocks…) to a logger and an append-only table, sanitised against
-    log injection.
+    denials, CSRF blocks…) to a logger and a table nothing in the request path
+    rewrites, sanitised against log injection. An optional retention window prunes
+    old history; expired sign-in link tokens are always purged.
 
 -   :material-export: __SIEM forwarding__
 
