@@ -38,7 +38,7 @@ jobs:
       # Source (no-build) extraction for both languages — nothing to compile,
       # and the Python extractor does not need dependencies installed.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           languages: ${{ matrix.language }}
           # Default (security) query suite. Promote to "security-extended" later
