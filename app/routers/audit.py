@@ -7,7 +7,7 @@ config; the HTTP bearer token is env-only and never exposed here.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -17,7 +17,7 @@ from app.dependencies import require_admin
 from app.models.audit import AuditEvent
 from app.models.audit_settings import AuditSettings
 from app.models.user import User
-from app.services import audit_service, audit_settings_service
+from app.services import audit_service, audit_settings_service, sink_pinning
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -99,9 +99,29 @@ async def update_audit_settings(
     current_user: AdminDep,
     session: SessionDep,
 ) -> AuditSettings:
-    row = await audit_settings_service.update_settings(
-        session, body.model_dump(exclude_unset=True)
-    )
+    previous_endpoint = (await audit_settings_service.get_settings(session)).http_endpoint
+    try:
+        row = await audit_settings_service.update_settings(
+            session, body.model_dump(exclude_unset=True)
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if sink_pinning.host_changed(previous_endpoint, row.http_endpoint):
+        # The HTTP sink carries the env-only SIEM token, so re-pointing it must be
+        # visible in the trail before anything is forwarded there (#259).
+        audit_service.emit(
+            "audit.sink_destination_changed",
+            actor=current_user,
+            target_type="audit_settings",
+            target_id=row.id,
+            reason=(
+                f"from={sink_pinning.origin(previous_endpoint) or 'unset'} "
+                f"to={sink_pinning.origin(row.http_endpoint) or 'unset'}"
+            ),
+            severity="critical",
+        )
     audit_service.emit(
         "audit.settings_updated",
         actor=current_user,

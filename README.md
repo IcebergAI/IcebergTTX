@@ -317,7 +317,12 @@ sidecar to run.
     authenticated with a bearer token.
 - **Secret handling**: the HTTP bearer token is set **only** via the
   `SIEM_HTTP_TOKEN` env var / Secret — it is never stored in the database, never
-  returned by the API, and never logged.
+  returned by the API, and never logged. While it is set, the HTTP endpoint's
+  **origin** is pinned to `SIEM_HTTP_ENDPOINT`: an admin may edit the path or clear
+  the sink, but cannot re-point the host and have the token follow it (#259). The
+  same pinning covers `SMTP_HOST` (paired with `SMTP_PASSWORD`) and `PROXY_URL`
+  (paired with the proxy credentials). Any destination change — pinned or not —
+  emits a `critical` audit event naming the old and new origin.
 - **Reliability**: a slow or unreachable SIEM (5-second timeouts) **never blocks
   or fails a request** — each sink is failure-isolated, and the persisted
   `AuditEvent` table (`AUDIT_PERSIST=true`) remains the durable record. Ensure
