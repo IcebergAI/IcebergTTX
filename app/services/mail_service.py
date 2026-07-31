@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 
 import aiosmtplib
-from fastapi import Request
 
 from app.config import settings
 
@@ -70,11 +69,27 @@ def smtp_enabled() -> bool:
     return get_config().smtp_enabled
 
 
-def build_link(request: Request, path: str, token: str) -> str:
-    """Absolute link for an email (#117). Honours PUBLIC_BASE_URL (proxies that
-    rewrite host/scheme) else derives from the request (mirrors oidc._callback_url)."""
-    public_base_url = get_config().public_base_url
-    base = public_base_url.rstrip("/") if public_base_url else str(request.base_url).rstrip("/")
+def link_base() -> str | None:
+    """The configured absolute base for emailed links, or None when unset (#258).
+
+    Deliberately **never** derived from the request: `Host` is client-supplied and
+    `POST /api/auth/password-reset/request` is unauthenticated, so a forged host made
+    the real deployment mail the victim a genuine link pointing at the attacker —
+    and the raw single-use token *is* the authorization. Callers must refuse to send
+    when this returns None rather than fall back to the request.
+    """
+    return get_config().public_base_url.strip().rstrip("/") or None
+
+
+class LinkBaseUnconfigured(RuntimeError):
+    """Raised when an emailed link is built with no configured base URL (#258)."""
+
+
+def build_link(path: str, token: str) -> str:
+    """Absolute link for an email (#117), rooted at the operator-configured base."""
+    base = link_base()
+    if base is None:
+        raise LinkBaseUnconfigured("PUBLIC_BASE_URL is not configured")
     return f"{base}{path}?token={token}"
 
 

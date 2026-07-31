@@ -101,6 +101,25 @@ def _require_smtp() -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 
+def _require_link_base() -> None:
+    """Refuse to mail a link the operator has not pinned a host for (#258).
+
+    Config-level, so it is identical for every caller and reveals nothing about
+    whether an account exists.
+    """
+    if mail_service.link_base() is None:
+        audit_service.emit(
+            "auth.email_feature",
+            result="deny",
+            reason="public base url not configured",
+            severity="warning",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Emailed links are not configured. Set PUBLIC_BASE_URL.",
+        )
+
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     body: RegisterRequest,
@@ -233,6 +252,7 @@ async def password_reset_request(
     "sign in via SSO" notice; unknown emails get nothing.
     """
     _require_smtp()
+    _require_link_base()
     ip = client_ip(request) or "unknown"
     if password_reset_rate_limiter.is_limited(ip):
         raise HTTPException(
@@ -251,7 +271,7 @@ async def password_reset_request(
             user_id=user.id,
             ttl=RESET_TOKEN_TTL,
         )
-        link = mail_service.build_link(request, "/reset-password", raw)
+        link = mail_service.build_link("/reset-password", raw)
         spawn(
             mail_service.send(
                 user.email,

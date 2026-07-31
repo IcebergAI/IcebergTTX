@@ -476,6 +476,15 @@ def validate_settings(s: Settings | None = None) -> None:
     # on both — see smtp_enabled). Checked in dev too so misconfig surfaces early.
     if s.smtp_host and not s.smtp_from:
         raise RuntimeError("SMTP_HOST is set but SMTP_FROM is empty.")
+    # Emailed reset/invite links are never derived from the client-supplied Host
+    # header (#258) — a configured mailer therefore needs an explicit base URL.
+    if s.smtp_host and not s.public_base_url.strip():
+        raise RuntimeError(
+            "SMTP_HOST is set but PUBLIC_BASE_URL is empty. Password-reset and "
+            "invite links must be rooted at an operator-configured origin (e.g. "
+            "PUBLIC_BASE_URL=https://ttx.example.com); deriving them from the "
+            "request Host header lets an attacker poison the emailed link."
+        )
     if s.dev_mode:
         return
     if s.secret_key_is_insecure:

@@ -130,6 +130,24 @@ async def test_disabled_cache_keeps_email_endpoints_hidden(
     assert reset.status_code == 404
 
 
+async def test_email_cannot_be_enabled_without_public_base_url(
+    client: AsyncClient, admin_token: str
+):
+    """Blocking the broken state up front beats failing at send time (#258)."""
+    response = await client.put(
+        "/api/email/settings",
+        json={
+            "enabled": True,
+            "smtp_host": "smtp.runtime.test",
+            "smtp_from": "noreply@runtime.test",
+            "public_base_url": "  ",
+        },
+        headers=_bearer(admin_token),
+    )
+    assert response.status_code == 422
+    assert "public base url" in response.text.lower()
+
+
 async def test_admin_email_page_requires_admin(client: AsyncClient):
     response = await client.get("/admin/email", follow_redirects=False)
     assert response.status_code in (302, 307)

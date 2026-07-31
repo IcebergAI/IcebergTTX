@@ -3,7 +3,7 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -59,11 +59,19 @@ async def update_email_settings(
     starttls = changes.get("smtp_starttls", current.smtp_starttls)
     tls = changes.get("smtp_tls", current.smtp_tls)
     if starttls and tls:
-        from fastapi import HTTPException, status
-
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="STARTTLS and implicit TLS cannot both be enabled",
+        )
+    enabled = changes.get("enabled", current.enabled)
+    base_url = changes.get("public_base_url", current.public_base_url)
+    if enabled and not (base_url or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Set a public base URL before enabling email — reset and invite "
+                "links are never derived from the request host (#258)."
+            ),
         )
     row = await email_settings_service.update_settings(session, changes)
     audit_service.emit(

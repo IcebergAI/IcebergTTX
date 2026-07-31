@@ -36,6 +36,27 @@ async def test_validate_settings_allows_strong_key_in_production():
     validate_settings(s)  # must not raise
 
 
+# ── #258: emailed links need an operator-pinned origin ────────────────────────
+
+
+async def test_validate_settings_rejects_smtp_without_public_base_url():
+    s = Settings(
+        dev_mode=True, smtp_host="smtp.example.com", smtp_from="noreply@example.com"
+    )
+    with pytest.raises(RuntimeError, match="PUBLIC_BASE_URL"):
+        validate_settings(s)
+
+
+async def test_validate_settings_allows_smtp_with_public_base_url():
+    s = Settings(
+        dev_mode=True,
+        smtp_host="smtp.example.com",
+        smtp_from="noreply@example.com",
+        public_base_url="https://ttx.example.com",
+    )
+    validate_settings(s)  # must not raise
+
+
 # ── #11: login rate limiting ──────────────────────────────────────────────────
 
 async def test_login_rate_limited_after_repeated_failures(client: AsyncClient, facilitator: User):

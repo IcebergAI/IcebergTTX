@@ -97,8 +97,8 @@ cp .env.example .env
 #                                HTTP(S)_PROXY/NO_PROXY vars; `explicit` routes outbound
 #                                LLM/SIEM-HTTP/OIDC via PROXY_URL, `none` forces direct
 #   SMTP_HOST + SMTP_FROM        off until both are set — enables password reset +
-#                                participant invites (also PUBLIC_BASE_URL, so emailed
-#                                links are absolute)
+#                                participant invites (PUBLIC_BASE_URL is then required:
+#                                emailed links are rooted there, never at the request Host)
 #   AUTH_MODE / OIDC_*           no SSO providers are configured by default; add OIDC_*
 #                                for OpenID Connect (Entra, Authentik, Auth0, Okta)
 #   SIEM_*                       off by default — forward audit events off-host
@@ -533,8 +533,14 @@ SMTP_FROM="IcebergTTX <noreply@example.com>"
 SMTP_USERNAME=<username>          # optional
 SMTP_PASSWORD=<password>          # optional
 SMTP_STARTTLS=true                # or SMTP_TLS=true for implicit TLS
-PUBLIC_BASE_URL=https://ttx.example.com   # so emailed links are absolute
+PUBLIC_BASE_URL=https://ttx.example.com   # required: roots every emailed link
 ```
+
+`PUBLIC_BASE_URL` is mandatory once `SMTP_HOST` is set — startup fails without it, and the
+admin API refuses to enable email while it is blank. Emailed reset and invite links are
+**never** derived from the request's `Host` header: the reset request is unauthenticated, so
+a forged `Host` would make the real deployment mail a victim a genuine link pointing at the
+attacker, and the raw single-use token is the whole authorization (#258).
 
 `SMTP_PASSWORD` is environment-only: it is never accepted by the admin API, persisted,
 logged, or shown. The runtime cache is process-local, matching the SIEM and proxy caches,

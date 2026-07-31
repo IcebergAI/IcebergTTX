@@ -26,6 +26,8 @@ AUTH = lambda t: {"Authorization": f"Bearer {t}"}  # noqa: E731
 def smtp_on_fixture(monkeypatch):
     monkeypatch.setattr(settings, "smtp_host", "smtp.test")
     monkeypatch.setattr(settings, "smtp_from", "noreply@test")
+    # Emailed links are rooted at the configured base, never the request host (#258).
+    monkeypatch.setattr(settings, "public_base_url", "https://ttx.test")
 
 
 @pytest.fixture(name="mail")
@@ -93,6 +95,19 @@ async def test_invite_unknown_exercise_404(
     assert r.status_code == 404
 
 
+async def test_invite_503_without_public_base_url(
+    client: AsyncClient, admin_token: str, smtp_on, mail, monkeypatch
+):
+    """Invite links share the reset builder, so they share its host pinning (#258)."""
+    monkeypatch.setattr(settings, "public_base_url", "")
+    r = await client.post(
+        "/api/users/invite", json={"email": "new@example.com"}, headers=AUTH(admin_token)
+    )
+    assert r.status_code == 503
+    await _tick()
+    assert mail == []
+
+
 # ── Send: happy path ──────────────────────────────────────────────────────────
 
 
@@ -117,7 +132,7 @@ async def test_invite_sends_link_and_mints_token(
     assert len(mail) == 1
     to, _subject, body = mail[0]
     assert to == "invitee@example.com"
-    assert "/accept-invite?token=" in body
+    assert "https://ttx.test/accept-invite?token=" in body
 
 
 async def test_invite_works_with_registration_disabled(
