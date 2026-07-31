@@ -403,6 +403,13 @@ so the active administrator cannot remove the last viable login path.
 Set the public redirect base URL in Admin → Single sign-on (or seed it with
 `OIDC_REDIRECT_BASE_URL`) so the callback URL matches what you register with the IdP.
 
+Just-in-time account creation requires the IdP to assert `email_verified` (Entra:
+`xms_edov`). On an IdP where users can set their own address before verifying it, an
+unverified email would let an attacker pre-claim a colleague's address — locking the
+real person out and collecting the enrolments facilitators make by email. Logins with
+an unverified email are denied and audited; `OIDC_ALLOW_UNVERIFIED_EMAIL=true`
+restores the old behaviour for an IdP that genuinely never emits the claim.
+
 ### Microsoft Entra ID
 
 1. **Entra admin center → App registrations → New registration.** Add a **Web**

@@ -18,7 +18,7 @@ from app.bootstrap_admin import upsert_admin
 from app.config import OIDCProviderConfig, settings
 from app.dependencies import resolve_user_from_token
 from app.models.user import User, UserRole
-from app.services import audit_service
+from app.services import audit_service, user_service
 from app.services.oidc import service as oidc_service
 from app.services.oidc.base import OIDCIdentity, get_adapter
 from app.services.oidc.entra import EntraAdapter
@@ -417,10 +417,11 @@ async def test_entra_jit_persists_stable_subject_and_tenant(session):
             "sub": "entra-sub",
             "tid": "tenant-a",
             "email": "new-entra@sso.test",
+            "xms_edov": True,
         },
         "roles",
     )
-    assert identity.email_verified is False
+    assert identity.email_verified is True
 
     user, created = await oidc_service.provision_oidc_user(
         session, cfg=_entra_cfg(), identity=identity
@@ -430,6 +431,42 @@ async def test_entra_jit_persists_stable_subject_and_tenant(session):
     assert user.subject == "entra-sub"
     assert user.auth_tenant == "tenant-a"
     assert user.role_managed_by_idp is True
+
+
+async def test_unverified_email_refused_jit_provisioning(session):
+    """An unverified address must not occupy the email column (#257).
+
+    Collision handling only stops it *taking* an existing row; without this gate it
+    still pre-claims a colleague's future one, and facilitators enrol by email.
+    """
+    with pytest.raises(oidc_service.OIDCProvisionError) as exc:
+        await oidc_service.provision_oidc_user(
+            session,
+            cfg=_cfg(),
+            identity=_identity(subject="squat-1", email="victim@corp.test", email_verified=False),
+        )
+    assert "verified" in exc.value.reason
+    assert await user_service.get_by_email(session, "victim@corp.test") is None
+
+
+async def test_unverified_email_allowed_when_operator_opts_in(session, monkeypatch):
+    """OIDC_ALLOW_UNVERIFIED_EMAIL exists for IdPs that never emit the claim."""
+    monkeypatch.setattr(settings, "oidc_allow_unverified_email", True)
+    user, created = await oidc_service.provision_oidc_user(
+        session,
+        cfg=_cfg(),
+        identity=_identity(subject="squat-2", email="optin@corp.test", email_verified=False),
+    )
+    assert created is True
+    assert user.email == "optin@corp.test"
+
+
+async def test_verified_email_still_provisions(session):
+    user, created = await oidc_service.provision_oidc_user(
+        session, cfg=_cfg(), identity=_identity(subject="ok-1", email="ok@corp.test")
+    )
+    assert created is True
+    assert user.subject == "ok-1"
 
 
 async def test_entra_verified_email_does_not_link_local_account(session):
@@ -847,6 +884,22 @@ async def test_callback_unverified_collision_denies(client, patch_oidc, session)
     assert r.status_code == 303
     assert r.headers["location"] == "/login?error=sso"
     assert "access_token" not in client.cookies
+
+
+async def test_callback_unverified_new_user_denied(client, patch_oidc, session):
+    """No local row to collide with — the unverified email is still refused (#257)."""
+    patch_oidc(
+        _FakeOIDCClient(
+            claims={"sub": "squat-cb", "email": "victim-cb@sso.test", "email_verified": False}
+        )
+    )
+    r = await client.get(
+        "/api/auth/oidc/authentik/callback?code=x&state=y", follow_redirects=False
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/login?error=sso"
+    assert "access_token" not in client.cookies
+    assert await user_service.get_by_email(session, "victim-cb@sso.test") is None
 
 
 async def test_callback_verified_collision_cannot_claim_local_admin(

@@ -202,6 +202,12 @@ class Settings(BaseSettings):
     # host/scheme so the redirect_uri matches what the IdP has registered).
     auth_mode: str = AUTH_MODE_BOTH
     oidc_redirect_base_url: str = ""
+    # JIT provisioning trusts the asserted email only when the IdP says it is
+    # verified (#257) — otherwise a user who can set their own unverified address
+    # pre-claims a colleague's email and gets enrolled in their place. Env-only,
+    # deliberately not admin-editable: it relaxes an identity guarantee. Set true
+    # only for an IdP that genuinely never emits the claim.
+    oidc_allow_unverified_email: bool = False
 
     # Microsoft Entra ID. oidc_entra_tenant_id MUST be a specific tenant (a GUID or
     # verified domain) — never "common"/"organizations" — so ID-token issuer
