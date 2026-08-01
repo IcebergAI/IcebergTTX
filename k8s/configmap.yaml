@@ -16,6 +16,9 @@ data:
   PASSWORD_RESET_LOCKOUT_SECONDS: "3600"
   # Email (#186) — non-secret values seed the admin-editable /admin/email row.
   # SMTP_PASSWORD remains in the Secret; after first startup the DB is authoritative.
+  # Setting SMTP_HOST requires PUBLIC_BASE_URL below (startup fails without it):
+  # emailed reset/invite links are rooted there and never taken from the request
+  # Host header, which a client can forge (#258).
   SMTP_HOST: ""
   SMTP_PORT: "587"
   SMTP_FROM: ""

@@ -94,7 +94,9 @@ services:
       PROXY_PASSWORD: ${PROXY_PASSWORD:-}
       # Email / SMTP (#117). Feature-flagged on SMTP_HOST+SMTP_FROM; enables self-
       # service password reset. SMTP_PASSWORD is a secret. Raw socket → goes direct,
-      # not via the outbound proxy. PUBLIC_BASE_URL builds absolute reset links.
+      # not via the outbound proxy. PUBLIC_BASE_URL roots absolute reset/invite links
+      # and is REQUIRED once SMTP_HOST is set — links are never taken from the
+      # client-supplied Host header (#258), and startup fails without it.
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
