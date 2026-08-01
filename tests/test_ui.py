@@ -935,3 +935,19 @@ def test_communication_dialog_traps_and_restores_focus(page: Page):
     page.keyboard.press("Escape")
     expect(dialog).to_be_hidden()
     expect(trigger).to_be_focused()
+
+
+def test_non_member_participate_page_shows_error_not_blank_shell(page: Page):
+    """A participant outside the roster used to get a permanently blank page —
+    no exercise, no spinner, no message (#269)."""
+    login_facilitator(page)
+    scenario_id = _make_scenario(page)
+    # No enrolment: the seeded participant is NOT a member of this exercise.
+    exercise_id = _make_exercise(page, scenario_id, title="Members Only Exercise")
+    api_post(page, f"/exercises/{exercise_id}/start")
+
+    login_participant(page)
+    page.goto(f"{BASE}/exercises/{exercise_id}/participate")
+    expect(page.locator("body")).to_contain_text("Exercise unavailable")
+    expect(page.locator("body")).to_contain_text("not a member of this exercise")
+    expect(page.get_by_role("link", name="Back to dashboard")).to_be_visible()

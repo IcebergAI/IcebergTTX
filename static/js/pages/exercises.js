@@ -94,6 +94,7 @@ document.addEventListener('alpine:init', () => {
     ...DT.uiHelpers,
     loading: true,
     exercise: null,
+    loadError: '',   // non-member/deleted: show a message, not a blank shell (#269)
     role: '',
     injects: [],
     comments: [],
@@ -134,7 +135,18 @@ document.addEventListener('alpine:init', () => {
         apiFetch(`/exercises/${exerciseId}/inject-comments`),
       ]);
       if (me && me.ok) { const d = await me.json(); this.role = d.role; }
-      if (er && er.ok) this.exercise = await er.json();
+      if (er && er.ok) {
+        this.exercise = await er.json();
+      } else {
+        // The page itself is shell-only and the data API scopes access — but a
+        // non-member used to get a permanently blank page here: no exercise, no
+        // spinner, no error, while a WS connect was still attempted (#269).
+        this.loadError = er && er.status === 403
+          ? 'You are not a member of this exercise. Ask the facilitator to enrol you.'
+          : 'This exercise could not be loaded. It may have been deleted.';
+        this.loading = false;
+        return;
+      }
       if (rr && rr.ok) {
         const responses = await rr.json();
         this.submitted = Object.fromEntries(responses.map(r => [r.inject_id, true]));
