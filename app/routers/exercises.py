@@ -37,7 +37,6 @@ from app.services.access_control import (
     require_exercise_owner,
     require_operational_mutability,
 )
-from app.services.background import spawn
 from app.services.csv_export import spreadsheet_safe_row
 from app.services.exercise_service import (
     create_exercise,
@@ -49,7 +48,7 @@ from app.services.exercise_service import (
 from app.services.exercise_service import list_members as members_for_exercise
 from app.services.inject_service import attachment_paths_for_exercise
 from app.services.llm.service import active_provider
-from app.services.llm_service import run_summary_pipeline
+from app.services.llm_service import queue_summary_pipeline
 from app.services.progression_service import progression_snapshot
 from app.services.report_service import (
     build_report,
@@ -543,8 +542,8 @@ async def draft_report_summary(exercise_id: int, current_user: FacilitatorDep, s
             status_code=status.HTTP_409_CONFLICT,
             detail="AI summary unavailable: no provider configured or exercise AI disabled",
         )
-    spawn(run_summary_pipeline(exercise_id))
-    return {"status": "accepted"}
+    queued = queue_summary_pipeline(exercise_id)
+    return {"status": "accepted" if queued else "already-running"}
 
 
 @router.patch("/{exercise_id}/report/summary", response_model=ExecutiveSummaryPublic)

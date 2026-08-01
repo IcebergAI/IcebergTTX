@@ -7,6 +7,17 @@
     <span class="smallcaps text-faint">Loading…</span>
   </div>
 
+  <!-- Non-member / deleted: a visible dead end instead of a blank shell (#269) -->
+  <template x-if="!loading && loadError">
+    <div class="max-w-[560px] mx-auto px-8 py-16">
+      <div class="surface p-6 text-center">
+        <h2 class="smallcaps text-muted mb-2">Exercise unavailable</h2>
+        <p class="text-[13.5px]" x-text="loadError"></p>
+        <a href="/dashboard" class="btn btn-ghost mt-4">Back to dashboard</a>
+      </div>
+    </div>
+  </template>
+
   <template x-if="!loading && exercise">
     <div class="max-w-[720px] mx-auto px-8 py-8">
 

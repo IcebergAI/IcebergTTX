@@ -44,8 +44,11 @@ async def update_general_settings(
 ) -> GeneralSettings:
     changes = body.model_dump(exclude_unset=True)
     row = await general_settings_service.update_settings(session, changes)
+    # Distinct from the audit router's "audit.settings_updated" (#269): a SIEM rule
+    # must be able to tell "someone rewired audit forwarding" from "someone changed
+    # rate limits".
     audit_service.emit(
-        "audit.settings_updated",
+        "general.settings_updated",
         actor=current_user,
         target_type="general_settings",
         target_id=row.id,

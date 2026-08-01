@@ -464,15 +464,57 @@ async def generate_executive_summary(session, exercise_id: int):
             llm_model=provider.llm_model_label,
         )
     session.add(summary)
-    await session.flush()
-    record(
-        session,
-        SummaryGenerated(exercise_id=exercise_id, payload=summary_payload(summary)),
-    )
-    await session.commit()
+    try:
+        await session.flush()
+        # Inside the transaction: the IntegrityError branch below rolls back, which
+        # discards the buffered event — the loser must not broadcast a frame for a
+        # row it never created (same discipline as the assess path).
+        record(
+            session,
+            SummaryGenerated(exercise_id=exercise_id, payload=summary_payload(summary)),
+        )
+        await session.commit()
+    except IntegrityError:
+        # Two concurrent drafts raced the exercise_id unique constraint (#269). First
+        # draft wins: hand back the winner's row instead of dying in the logs.
+        await session.rollback()
+        winner = (
+            await session.exec(
+                select(ExecutiveSummary).where(
+                    ExecutiveSummary.exercise_id == exercise_id
+                )
+            )
+        ).one_or_none()
+        if winner is not None:
+            return winner
+        raise
     await session.refresh(summary)
     await dispatch(session)
     return summary
+
+
+_summary_inflight: set[int] = set()
+
+
+def queue_summary_pipeline(exercise_id: int) -> bool:
+    """Queue one summary draft per exercise; return whether a task was created.
+
+    Without this, a double-click on "draft summary" fired two paid provider calls
+    racing each other into the unique constraint (#269) — same guard shape as
+    ``queue_llm_pipeline``.
+    """
+    if exercise_id in _summary_inflight:
+        return False
+    _summary_inflight.add(exercise_id)
+    coroutine = run_summary_pipeline(exercise_id)
+    try:
+        task = spawn(coroutine)
+    except Exception:
+        coroutine.close()
+        _summary_inflight.discard(exercise_id)
+        raise
+    task.add_done_callback(lambda _: _summary_inflight.discard(exercise_id))
+    return True
 
 
 async def run_summary_pipeline(exercise_id: int) -> None:

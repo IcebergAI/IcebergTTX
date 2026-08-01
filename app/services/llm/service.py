@@ -38,7 +38,26 @@ def active_provider() -> LLMProvider | None:
 
 
 def reset_provider_cache() -> None:
-    """Drop the cached provider so the next ``active_provider()`` rebuilds it."""
+    """Drop the cached provider so the next ``active_provider()`` rebuilds it.
+
+    The dropped adapter may hold a built SDK client wrapping a live
+    ``httpx.AsyncClient``; close it off-path (#269) — resets fire on every LLM- and
+    proxy-settings save, and each abandoned client leaked its FD/socket pool in a
+    process meant to run indefinitely. Stays sync (callers are sync), so the close
+    is spawned onto the running loop; with no loop (sync unit tests, interpreter
+    teardown) there is nothing to leak into and the coroutine is discarded.
+    """
     global _provider, _provider_built
+    stale = _provider
     _provider = None
     _provider_built = False
+    closer = getattr(stale, "aclose", None)
+    if closer is None:
+        return
+    from app.services.background import spawn
+
+    coro = closer()
+    try:
+        spawn(coro)
+    except RuntimeError:
+        coro.close()

@@ -119,3 +119,63 @@ async def test_create_demo_exercise_enrolls_facilitator_and_releases_start(
     stored = await session.get(Exercise, exercise["id"])
     assert stored is not None
     assert stored.current_node_id == "initial_alert"
+
+
+async def test_demo_with_multi_team_start_releases_the_enrolled_teams_inject(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    monkeypatch,
+):
+    """A multi-team start node seeds one physical inject per team; the demo enrols
+    only participant_teams[0], so releasing any other team's copy 409s on an empty
+    audience and fails the whole demo load (#269). The pick must be the enrolled
+    team's inject — and activation must arm the sample's schedules."""
+    from app.schemas.scenario_json import ScenarioDefinition
+    from app.services import sample_service
+
+    definition = ScenarioDefinition.model_validate(
+        {
+            "title": "Multi-team Start Demo",
+            "description": "Trap case for #269",
+            "participant_teams": [
+                {"id": "alpha", "label": "Alpha"},
+                {"id": "beta", "label": "Beta"},
+            ],
+            "injects": [
+                {
+                    "id": "kickoff",
+                    "title": "Kickoff",
+                    "content": "Both teams get their own copy.",
+                    "target_teams": ["beta", "alpha"],
+                    "release_at_minutes": 5,
+                }
+            ],
+            "start_inject_id": "kickoff",
+        }
+    )
+    monkeypatch.setattr(sample_service, "get_sample_definition", lambda _id: definition)
+    armed: list[int] = []
+
+    async def spy_schedule(session_, exercise) -> None:
+        armed.append(exercise.id)
+
+    monkeypatch.setattr(sample_service, "schedule_exercise_injects", spy_schedule)
+
+    resp = await client.post(
+        "/api/settings/samples/scenarios/whatever/demo-exercise",
+        headers=_headers(facilitator_token),
+    )
+    assert resp.status_code == 201, resp.text
+    exercise = resp.json()["exercise"]
+
+    released = (
+        await session.exec(
+            select(Inject)
+            .where(Inject.exercise_id == exercise["id"])
+            .where(Inject.state == InjectState.released)
+        )
+    ).all()
+    # Exactly the enrolled team's copy — not another team's, not both.
+    assert [i.group_id for i in released] == ["alpha"]
+    assert armed == [exercise["id"]]
