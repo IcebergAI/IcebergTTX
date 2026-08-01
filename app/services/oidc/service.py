@@ -218,15 +218,9 @@ async def provision_oidc_user(
     # 3. JIT create. The stable provider subject authenticates this account, but the
     # email column is what facilitators enrol against, so an unverified address must
     # not occupy it (#257): collisions above stop it *taking* an existing row, not
-    # pre-claiming a colleague's future one and receiving their injects.
+    # pre-claiming a colleague's future one and receiving their injects. Audited by
+    # the router's OIDCProvisionError handler, like the collision denial above.
     if not identity.email_verified and not settings.oidc_allow_unverified_email:
-        audit_service.emit(
-            "auth.oidc_login",
-            result="deny",
-            actor_email=normalized_email,
-            reason=f"provider={cfg.key} unverified email",
-            severity="warning",
-        )
         raise OIDCProvisionError("email not verified by the identity provider")
     user = User(
         email=normalized_email,

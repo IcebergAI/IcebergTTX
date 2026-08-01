@@ -886,7 +886,7 @@ async def test_callback_unverified_collision_denies(client, patch_oidc, session)
     assert "access_token" not in client.cookies
 
 
-async def test_callback_unverified_new_user_denied(client, patch_oidc, session):
+async def test_callback_unverified_new_user_denied(client, patch_oidc, session, audit_events):
     """No local row to collide with — the unverified email is still refused (#257)."""
     patch_oidc(
         _FakeOIDCClient(
@@ -900,6 +900,14 @@ async def test_callback_unverified_new_user_denied(client, patch_oidc, session):
     assert r.headers["location"] == "/login?error=sso"
     assert "access_token" not in client.cookies
     assert await user_service.get_by_email(session, "victim-cb@sso.test") is None
+    # Exactly one deny event — the router audits the refusal, the service must not
+    # double-emit (that would double-count denials in SIEM alerting).
+    denies = [
+        kw for action, kw in audit_events
+        if action == "auth.oidc_login" and kw.get("result") == "deny"
+    ]
+    assert len(denies) == 1
+    assert "not verified" in denies[0]["reason"]
 
 
 async def test_callback_verified_collision_cannot_claim_local_admin(
