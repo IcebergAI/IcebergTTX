@@ -1,10 +1,12 @@
 """Tests for the generated after-action report + executive summary (#113)."""
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import AsyncClient
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.communication import CommDirection, Communication
@@ -333,3 +335,127 @@ async def test_generate_and_edit_executive_summary(
     assert patched.status_code == 200
     assert patched.json()["edited"] is True
     assert patched.json()["summary_text"] == "Revised executive summary."
+
+
+async def test_concurrent_summary_generation_first_draft_wins(
+    client: AsyncClient,
+    facilitator: User,
+    session: AsyncSession,
+    sample_scenario,
+    participant,
+):
+    """The loser of the exercise_id unique-constraint race must not die in the logs
+    (#269): it rolls back, broadcasts nothing, and returns the winner's row."""
+    from app.models.report_summary import ExecutiveSummary
+    from app.services.exercise_service import create_exercise, enrol_member, transition_state
+    from app.services.llm_service import generate_executive_summary
+
+    ex = await create_exercise(
+        session,
+        scenario_id=sample_scenario.id,
+        title="Race Exercise",
+        created_by=facilitator.id,
+        llm_enabled=True,
+    )
+    await enrol_member(session, exercise=ex, user_id=participant.id)
+    await transition_state(session, ex, ExerciseState.active)
+    await _seed_completed(session, ex, participant)
+    # The loser's rollback expires every loaded instance; hold the id as a plain int.
+    ex_id = ex.id
+    assert ex_id is not None
+
+    # The winner's draft is already committed...
+    session.add(
+        ExecutiveSummary(exercise_id=ex_id, summary_text="winner", llm_model="test:winner")
+    )
+    await session.commit()
+
+    # ...but the loser raced past the pre-select before it landed: blind every
+    # executivesummary SELECT until the loser has rolled back, so the create path
+    # genuinely hits the unique constraint and the recovery select sees the truth.
+    real_exec = session.exec
+    real_rollback = session.rollback
+    rolled_back = False
+
+    class _Empty:
+        def first(self):
+            return None
+
+        def one_or_none(self):
+            return None
+
+        def all(self):
+            return []
+
+    async def blinded_exec(statement, *args, **kwargs):
+        if not rolled_back and "FROM executivesummary" in str(statement):
+            return _Empty()
+        return await real_exec(statement, *args, **kwargs)
+
+    async def marking_rollback():
+        nonlocal rolled_back
+        rolled_back = True
+        await real_rollback()
+
+    with (
+        patch(
+            "app.services.llm_service.active_provider",
+            return_value=_fake_provider("loser draft"),
+        ),
+        patch.object(session, "exec", blinded_exec),
+        patch.object(session, "rollback", marking_rollback),
+    ):
+        summary = await generate_executive_summary(session, ex_id)
+
+    assert rolled_back, "expected the loser to hit the unique constraint"
+    assert summary is not None
+    assert summary.summary_text == "winner"  # first draft wins
+    rows = (
+        await session.exec(
+            select(ExecutiveSummary).where(ExecutiveSummary.exercise_id == ex_id)
+        )
+    ).all()
+    assert len(rows) == 1
+
+
+async def test_summary_endpoint_dedupes_inflight_requests(
+    client: AsyncClient,
+    facilitator: User,
+    facilitator_token: str,
+    session: AsyncSession,
+    sample_scenario,
+):
+    """A double-click is one paid provider call, not two (#269)."""
+    from app.services import llm_service
+    from app.services.exercise_service import create_exercise, transition_state
+
+    ex = await create_exercise(
+        session,
+        scenario_id=sample_scenario.id,
+        title="Dedupe Exercise",
+        created_by=facilitator.id,
+        llm_enabled=True,
+    )
+    await transition_state(session, ex, ExerciseState.active)
+
+    started: list[int] = []
+    release = asyncio.Event()
+
+    async def slow_pipeline(exercise_id: int) -> None:
+        started.append(exercise_id)
+        await release.wait()
+
+    url = f"/api/exercises/{ex.id}/report/summary"
+    hdr = _bearer(facilitator_token)
+    with (
+        patch("app.routers.exercises.active_provider", return_value=_fake_provider("x")),
+        patch.object(llm_service, "run_summary_pipeline", slow_pipeline),
+    ):
+        first = await client.post(url, headers=hdr)
+        second = await client.post(url, headers=hdr)
+        release.set()
+        await asyncio.sleep(0)
+
+    assert first.status_code == 202 and first.json()["status"] == "accepted"
+    assert second.status_code == 202 and second.json()["status"] == "already-running"
+    assert started == [ex.id]
