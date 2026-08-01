@@ -184,6 +184,15 @@ async def lifespan(app: FastAPI):
     from app.services.oidc import service as oidc_service
 
     oidc_service.register_providers()
+    # Subscribe to the cross-replica bus, so a config saved on another replica lands in
+    # this one's caches (#213). Started after the loaders above: the first connect has
+    # nothing to recover, and connecting is deliberately not awaited to completion —
+    # a database blip must not stop a replica from serving what it already can.
+    from app.services import config_sync
+    from app.services.pg_listener import listener
+
+    config_sync.install()
+    await listener.start()
     # Re-arm persisted inject and communication schedules for exercises that were active
     # before a restart (#116, #194). Timers remain single-process only.
     from app.services.schedule_service import rehydrate_schedules
@@ -214,7 +223,11 @@ async def lifespan(app: FastAPI):
     for loop_task in (task, retention):
         with suppress(asyncio.CancelledError):
             await loop_task
-    # 3. Drain in-flight background work (mail, audit persist, SIEM forward, LLM runs) and
+    # 3. Unsubscribe from the bus (#213). Before the drain, for the same reason as the
+    #    loops above: a bus handler mid-refresh is holding a pooled connection, and
+    #    nothing arriving now can be acted on by a replica that is going away.
+    await listener.stop()
+    # 4. Drain in-flight background work (mail, audit persist, SIEM forward, LLM runs) and
     #    armed timers in one bounded, converging pass. cancel_all_schedules, re-invoked each
     #    round, cancels still-sleeping timers (rehydration re-arms them next boot) and hands
     #    back any worker already mid-release so it finishes its commit and dispatch atomically
@@ -224,7 +237,7 @@ async def lifespan(app: FastAPI):
     from app.services.schedule_service import cancel_all_schedules
 
     await background.drain(collect_extra=cancel_all_schedules)
-    # 4. Close the asyncpg pool cleanly so Postgres doesn't log unexpected EOFs on deploy.
+    # 5. Close the asyncpg pool cleanly so Postgres doesn't log unexpected EOFs on deploy.
     from app.database import engine
 
     await engine.dispose()

@@ -7,7 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
 from app.models.email_settings import EmailSettings
-from app.services import mail_service, sink_pinning
+from app.services import mail_service, pg_bus, sink_pinning
 
 _SINGLETON_ID = 1
 EDITABLE_FIELDS = (
@@ -76,6 +76,7 @@ async def update_settings(session: AsyncSession, changes: dict[str, Any]) -> Ema
             setattr(row, key, changes[key])
     row.updated_at = datetime.now(UTC)
     session.add(row)
+    await pg_bus.publish_config_changed(session, "email")
     await session.commit()
     await session.refresh(row)
     mail_service.set_config(_to_config(row))

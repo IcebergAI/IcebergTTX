@@ -29,6 +29,20 @@ def make_async_url(url: str) -> str:
     return url
 
 
+def make_asyncpg_dsn(url: str) -> str:
+    """Strip the SQLAlchemy driver marker so raw asyncpg can dial the same database.
+
+    ``asyncpg.connect`` speaks libpq DSNs and rejects SQLAlchemy's ``+driver`` suffix.
+    The LISTEN connection (#213) is raw asyncpg rather than a pooled checkout, so it
+    needs the plain form of whatever ``DATABASE_URL`` was configured with.
+    """
+    async_url = make_async_url(url)
+    for prefix in ("postgresql+asyncpg://", "postgres+asyncpg://"):
+        if async_url.startswith(prefix):
+            return "postgresql://" + async_url[len(prefix) :]
+    return async_url
+
+
 engine = create_async_engine(make_async_url(settings.database_url), pool_pre_ping=True)
 
 

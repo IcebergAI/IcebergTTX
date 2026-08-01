@@ -16,6 +16,7 @@ from app.config import (
     settings,
 )
 from app.models.oidc_settings import OIDCSettings
+from app.services import pg_bus
 
 _SINGLETON_ID = 1
 AUTH_MODES = (AUTH_MODE_LOCAL, AUTH_MODE_OIDC, AUTH_MODE_BOTH)
@@ -293,6 +294,7 @@ async def update_settings(session: AsyncSession, changes: dict[str, Any]) -> OID
         setattr(row, field, getattr(candidate, field))
     row.updated_at = datetime.now(UTC)
     session.add(row)
+    await pg_bus.publish_config_changed(session, "oidc")
     await session.commit()
     await session.refresh(row)
     set_config(_to_config(row))
