@@ -76,9 +76,9 @@ Full prose in the architecture doc § Testing; the traps:
 
 ## GitHub and maintenance
 
-- **PRs merge via `icebergai-review-bot`, so `Closes #n` never auto-closes** — the link
-  registers but the issue stays open. After any merge: `gh issue view <n> --json state`,
-  then `gh issue close <n>` by hand.
+- **Bot merges (`icebergai-review-bot`) never auto-close `Closes #n`** — a `gh pr merge`
+  you run yourself does (GitHub closes as the merging actor). Either way, verify after
+  merging: `gh issue view <n> --json state`, then `gh issue close <n>` any stragglers.
 - Screenshots (`docs/*.png`, `website/docs/assets/*.png`) all show the app shell; after
   rail/topbar changes regenerate all 13 via
   `uv run python scripts/screenshots.py --base https://localhost --insecure` against a
