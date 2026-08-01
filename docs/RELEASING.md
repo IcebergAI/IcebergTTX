@@ -38,9 +38,19 @@ cosign (keyless) signature.
    The `Release` workflow builds and pushes the image, attaches the SBOM + provenance,
    signs it, and creates a GitHub Release (marked **pre-release** when the tag has a `-`).
 
+Publishing is gated by a `verify` job (#267). Branch protection does not cover tag
+pushes, so before anything is built the workflow asserts that the tagged commit **is
+contained in `origin/main`** and that the **most recent completed `ci.yml` run for that
+exact SHA concluded `success`**. Tagging a branch commit, a commit that never went
+through a PR, or one whose CI failed now fails the release instead of publishing a
+signed, provenance-attested image of unvalidated code. If the guard trips, merge the
+commit to `main` and let CI go green on it rather than re-pushing the tag.
+
 Before the very first real tag, validate the pipeline with a throwaway pre-release tag
 (e.g. `v0.0.0-test`) or a `workflow_dispatch` run with **dry_run** unchecked, then delete
-the test tag, its Release, and the GHCR version.
+the test tag, its Release, and the GHCR version. A `workflow_dispatch` **dry run** skips
+the verify gate along with the push (it publishes nothing); a dispatch with **dry_run**
+unchecked is held to the same main-ancestry and green-CI checks as a tag push.
 
 ## Security advisory releases
 

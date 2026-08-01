@@ -27,7 +27,51 @@ env:
   SHOULD_PUSH: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
 
 jobs:
+  # Branch protection covers pushes to main, not tag pushes — so without this job a
+  # `v*` tag on any commit (a branch, a commit that never saw a PR, one whose CI
+  # failed) would publish a signed, provenance-attested public image of untested
+  # code, with the signing machinery lending it credibility (#267).
+  verify:
+    name: Verify the tagged commit is releasable
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # read CI workflow-run conclusions for this commit
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          # Full history: merge-base needs main's ancestry, not a shallow tip.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert the commit is on main
+        if: env.SHOULD_PUSH == 'true'
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::${GITHUB_SHA} is not contained in origin/main — refusing to publish a release from an unmerged commit"
+            exit 1
+          fi
+          echo "OK: ${GITHUB_SHA} is on main"
+
+      - name: Assert CI passed for this commit
+        if: env.SHOULD_PUSH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Query the CI workflow's own runs for this SHA rather than the commit's
+          # check-runs, which would also match this release workflow's jobs.
+          latest="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&per_page=100" \
+            --jq '[.workflow_runs[] | select(.status == "completed")][0].conclusion // "none"')"
+          if [ "$latest" != "success" ]; then
+            echo "::error::the most recent completed CI run for ${GITHUB_SHA} concluded '${latest}' — refusing to publish"
+            exit 1
+          fi
+          echo "OK: CI succeeded for ${GITHUB_SHA}"
+
   release:
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub Release

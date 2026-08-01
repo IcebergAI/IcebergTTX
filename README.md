@@ -671,7 +671,9 @@ docker pull ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.2
 ```
 
 Each release image ships an SBOM, a signed **SLSA build-provenance** attestation, and a
-**cosign** signature (keyless). The `latest` tag tracks the newest **stable** release only
+**cosign** signature (keyless) — and nothing is built until the release workflow has
+confirmed the tagged commit is on `main` with a green CI run for that exact SHA, so the
+signature never vouches for unvalidated code. The `latest` tag tracks the newest **stable** release only
 (never a beta). See the [CHANGELOG](CHANGELOG.md) for what's in each release and
 [docs/RELEASING.md](docs/RELEASING.md) for the release process and image-verification
 commands.
