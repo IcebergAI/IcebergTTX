@@ -289,6 +289,67 @@ async def test_invalid_method_is_dropped(client: AsyncClient, admin_token: str):
     assert resp.json()["methods"] == ["stdout"]
 
 
+async def test_retention_days_defaults_to_zero(client: AsyncClient, admin_token: str):
+    """Seeded from env, and the env default is "keep forever" (#251)."""
+    resp = await client.get("/api/audit/settings", headers=_headers(admin_token))
+    assert resp.status_code == 200
+    assert resp.json()["retention_days"] == 0
+
+
+async def test_retention_days_roundtrip(client: AsyncClient, admin_token: str):
+    resp = await client.put(
+        "/api/audit/settings", headers=_headers(admin_token), json={"retention_days": 90}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["retention_days"] == 90
+
+    again = await client.get("/api/audit/settings", headers=_headers(admin_token))
+    assert again.json()["retention_days"] == 90
+
+
+@pytest.mark.parametrize("days", [-1, 99999])
+async def test_retention_days_rejects_out_of_range(
+    client: AsyncClient, admin_token: str, days: int
+):
+    resp = await client.put(
+        "/api/audit/settings", headers=_headers(admin_token), json={"retention_days": days}
+    )
+    assert resp.status_code == 422
+
+
+async def test_retention_days_requires_admin(
+    client: AsyncClient, participant_token: str, facilitator_token: str, admin_token: str
+):
+    async def _put(token: str) -> int:
+        resp = await client.put(
+            "/api/audit/settings", headers=_headers(token), json={"retention_days": 30}
+        )
+        return resp.status_code
+
+    assert await _put(participant_token) == 403
+    # A non-admin facilitator is denied too — retention is a destructive control.
+    assert await _put(facilitator_token) == 403
+    assert await _put(admin_token) == 200
+
+
+async def test_settings_update_audits_changed_field_names(
+    client: AsyncClient, admin_token: str, monkeypatch
+):
+    """"Who shortened retention" has to be answerable from the trail (#251)."""
+    from app.routers import audit as audit_router
+
+    emitted: list[tuple] = []
+    monkeypatch.setattr(
+        audit_router.audit_service, "emit", lambda action, **kw: emitted.append((action, kw))
+    )
+    resp = await client.put(
+        "/api/audit/settings", headers=_headers(admin_token), json={"retention_days": 30}
+    )
+    assert resp.status_code == 200
+    assert emitted[0][0] == "audit.settings_updated"
+    assert emitted[0][1]["reason"] == "fields=retention_days"
+
+
 async def test_test_event_emits_through_sinks(client: AsyncClient, admin_token: str):
     await client.put(
         "/api/audit/settings",

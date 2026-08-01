@@ -6,14 +6,25 @@ document.addEventListener('alpine:init', () => {
     cfg: {
       enabled: false, methods: [], min_severity: 'info', file_path: '',
       syslog_host: 'localhost', syslog_port: 514, syslog_protocol: 'UDP',
-      http_endpoint: '', http_verify_tls: true,
+      http_endpoint: '', http_verify_tls: true, retention_days: 0,
     },
     filters: { action: '', severity: '', result: '', actor: '' },
     events: [],
     loadingEvents: true,
     saving: false,
     testing: false,
+    savingRetention: false,
     message: '',
+    retentionMessage: '',
+
+    // Pruning with nothing but stdout means pruned events leave no off-host copy.
+    // A getter, not an attribute expression: the CSP Alpine build can't evaluate
+    // real logic in directives (#77).
+    get pruningWithoutForwarder() {
+      if (!(this.cfg.retention_days > 0)) return false;
+      if (!this.cfg.enabled) return true;
+      return !(this.cfg.methods || []).some((m) => m !== 'stdout');
+    },
 
     async init() {
       await Promise.all([this.loadSettings(), this.loadEvents()]);
@@ -33,6 +44,7 @@ document.addEventListener('alpine:init', () => {
           syslog_protocol: data.syslog_protocol || 'UDP',
           http_endpoint: data.http_endpoint || '',
           http_verify_tls: data.http_verify_tls !== false,
+          retention_days: Number(data.retention_days) || 0,
         };
       }
     },
@@ -46,6 +58,18 @@ document.addEventListener('alpine:init', () => {
       });
       this.saving = false;
       this.message = resp && resp.ok ? 'Forwarding saved.' : 'Could not save.';
+      if (resp && resp.ok) await this.loadSettings();
+    },
+
+    async saveRetention() {
+      this.savingRetention = true;
+      this.retentionMessage = '';
+      const resp = await apiFetch('/audit/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ retention_days: this.cfg.retention_days }),
+      });
+      this.savingRetention = false;
+      this.retentionMessage = resp && resp.ok ? 'Retention saved.' : 'Could not save retention.';
       if (resp && resp.ok) await this.loadSettings();
     },
 

@@ -152,6 +152,15 @@ class Settings(BaseSettings):
     # logger regardless).
     audit_persist: bool = True
 
+    # Audit retention (#251). Days of AuditEvent history to keep; 0 = keep forever.
+    # 0 is the default deliberately: an upgrade must never silently destroy security
+    # records, and SIEM forwarding is only an archival path if an operator can enable a
+    # forwarder *before* turning pruning on. 365 is a typical compliance value. This
+    # *seeds* the admin-editable AuditSettings row on first read only — once the row
+    # exists, changing the env var does nothing; change it at /admin/audit. Dead
+    # AuthToken rows are purged by the same sweep regardless of this setting.
+    audit_retention_days: int = 0
+
     # Application logging (#17). log_level sets the root level; log_json emits
     # structured JSON lines for application logs (the audit stream is always
     # JSON regardless). Configured once at startup by configure_logging().

@@ -70,6 +70,7 @@ from app.routers import (
 )
 from app.routers.ui import UIRedirect
 from app.services import audit_service, background
+from app.services.retention_service import retention_task
 from app.services.ws_manager import heartbeat_task
 
 logger = logging.getLogger("iceberg_ttx")
@@ -190,16 +191,29 @@ async def lifespan(app: FastAPI):
     await rehydrate_schedules()
     audit_service.emit("app.startup", severity="info")
     task = asyncio.create_task(heartbeat_task())
+    # Prune audit history past the configured window and dead auth tokens: once now,
+    # then daily (#251). Not awaited inline like rehydrate_schedules above — a first
+    # pass over a legacy table is unbounded and would delay readiness. Single-process,
+    # like the timers: a second live replica would run a second concurrent sweep.
+    retention = asyncio.create_task(retention_task())
     yield
     # Graceful teardown (#250), strictly ordered:
     # 1. Record app.shutdown FIRST, while the loop is still live, so its audit-persist and
     #    SIEM-forward tasks are spawned in time to join the drain below instead of being
     #    abandoned into a dying loop (which reliably lost the shutdown record to stdout).
     audit_service.emit("app.shutdown", severity="info")
-    # 2. Stop the heartbeat loop and await its cancellation.
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
+    # 2. Stop the recurring loops and await their cancellation. Both are bare
+    #    create_task, so background.drain below never sees them — dropping this leaves a
+    #    task holding a pooled connection when engine.dispose() runs. It must also come
+    #    *before* the drain: a sweep's own audit event spawns persist/forward children
+    #    that are drainable, so cancelling first means they are drained, not abandoned
+    #    (same reasoning as step 1). A sweep cancelled mid-batch rolls back and redoes
+    #    that batch next boot.
+    for loop_task in (task, retention):
+        loop_task.cancel()
+    for loop_task in (task, retention):
+        with suppress(asyncio.CancelledError):
+            await loop_task
     # 3. Drain in-flight background work (mail, audit persist, SIEM forward, LLM runs) and
     #    armed timers in one bounded, converging pass. cancel_all_schedules, re-invoked each
     #    round, cancels still-sleeping timers (rehydration re-arms them next boot) and hands

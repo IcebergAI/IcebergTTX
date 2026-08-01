@@ -32,7 +32,10 @@ class AuthToken(SQLModel, table=True):
     exercise_id: int | None = Field(
         default=None, foreign_key="exercise.id", ondelete="SET NULL", index=True
     )
-    expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+    # Indexed for the retention sweep's cutoff scan (#251), not for any read path.
+    expires_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False, index=True)
+    )
     used_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

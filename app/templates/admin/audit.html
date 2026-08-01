@@ -108,6 +108,50 @@
       </div>
     </section>
 
+    <!-- Retention (#251) -->
+    <section class="surface p-5">
+      <div class="section-title mb-4">
+        <h2 class="smallcaps text-muted">Retention</h2>
+      </div>
+
+      <div class="grid gap-4" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+        <div>
+          <label class="block smallcaps text-muted mb-1" for="retention-days">Keep audit events for</label>
+          <div class="flex items-center gap-2">
+            <input id="retention-days" type="number" min="0" max="3650" x-model.number="cfg.retention_days"
+                   class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
+            <span class="text-[12px] text-muted">days</span>
+          </div>
+          <p class="text-[11.5px] text-faint mt-1">
+            0 keeps events forever. Pruning runs on startup and once daily; deleted events cannot be recovered.
+          </p>
+        </div>
+
+        <div class="flex flex-col justify-end">
+          <p class="text-[11.5px] text-faint">
+            SIEM forwarding is the archival path — enable a forwarder above before turning pruning on.
+            Forwarding is best-effort with no retry, so events lost during a forwarder outage are not recoverable once pruned.
+          </p>
+          <p class="text-[11.5px] text-faint mt-1">
+            Expired and used sign-in link tokens (password reset, invites) are always purged, regardless of this setting.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-start gap-2 mt-3 text-[12.5px]" x-show="pruningWithoutForwarder">
+        <span class="mt-1 h-2 w-2 shrink-0 rounded-full dot-warn"></span>
+        <p>Pruning is on but no off-host forwarder is enabled — pruned events will only ever have existed in this container's stdout.</p>
+      </div>
+
+      <div class="flex items-center gap-2 mt-5">
+        <button @click="saveRetention()" :disabled="savingRetention"
+                class="btn btn-primary h-9 px-4 text-[13px] justify-center disabled:opacity-50">
+          <span x-text="savingRetention ? 'Saving…' : 'Save retention'"></span>
+        </button>
+        <p class="text-[12.5px] text-muted" x-text="retentionMessage"></p>
+      </div>
+    </section>
+
     <!-- Recent events -->
     <section class="surface p-5">
       <div class="section-title mb-4">

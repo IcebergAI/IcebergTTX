@@ -4,11 +4,11 @@ from sqlmodel import Field, SQLModel
 
 
 class AuditSettings(SQLModel, table=True):
-    """Runtime SIEM-forwarding routing config (#24).
+    """Runtime audit policy: SIEM-forwarding routing (#24) + retention (#251).
 
     A single row (``id == 1``) edited live from the admin ``/admin/audit`` page and
-    seeded from ``SIEM_*`` env defaults on first read. Deliberately holds **no
-    secret**: the HTTP bearer token stays env-only (``settings.siem_http_token``),
+    seeded from ``SIEM_*``/``AUDIT_*`` env defaults on first read. Deliberately holds
+    **no secret**: the HTTP bearer token stays env-only (``settings.siem_http_token``),
     never a column, so it can't leak via the DB, the API, or an audit log line.
     """
 
@@ -25,3 +25,7 @@ class AuditSettings(SQLModel, table=True):
     syslog_facility: int = 13  # 13 = "log audit" (RFC 5424)
     http_endpoint: str = ""
     http_verify_tls: bool = True
+    # Days of AuditEvent history to keep; 0 = keep forever (#251). Read only by
+    # retention_service's sweep — no request path consults it, which is why it is not
+    # projected into the in-memory SiemConfig snapshot.
+    retention_days: int = 0

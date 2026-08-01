@@ -132,6 +132,7 @@ async def _database_overrides(session: AsyncSession) -> tuple[dict[str, Any], se
             "siem_syslog_facility": "syslog_facility",
             "siem_http_endpoint": "http_endpoint",
             "siem_http_verify_tls": "http_verify_tls",
+            "audit_retention_days": "retention_days",
         }
         for field, model_field in audit_map.items():
             values[field] = getattr(audit, model_field)

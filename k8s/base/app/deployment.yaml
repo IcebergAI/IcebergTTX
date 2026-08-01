@@ -170,6 +170,11 @@ spec:
                 configMapKeyRef:
                   name: iceberg-ttx-config
                   key: AUDIT_PERSIST
+            - name: AUDIT_RETENTION_DAYS
+              valueFrom:
+                configMapKeyRef:
+                  name: iceberg-ttx-config
+                  key: AUDIT_RETENTION_DAYS
             - name: LOGIN_MAX_ATTEMPTS
               valueFrom:
                 configMapKeyRef:
