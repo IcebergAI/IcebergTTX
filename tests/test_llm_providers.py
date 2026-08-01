@@ -253,3 +253,43 @@ async def test_openai_family_shares_adapter_and_parses_choice(provider, monkeypa
     assert kwargs["model"] == cfg.model
     assert kwargs["messages"][0]["role"] == "system"
     assert "context" in kwargs["messages"][1]["content"]
+
+
+# ── reset_provider_cache closes the dropped adapter's SDK client (#269) ───────
+
+
+@pytest.mark.asyncio
+async def test_reset_provider_cache_closes_built_client():
+    """Resets fire on every LLM/proxy settings save; each dropped adapter leaked its
+    httpx pool. The reset must close the stale client off-path."""
+    import asyncio
+
+    from app.services.llm import service as llm_service
+
+    cfg = _settings(
+        llm_provider="anthropic", anthropic_api_key="sk-x"
+    ).active_llm_provider()
+    adapter = AnthropicFamilyAdapter(cfg)
+    sdk_client = MagicMock(close=AsyncMock())
+    adapter._client = sdk_client
+    llm_service._provider = adapter
+    llm_service._provider_built = True
+
+    llm_service.reset_provider_cache()
+    await asyncio.sleep(0)  # let the spawned aclose() run
+
+    sdk_client.close.assert_awaited_once()
+    assert adapter._client is None
+    assert llm_service.active_provider() is not adapter
+
+
+@pytest.mark.asyncio
+async def test_reset_provider_cache_with_unbuilt_client_is_quiet():
+    from app.services.llm import service as llm_service
+
+    cfg = _settings(
+        llm_provider="anthropic", anthropic_api_key="sk-x"
+    ).active_llm_provider()
+    llm_service._provider = AnthropicFamilyAdapter(cfg)
+    llm_service._provider_built = True
+    llm_service.reset_provider_cache()  # no built client — must not raise

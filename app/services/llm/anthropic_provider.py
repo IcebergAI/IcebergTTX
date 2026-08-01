@@ -87,6 +87,12 @@ class AnthropicFamilyAdapter:
             )
         return self._client
 
+    async def aclose(self) -> None:
+        """Close the built SDK client and its httpx pool; a no-op when unbuilt (#269)."""
+        client, self._client = self._client, None
+        if client is not None:
+            await client.close()
+
     async def complete(
         self, system: str, cached_context: str, user_prompt: str, max_tokens: int
     ) -> str:
