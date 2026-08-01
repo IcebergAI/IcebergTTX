@@ -359,11 +359,14 @@ def schema_sql() -> str:
 
 
 def apply_schema(dsn: str | None = None) -> None:
-    """Install the schema over a synchronous connection.
+    """Install the schema over a synchronous connection, if it is not already there.
 
-    Used by the Alembic revision and by the test harness, which builds its schema from
-    the models and so never runs Alembic. Synchronous because procrastinate's DDL is a
-    multi-statement script, which asyncpg's prepared-statement path cannot execute.
+    Used by the test harness, which builds its schema from the models and so never runs
+    Alembic. Idempotent because the two installers can meet: the UI suite runs against a
+    server whose startup migrations already installed the schema, and procrastinate's
+    DDL — unlike ``create_all`` — does not skip objects that exist. Synchronous because
+    that DDL is a multi-statement script, which asyncpg's prepared-statement path cannot
+    execute.
     """
     from procrastinate import SyncPsycopgConnector
     from procrastinate.schema import SchemaManager
@@ -371,6 +374,11 @@ def apply_schema(dsn: str | None = None) -> None:
     connector = SyncPsycopgConnector(conninfo=dsn or _dsn())
     connector.open()
     try:
+        rows = connector.execute_query_all(
+            query="SELECT to_regclass('procrastinate_jobs') IS NOT NULL AS present"
+        )
+        if rows and rows[0]["present"]:
+            return
         SchemaManager(connector=connector).apply_schema()
     finally:
         connector.close()

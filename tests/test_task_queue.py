@@ -209,3 +209,15 @@ async def test_the_worker_picks_up_and_runs_a_committed_job():
             await connection.execute(
                 text("DELETE FROM procrastinate_jobs WHERE args->>'inject_id' = '0'")
             )
+
+
+def test_apply_schema_is_idempotent():
+    """The two installers can meet on one database — the UI suite's server migrates it
+    and then pytest provisions it again — and procrastinate's DDL, unlike create_all,
+    fails loudly on objects that already exist. The suite's own setup has already
+    applied the schema here, so a second call must be a clean no-op."""
+    import os
+
+    from app.database import make_asyncpg_dsn
+
+    task_queue.apply_schema(make_asyncpg_dsn(os.environ["DATABASE_URL"]))
