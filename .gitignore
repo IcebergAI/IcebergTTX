@@ -54,3 +54,16 @@ website/site/
 
 #Claude
 .claude/
+# Machine-local shell/IDE/agent dotfiles that appear (empty) at the worktree
+# root on some dev setups — never repo content. Accidentally swept into #297
+# by a broad `git add -A`; keep them untracked.
+.bash_profile
+.bashrc
+.gitconfig
+.gitmodules
+.idea
+.mcp.json
+.profile
+.ripgreprc
+.zprofile
+.zshrc
