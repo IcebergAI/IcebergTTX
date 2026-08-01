@@ -10,7 +10,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.communication import CommDirection, Communication, CommunicationRead
 from app.models.exercise import ExerciseMember
-from app.models.inject import Inject
 from app.models.user import User
 from app.schemas.api import CommunicationPublic
 from app.services.domain_events import CommunicationCreated, dispatch, record
@@ -298,28 +297,6 @@ async def comm_payload(
     ).model_dump(mode="json")
 
 
-
-
-def schedule_triggered_comms(
-    inject: Inject,
-    trigger_comms: list,  # list[TriggerComm] from scenario definition
-    logical_node_id: str,
-) -> None:
-    """Schedule node-level all-team communications once, across group-specific injects."""
-    assert inject.id is not None
-    from app.services.schedule_service import arm_triggered_communication
-
-    for index, tc in enumerate(trigger_comms):
-        arm_triggered_communication(
-            exercise_id=inject.exercise_id,
-            inject_id=inject.id,
-            direction=tc.direction,
-            external_entity=tc.external_entity,
-            subject=tc.subject,
-            body=tc.body,
-            delay=tc.delay_after_release_seconds,
-            trigger_key=f"{logical_node_id}:{index}",
-        )
 
 
 async def deliver_triggered_communication(

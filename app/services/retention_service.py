@@ -17,11 +17,10 @@ Two tables previously grew without bound and nothing ever deleted from them:
   with no purpose, so those rows are purged **unconditionally** — the audit trail
   separately records issuance and acceptance, so nothing is lost.
 
-Single-process, like every other timer in the app: two replicas would run two
-concurrent sweeps. See the single-replica note in CLAUDE.md.
+The sweep runs as a periodic job on the task queue, so exactly one replica performs each
+night's purge however many are running (#213).
 """
 
-import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
@@ -34,8 +33,6 @@ from app.models.auth_token import AuthToken
 from app.services import audit_service, audit_settings_service
 
 logger = logging.getLogger(__name__)
-
-_SWEEP_INTERVAL_SECONDS = 86_400  # daily
 
 # Rows deleted per transaction. One unbounded DELETE across a year of history would be
 # a single giant transaction, a long row-lock window and a WAL spike; per-batch commits
@@ -140,19 +137,7 @@ async def sweep_once() -> tuple[int, int]:
     return events, tokens
 
 
-async def retention_task() -> None:
-    """Background task: sweep on startup, then once a day.
-
-    Sweeping *before* the first sleep is what collapses the issue's "on-startup pass
-    plus daily timer" into one construct. It deliberately runs inside the task rather
-    than being awaited inline in the lifespan like ``rehydrate_schedules``: a first
-    purge over a legacy table is unbounded and would delay readiness.
-    """
-    while True:
-        try:
-            await sweep_once()
-        except Exception:
-            # A failed sweep must never kill the loop. CancelledError is BaseException,
-            # so the lifespan's task.cancel() still stops shutdown (cf. heartbeat_task).
-            logger.exception("retention sweep failed; continuing")
-        await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
+# The daily sweep is a periodic job on the task queue (``task_queue.retention_sweep``),
+# not a loop in every process. procrastinate's periodic defer is unique per (task,
+# timestamp), so exactly one replica runs each night's purge — where a per-process loop
+# would have had every replica purging the same rows concurrently (#213).

@@ -41,7 +41,6 @@ from app.services.domain_events import (
     ResponseSubmitted,
     SummaryGenerated,
     subscribe,
-    subscribe_local,
 )
 from app.services.ws_manager import manager
 
@@ -281,52 +280,9 @@ async def on_summary_generated(session: AsyncSession, ev: SummaryGenerated) -> N
     )
 
 
-# ── Non-WebSocket subscribers ─────────────────────────────────────────────────
-#
-# These *act* rather than project, so unlike the frames above they must happen exactly
-# once — hence subscribe_local, which keeps them on the replica that recorded the event
-# and off every peer that merely hears about it. Both become transactional enqueues when
-# the durable queue lands (#213 step 3), at which point the distinction goes away.
-
-
-@subscribe_local(InjectReleased)
-async def schedule_triggered_communications(session: AsyncSession, ev: InjectReleased) -> None:
-    """A second subscriber to the same event, and the reason this is a bus rather than a
-    broadcast helper: triggered comms are a post-commit consequence of a release in
-    exactly the way the frame is, and they used to be a hand-sequenced call inside
-    ``release_inject``. Now the release just announces itself."""
-    from app.models.inject import Inject
-    from app.services.communication_service import schedule_triggered_comms
-    from app.services.scenario_service import definition_for_exercise, get_inject_node
-
-    inject = await session.get(Inject, ev.inject_id)
-    if inject is None:
-        return _gone("inject", ev.inject_id)
-    if not inject.scenario_node_id:
-        return
-    definition = await definition_for_exercise(session, ev.exercise_id)
-    if not definition:
-        return
-    node = get_inject_node(definition, inject.scenario_node_id)
-    if node and node.triggers_communications:
-        schedule_triggered_comms(inject, node.triggers_communications, node.id)
-
-
-@subscribe_local(ResponseSubmitted)
-async def arm_schedules_the_response_unlocked(session: AsyncSession, ev: ResponseSubmitted) -> None:
-    """A response is the only thing that advances a progression cursor, and a cursor
-    advance is the only thing that unlocks a scheduled inject the team had not reached
-    (#218). So the re-arm belongs here, on the same post-commit seam as the frame: arming a
-    timer against a cursor advance that then rolled back would release an inject the
-    participants never chose.
-
-    Registered after ``on_response_submitted`` — subscriber order is registration order, so
-    the ``response_submitted`` frame still lists the newly-armed inject as pending, and any
-    immediate ``inject_released`` follows it rather than racing it.
-    """
-    from app.models.exercise import Exercise
-    from app.services.schedule_service import arm_cursor_reached_injects
-
-    exercise = await session.get(Exercise, ev.exercise_id)
-    if exercise is not None:
-        await arm_cursor_reached_injects(session, exercise)
+# Every subscriber here is a pure projection, and that is now a property worth keeping:
+# each one renders a frame for whichever sockets its own replica holds, so running it
+# everywhere is exactly right. Work that *acts* — arming a schedule, delivering a comm —
+# moved into the transaction that occasions it (see ``schedule_service``), because
+# running it once per replica would do it once per replica. If something ever has to act
+# from here, register it with ``subscribe_local``.

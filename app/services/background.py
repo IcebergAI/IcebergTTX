@@ -5,14 +5,13 @@ task with no other reference can be garbage-collected mid-flight. ``spawn`` hold
 a strong reference until the task completes, which is the pattern every
 background call site (LLM pipeline, mail delivery, audit persistence) needs.
 
-Delayed exercise work is *not* one of them any more: an inject release or a triggered
-communication also has to be cancellable and rehydratable, so ``schedule_service`` keeps
-its own keyed registry, which holds the strong reference itself (#211).
+Delayed exercise work is *not* one of them: an inject release or a triggered
+communication has to survive a restart, so those are durable jobs in Postgres
+(``task_queue``) rather than tasks in this process (#211, #213).
 
-This does not provide durability across process restarts — a delayed task is
-still lost if the single process dies (see the task-queue note in CLAUDE.md). It
-only guarantees the task is not dropped by the garbage collector while the
-process is alive.
+Nothing here is durable. A spawned task is lost if the process dies, which is why
+anything that must not be lost belongs on the queue instead. This only guarantees the
+task is not dropped by the garbage collector while the process is alive.
 """
 
 import asyncio
@@ -58,16 +57,13 @@ async def drain(
     """Wait for in-flight spawned work — and anything it spawns while finishing — to settle,
     then cancel whatever remains, all within a bounded grace period (#250).
 
-    Draining is not a single snapshot. A finishing task can spawn *more* background work: a
-    schedule worker's release fires audit persistence and SIEM forwarding, and its dispatch
-    can arm fresh triggered-communication timers. A one-shot snapshot would let those
-    children outlive ``engine.dispose``, so the task sets are re-collected after every wait
-    until they empty or the deadline passes. ``collect_extra`` is re-invoked each round to
-    fold in tasks tracked elsewhere — the lifespan passes ``cancel_all_schedules``, which
-    cancels still-sleeping timers (rehydration re-arms them next boot) and hands back any
-    worker already mid-release so it can finish its commit and dispatch atomically (#218).
-    Every task ``collect_extra`` has ever returned stays tracked, so a worker that spans
-    rounds is never dropped even after its registry entry is cleared.
+    Draining is not a single snapshot. A finishing task can spawn *more* background work —
+    a mail send or an LLM run fires audit persistence, which in turn fires SIEM forwarding.
+    A one-shot snapshot would let those children outlive ``engine.dispose``, so the task
+    sets are re-collected after every wait until they empty or the deadline passes.
+    ``collect_extra`` is re-invoked each round to fold in tasks tracked elsewhere, and
+    every task it has ever returned stays tracked, so one that spans rounds is never
+    dropped.
 
     The whole thing is bounded: the initial waits share one ``timeout`` deadline, and past
     it stragglers are cancelled and then waited on for a short fixed window — so a task that

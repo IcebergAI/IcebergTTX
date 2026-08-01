@@ -154,22 +154,22 @@ async def release_inject(
             detail="Inject is no longer pending and cannot be released",
         )
     # Recorded inside the transaction, so the compare-and-swap loser above — which
-    # rolled back — cannot emit a frame or fire triggered comms for a release that
-    # never happened. Both are subscribers to this one event (see ws_projector).
+    # rolled back — cannot emit a frame for a release that never happened.
     assert inject.id is not None
     record(session, InjectReleased(exercise_id=inject.exercise_id, inject_id=inject.id))
+    # Triggered communications are enqueued in this same transaction rather than from a
+    # post-commit subscriber. That is #211: a release that committed and then lost its
+    # process left every triggered comm silently unarmed. Now the jobs exist if and only
+    # if the release does, and the CAS loser's rollback discards them with everything
+    # else.
+    from app.services.schedule_service import schedule_release_triggered_comms
+
+    await schedule_release_triggered_comms(session, inject.exercise_id, inject)
     await session.commit()
     # ``inject`` may already be in this session's identity map, so a returned ORM
     # row would retain its old pending attributes with synchronize_session=False.
     # Refresh the authoritative row after commit before constructing side effects.
     await session.refresh(inject)
-
-    # Releasing (manually or on schedule) settles any pending scheduled-release timer only
-    # after the compare-and-swap has committed. The losing racer must not cancel the winner's
-    # timer or emit any side effects.
-    from app.services.schedule_service import cancel_inject_schedule
-
-    cancel_inject_schedule(inject.exercise_id, inject.id)
 
     await dispatch(session)
     return inject

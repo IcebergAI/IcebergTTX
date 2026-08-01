@@ -50,6 +50,19 @@ if config.config_file_name is not None:
 target_metadata = SQLModel.metadata
 
 
+def include_name(name, type_, parent_names) -> bool:
+    """Keep procrastinate's own tables out of autogenerate and ``alembic check``.
+
+    The task queue's schema is owned by the library and installed verbatim by its own
+    revision (#213), so it is deliberately absent from ``SQLModel.metadata``. Without
+    this filter every autogenerate would propose dropping it, and the ``alembic check``
+    that gates CI would fail on a database that is in fact correct.
+    """
+    if type_ == "table" and name is not None:
+        return not name.startswith("procrastinate_")
+    return True
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=config.get_main_option("sqlalchemy.url"),
@@ -57,6 +70,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -67,6 +81,7 @@ def _do_run_migrations(connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()

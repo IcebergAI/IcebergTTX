@@ -57,7 +57,6 @@ from app.services.report_service import (
 )
 from app.services.scenario_service import get_scenario_definition, titles_for
 from app.services.schedule_service import (
-    cancel_exercise_schedules,
     schedule_exercise_injects,
 )
 from app.services.timeline_service import (
@@ -262,12 +261,12 @@ async def _transition(
     # transaction and dispatched by transition_state_with_history itself (#212), so it has
     # already gone out by the time we get here. A rolled-back transition raises above and
     # emits neither projection.
-    # Start/resume arm pending timers; pause/complete cancel them. This runs only
-    # after the atomic state/history transaction and canonical WS projection.
+    # Start/resume enqueue pending schedules. Pause and complete enqueue nothing and
+    # cancel nothing: a job written before the pause fires, re-reads the exercise, and
+    # either no-ops or re-defers itself against the resumed clock (#213).
     if target == ExerciseState.active:
         await schedule_exercise_injects(session, result.exercise)
-    else:
-        cancel_exercise_schedules(exercise_id)
+        await session.commit()
     return _exercise_out(result.exercise)
 
 
@@ -542,7 +541,8 @@ async def draft_report_summary(exercise_id: int, current_user: FacilitatorDep, s
             status_code=status.HTTP_409_CONFLICT,
             detail="AI summary unavailable: no provider configured or exercise AI disabled",
         )
-    queued = queue_summary_pipeline(exercise_id)
+    queued = await queue_summary_pipeline(session, exercise_id)
+    await session.commit()
     return {"status": "accepted" if queued else "already-running"}
 
 
