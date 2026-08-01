@@ -132,8 +132,8 @@ async def register(
     # cannot mass-create accounts. Keyed by IP alone — the email is the thing being
     # created, so it can't be part of the key.
     ip = client_ip(request) or "unknown"
-    if registration_rate_limiter.is_limited(ip):
-        retry_after = registration_rate_limiter.retry_after(ip)
+    limited, retry_after = await registration_rate_limiter.check(ip)
+    if limited:
         audit_service.emit(
             "auth.register",
             result="deny",
@@ -146,7 +146,7 @@ async def register(
             detail="Too many registration attempts. Try again later.",
             headers={"Retry-After": str(retry_after)},
         )
-    registration_rate_limiter.record_failure(ip)
+    await registration_rate_limiter.record_failure(ip)
 
     if await user_service.email_exists(session, body.email):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
@@ -184,8 +184,8 @@ async def login(
     _require_local_auth()
     ip = client_ip(request) or "unknown"
     rate_key = f"{ip}:{body.email}"
-    if login_rate_limiter.is_limited(rate_key):
-        retry_after = login_rate_limiter.retry_after(rate_key)
+    limited, retry_after = await login_rate_limiter.check(rate_key)
+    if limited:
         audit_service.emit(
             "auth.login",
             result="deny",
@@ -205,7 +205,7 @@ async def login(
     if not user or user.hashed_password is None or not verify_password(
         body.password, user.hashed_password
     ):
-        login_rate_limiter.record_failure(rate_key)
+        await login_rate_limiter.record_failure(rate_key)
         audit_service.emit(
             "auth.login",
             result="fail",
@@ -226,7 +226,7 @@ async def login(
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
 
-    login_rate_limiter.reset(rate_key)
+    await login_rate_limiter.reset(rate_key)
     token = create_access_token(subject=user.email, role=user.role.value, is_admin=user.is_admin)
     _set_session_cookie(response, token)
     audit_service.emit(
@@ -254,13 +254,14 @@ async def password_reset_request(
     _require_smtp()
     _require_link_base()
     ip = client_ip(request) or "unknown"
-    if password_reset_rate_limiter.is_limited(ip):
+    limited, retry_after = await password_reset_rate_limiter.check(ip)
+    if limited:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many reset requests. Try again later.",
-            headers={"Retry-After": str(password_reset_rate_limiter.retry_after(ip))},
+            headers={"Retry-After": str(retry_after)},
         )
-    password_reset_rate_limiter.record_failure(ip)
+    await password_reset_rate_limiter.record_failure(ip)
 
     user = await user_service.get_by_email(session, body.email)
     if user is not None and user.auth_provider == LOCAL_AUTH_PROVIDER:

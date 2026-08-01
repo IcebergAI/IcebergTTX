@@ -310,6 +310,22 @@ async def remove_old_jobs(timestamp: int) -> None:
     await queue_app.job_manager.delete_old_jobs(nb_hours=24 * 7)
 
 
+@queue_app.periodic(cron="29 * * * *")
+@queue_app.task(name="maintenance.rate_limit_sweep")
+async def rate_limit_sweep(timestamp: int) -> None:
+    """Delete throttle counters past their window.
+
+    Hourly and centralised, because the keys are attacker-controlled: the previous
+    in-process version swept on a read path, so rows for a key nobody looked at again
+    stayed forever.
+    """
+    from app.services.rate_limit import sweep
+
+    removed = await sweep()
+    if removed:
+        logger.info("swept %d expired rate-limit hits", removed)
+
+
 @queue_app.periodic(cron="*/10 * * * *")
 @queue_app.task(name="maintenance.retry_stalled_jobs")
 async def retry_stalled_jobs(timestamp: int) -> None:

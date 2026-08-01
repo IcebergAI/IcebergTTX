@@ -106,20 +106,18 @@ def seed_playwright_users():
 
 @pytest.fixture(autouse=True)
 def _reset_login_rate_limiter():
-    """Isolate the in-memory login/registration limiters between tests (#11, #67)."""
-    from app.services.rate_limit import (
-        login_rate_limiter,
-        password_reset_rate_limiter,
-        registration_rate_limiter,
-    )
+    """Isolate the login/registration/reset limiters between tests (#11, #67).
 
-    login_rate_limiter.clear()
-    registration_rate_limiter.clear()
-    password_reset_rate_limiter.clear()
+    The counters are rows now (#213), and they are written on their own connections so a
+    test's rollback does not remove them — hence a real DELETE rather than clearing a
+    dict. Sync and driven through asyncio.run, because this fixture also applies to
+    test_ui.py's synchronous Playwright tests, which an async autouse fixture fails
+    wholesale.
+    """
+    from app.services.rate_limit import clear_all
+
     yield
-    login_rate_limiter.clear()
-    registration_rate_limiter.clear()
-    password_reset_rate_limiter.clear()
+    asyncio.run(clear_all())
 
 
 @pytest.fixture(autouse=True)

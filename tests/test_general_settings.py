@@ -76,7 +76,7 @@ async def test_runtime_login_limit_causes_real_lockout(client: AsyncClient, admi
         headers=_bearer(admin_token),
     )
     assert response.status_code == 200
-    login_rate_limiter.clear()
+    await login_rate_limiter.clear()
 
     body = {"email": "nobody@example.test", "password": "wrong-password"}
     first = await client.post("/api/auth/login", json=body)

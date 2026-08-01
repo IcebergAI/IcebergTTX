@@ -29,6 +29,7 @@ from app.models import (  # noqa: F401
     inject_comment,
     llm_settings,
     proxy_settings,
+    rate_limit,
     report_summary,
     response,
     scenario,

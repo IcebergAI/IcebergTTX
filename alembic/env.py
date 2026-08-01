@@ -30,6 +30,7 @@ from app.models import (  # noqa: F401
     llm_settings,
     oidc_settings,
     proxy_settings,
+    rate_limit,
     report_summary,
     response,
     scenario,
