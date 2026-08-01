@@ -115,7 +115,8 @@ async def submit_response(
         # Inside the transaction: the IntegrityError branch below rolls back, which
         # discards this — so a duplicate submission cannot broadcast. That used to be
         # guaranteed only by the broadcast sitting after the try block.
-        record(session, ResponseSubmitted(exercise_id=exercise_id, response=response))
+        assert response.id is not None
+        record(session, ResponseSubmitted(exercise_id=exercise_id, response_id=response.id))
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()

@@ -157,7 +157,7 @@ async def release_inject(
     # rolled back — cannot emit a frame or fire triggered comms for a release that
     # never happened. Both are subscribers to this one event (see ws_projector).
     assert inject.id is not None
-    record(session, InjectReleased(exercise_id=inject.exercise_id, inject=inject))
+    record(session, InjectReleased(exercise_id=inject.exercise_id, inject_id=inject.id))
     await session.commit()
     # ``inject`` may already be in this session's identity map, so a returned ORM
     # row would retain its old pending attributes with synchronize_session=False.

@@ -199,7 +199,7 @@ async def _assess_response_result(session, response, inject, definition):
             ResponseAssessed(
                 exercise_id=inject.exercise_id,
                 response_id=response_id,
-                payload=assessment_payload(assessment),
+                assessment_id=assessment.id,
             ),
         )
         await session.commit()
@@ -282,9 +282,10 @@ async def _suggest_inject_result(session, response, inject, exercise, definition
     session.add(suggested)
     try:
         await session.flush()
+        assert suggested.id is not None
         record(
             session,
-            InjectSuggested(exercise_id=exercise.id, suggested=suggested),
+            InjectSuggested(exercise_id=exercise.id, suggested_id=suggested.id),
         )
         await session.commit()
     except IntegrityError:
@@ -466,12 +467,13 @@ async def generate_executive_summary(session, exercise_id: int):
     session.add(summary)
     try:
         await session.flush()
+        assert summary.id is not None
         # Inside the transaction: the IntegrityError branch below rolls back, which
         # discards the buffered event — the loser must not broadcast a frame for a
         # row it never created (same discipline as the assess path).
         record(
             session,
-            SummaryGenerated(exercise_id=exercise_id, payload=summary_payload(summary)),
+            SummaryGenerated(exercise_id=exercise_id, summary_id=summary.id),
         )
         await session.commit()
     except IntegrityError:

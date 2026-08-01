@@ -13,7 +13,7 @@ from app.services import domain_events as de
 
 
 def _ev(exercise_id: int = 1) -> de.SummaryGenerated:
-    return de.SummaryGenerated(exercise_id=exercise_id, payload={"summary_text": "x"})
+    return de.SummaryGenerated(exercise_id=exercise_id, summary_id=1)
 
 
 def _user(email: str) -> User:
@@ -77,14 +77,14 @@ async def test_rollback_discards_and_a_later_commit_cannot_resurrect(
     seen: list[de.DomainEvent] = []
     monkeypatch.setitem(de._subscribers, de.SummaryGenerated, [_collect(seen)])
 
-    doomed = de.SummaryGenerated(exercise_id=111, payload={"summary_text": "never"})
+    doomed = de.SummaryGenerated(exercise_id=111, summary_id=111)
     session.add(_user("d@x.test"))
     de.record(session, doomed)
     await session.rollback()
     assert de.buffer_for(session).pending == []
 
     # A second, entirely unrelated unit of work on the same session commits.
-    survivor = de.SummaryGenerated(exercise_id=222, payload={"summary_text": "real"})
+    survivor = de.SummaryGenerated(exercise_id=222, summary_id=222)
     session.add(_user("e@x.test"))
     de.record(session, survivor)
     await session.commit()

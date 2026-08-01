@@ -89,9 +89,10 @@ async def create_inject_comment(
     session.add(comment)
     await session.flush()  # id + created_at, so the payload is complete pre-commit
     payload = await comment_payload(session, comment)
+    assert comment.id is not None
     record(
         session,
-        InjectCommentCreated(exercise_id=exercise_id, comment=comment, payload=payload),
+        InjectCommentCreated(exercise_id=exercise_id, comment_id=comment.id),
     )
     await session.commit()
     await session.refresh(comment)

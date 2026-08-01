@@ -163,11 +163,12 @@ async def transition_state_with_history(
         # must be recorded inside this transaction so a failed commit discards it.
         await session.flush()
         assert exercise.id is not None
+        assert transition.id is not None
         record(
             session,
             ExerciseStateChanged(
                 exercise_id=exercise.id,
-                transition=transition,
+                transition_id=transition.id,
                 action=transition_action(previous_state, new_state),
             ),
         )

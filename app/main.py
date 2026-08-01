@@ -188,10 +188,11 @@ async def lifespan(app: FastAPI):
     # this one's caches (#213). Started after the loaders above: the first connect has
     # nothing to recover, and connecting is deliberately not awaited to completion —
     # a database blip must not stop a replica from serving what it already can.
-    from app.services import config_sync
+    from app.services import config_sync, ws_relay
     from app.services.pg_listener import listener
 
     config_sync.install()
+    ws_relay.install()
     await listener.start()
     # Re-arm persisted inject and communication schedules for exercises that were active
     # before a restart (#116, #194). Timers remain single-process only.

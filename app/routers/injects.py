@@ -376,7 +376,7 @@ async def update_schedule(
         )
     inject.release_offset_minutes = body.release_offset_minutes
     session.add(inject)
-    record(session, InjectUpdated(exercise_id=exercise_id, inject=inject))
+    record(session, InjectUpdated(exercise_id=exercise_id, inject_id=inject_id))
     await session.commit()
     await session.refresh(inject)
 
