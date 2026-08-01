@@ -110,14 +110,20 @@ def _reset_login_rate_limiter():
 
     The counters are rows now (#213), and they are written on their own connections so a
     test's rollback does not remove them — hence a real DELETE rather than clearing a
-    dict. Sync and driven through asyncio.run, because this fixture also applies to
-    test_ui.py's synchronous Playwright tests, which an async autouse fixture fails
-    wholesale.
+    dict. Over a *synchronous* psycopg connection, not asyncio.run: this autouse fixture
+    also tears down test_ui.py's sync Playwright tests, which execute while the
+    session-scoped event loop is live — where an async fixture fails them wholesale and
+    asyncio.run refuses with "cannot be called from a running event loop".
     """
-    from app.services.rate_limit import clear_all
+    import psycopg
+
+    from app.database import make_asyncpg_dsn
 
     yield
-    asyncio.run(clear_all())
+    with psycopg.connect(
+        make_asyncpg_dsn(os.environ["DATABASE_URL"]), autocommit=True
+    ) as connection:
+        connection.execute("DELETE FROM rate_limit_hits")
 
 
 @pytest.fixture(autouse=True)

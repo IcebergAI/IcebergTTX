@@ -166,12 +166,6 @@ def apply_config(
     )
 
 
-async def clear_all() -> None:
-    """Forget every counter in every scope. One statement, for the test harness."""
-    async with _engine().begin() as connection:
-        await connection.execute(delete(rate_limit_hits))
-
-
 async def sweep() -> int:
     """Delete hits older than the widest configured window. Returns rows removed.
 
