@@ -6,9 +6,12 @@ not run), and these assertions are about the machinery, not a live subscription.
 """
 
 import asyncio
+from uuid import uuid4
 
 import pytest
+from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.database import engine
 from app.services import pg_bus, pg_listener
 from app.services.pg_listener import Listener
 
@@ -246,3 +249,43 @@ async def _append(sink: list, descriptor: dict) -> None:
 
 async def _record(sink: list, value: str) -> None:
     sink.append(value)
+
+
+# ── Live round trip ───────────────────────────────────────────────────────────
+
+
+async def test_a_real_notification_reaches_a_handler():
+    """The whole delivery path against a real database: connect, LISTEN, asyncpg's
+    callback, the queue, the consumer, the handler.
+
+    Everything above this drives a stubbed connection, so without it a mistake in the
+    parts asyncpg owns — the subscription, the callback signature — would pass the suite
+    and fail in production.
+    """
+    channel = f"ttx_live_{uuid4().hex[:8]}"
+    received: asyncio.Queue[dict] = asyncio.Queue()
+    listener = Listener()
+    listener.register(channel, lambda descriptor: _put(received, descriptor))
+    await listener.start()
+    try:
+        # Wait for the subscription: publishing before LISTEN lands would be delivered
+        # to nobody, and at-most-once means nothing would replay it.
+        for _ in range(100):
+            if listener.is_connected:
+                break
+            await asyncio.sleep(0.05)
+        assert listener.is_connected
+
+        async with AsyncSession(engine) as session:
+            await pg_bus.publish(session, channel, pg_bus.envelope(scope="live"))
+            await session.commit()
+
+        descriptor = await asyncio.wait_for(received.get(), timeout=5)
+        assert descriptor["scope"] == "live"
+        assert pg_bus.is_own(descriptor)
+    finally:
+        await listener.stop()
+
+
+async def _put(sink: asyncio.Queue, descriptor: dict) -> None:
+    sink.put_nowait(descriptor)
