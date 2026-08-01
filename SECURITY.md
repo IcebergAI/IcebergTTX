@@ -46,5 +46,6 @@ participant reading another team's data, or an unauthenticated caller reaching a
 them) remain in scope.
 
 Deployment hardening (secret management, TLS termination, network policy, and the
-single-replica WebSocket constraint) is the operator's responsibility; see the
-deployment notes in [README.md](README.md) and [CLAUDE.md](CLAUDE.md).
+storage prerequisites for running more than one replica) is the operator's
+responsibility; see the deployment notes in [README.md](README.md) and
+[CLAUDE.md](CLAUDE.md).

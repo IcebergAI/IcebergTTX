@@ -11,25 +11,43 @@ IcebergTTX ships with two supported deployment paths: **Docker Compose** for a
 single host, and **Kubernetes** manifests for a cluster. Both front the app with
 **Caddy**; the only difference is where TLS is terminated.
 
-!!! info "Single-replica constraint"
-    The app must run as a **single replica**, and the Kubernetes manifests enforce it with
-    `replicas: 1` and `strategy: Recreate`. This is not one limitation but several — every
-    piece of cross-request state the app keeps lives in the **process**, so a second replica
-    would not share it:
+## Running more than one replica
 
-    | In-memory state | What a second replica would break | Needs |
-    |---|---|---|
-    | **WebSocket manager** | Clients connected to replica A never see events raised on replica B | A shared bus (e.g. Redis pub/sub) |
-    | **Exercise schedules** | Inject and communication timers are process-local; persisted state restores them after one process restarts, but a second live replica can duplicate scheduling work | A task queue (Celery, ARQ) |
-    | **Login / registration / reset rate limiters** | Attempt counters are per process, so the effective limit multiplies by the replica count | A shared store |
-    | **SIEM and proxy config caches** | An admin's change on replica A leaves replica B forwarding to the old sink, or egressing via the old proxy | Cache invalidation across replicas |
-    | **In-flight LLM assessments** | Best-effort background tasks, tracked per process | A task queue |
-    | **Audit-retention sweeper** | Every replica runs its own daily purge, so the same batched deletes compete concurrently for the same rows | A task queue, or leader election |
+Every piece of cross-request state is shared through PostgreSQL, so the app scales out
+without a broker, a cache, or any second datastore to operate:
 
-    `rehydrate_schedules()` reconstructs pending inject releases and delayed triggered
-    communications on startup. Pause cancels both timer types and resume re-arms their
-    remaining active-time delay. This protects a **single-process** restart; it is not a
-    substitute for shared scheduling across live replicas.
+| State | How it is shared |
+|---|---|
+| **WebSocket fan-out** | The originating replica publishes a compact descriptor on a `LISTEN`/`NOTIFY` channel inside its transaction; each replica re-reads the committed rows and renders frames for its own sockets. |
+| **Exercise schedules** | Inject releases and triggered communications are rows in a job table, enqueued in the same transaction as the change that makes them due. A restart loses nothing, and a killed worker's job is retried. |
+| **Rate limiters** | Attempt counters are rows, so the limit is the limit however many replicas are running. |
+| **Config caches** | A settings save publishes its scope; every replica re-reads the row. A replica that was disconnected re-reads all of them on reconnect. |
+| **LLM assessments and summaries** | Queue jobs with a queueing lock, so a manual re-trigger on one replica cannot duplicate a provider call on another. |
+| **Audit-retention sweep** | A periodic job. Exactly one replica performs each night's purge. |
+| **Schema migrations** | Every replica migrates on startup behind a Postgres advisory lock, so they run one at a time and the rest find the schema already at head. |
+
+!!! warning "Storage is the remaining prerequisite"
+    The default manifests still ship `replicas: 1`, for one reason: inject attachments
+    live on a `ReadWriteOnce` volume that only a single node can mount, and a PVC's
+    access modes **cannot be changed in place**.
+
+    On a cluster with an RWX StorageClass (EFS, Filestore, CephFS, NFS…), apply the
+    overlay:
+
+    ```bash
+    kubectl apply -k k8s/overlays/multi-replica
+    ```
+
+    It sets `replicas: 2`, switches to a `RollingUpdate` that keeps the old pod serving
+    until the new one is ready, and requests `ReadWriteMany` for uploads. An install
+    already running the single-replica base must provision a new claim and copy the
+    attachments across — it cannot be upgraded in place.
+
+!!! note "Do not put a transaction-mode pooler in front of the app"
+    `LISTEN`/`NOTIFY` needs a session that outlives a transaction. PgBouncer in
+    `transaction` or `statement` mode silently drops the subscription, and the symptom is
+    that live updates stop reaching some clients while everything else looks healthy. Use
+    `session` mode, or connect the app directly to Postgres.
 
 ## Docker Compose
 
@@ -171,10 +189,15 @@ Browser WebSocket auth verifies the upgrade's `Origin` against the request `Host
 
 ## Migrations
 
-Schema is managed by **Alembic**. The app self-migrates on startup
-(`alembic upgrade head` runs in the async lifespan), which suits the single-replica
-model. For multi-replica rollouts, run `alembic upgrade head` as a dedicated deploy
-step instead.
+Schema is managed by **Alembic**. The app self-migrates on startup (`alembic upgrade
+head` runs in the async lifespan), behind a Postgres advisory lock — so several replicas
+starting at once migrate one at a time, and the ones that lose the lock find the schema
+already at head and apply nothing.
+
+During a rolling update the previous version serves against the new schema for as long
+as the rollout takes, so **a migration must be forward-compatible across one release**:
+add columns before writing them, and drop them a release after the code stops reading
+them.
 
 ## Data growth and retention
 

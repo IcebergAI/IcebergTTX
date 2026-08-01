@@ -1,21 +1,17 @@
-# IMPORTANT: replicas must remain 1.
-# Every piece of cross-request state the app keeps lives in the process, so a
-# second replica would not share it. Redis pub/sub in ws_manager.py is NOT
-# sufficient on its own — it only fixes the first of these:
-#   - ws_manager.py       WebSocket fan-out       -> shared bus (Redis pub/sub)
-#   - schedule_service    scheduled inject release, and the delayed triggered
-#                         comms in communication_service: in-process asyncio
-#                         tasks, lost or duplicated per replica
-#                                                 -> task queue (Celery/ARQ)
-#   - rate_limit          per-process attempt counters, so a 2nd replica
-#                         DOUBLES the effective login/registration/reset limits
-#                                                 -> shared store
-#   - SiemConfig/ProxyConfig caches: an admin's policy change would not reach
-#                         the other replica       -> cross-replica invalidation
-# See website/docs/deployment.md for the full table.
+# The app no longer requires a single replica: WebSocket fan-out, config
+# invalidation, scheduled work and rate-limit counters are all shared through
+# Postgres (#213 — LISTEN/NOTIFY plus a procrastinate job table).
 #
-# strategy: Recreate ensures the old pod is terminated before the new one
-# starts, so there is never a brief window with 2 replicas running.
+# This base still runs one replica, for one reason only: the uploads PVC below
+# is ReadWriteOnce, and a PVC's access modes cannot be changed in place. Scaling
+# out therefore needs storage that several pods can mount.
+#
+# To run more than one replica, apply k8s/overlays/multi-replica, which sets
+# replicas: 2, switches to a RollingUpdate (so deploys stop being an outage),
+# and requires an RWX StorageClass for uploads. See website/docs/deployment.md.
+#
+# strategy: Recreate is kept here to match the single RWO volume: the old pod
+# must release it before the new one can mount it.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -77,7 +77,18 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+# Any 64-bit constant works; this one is arbitrary and only has to stay stable, since
+# two processes agree on a lock by using the same number.
+_MIGRATION_LOCK_ID = 8_213_100_213
+
+
 def _do_run_migrations(connection) -> None:
+    # Serialise migrations across replicas (#213). Every replica migrates on startup, so
+    # a rollout would otherwise run several `alembic upgrade head` concurrently against
+    # one database — two processes creating the same table is a crash loop, not a race
+    # you can retry past. The lock is held until the connection closes; whoever loses
+    # simply finds the schema at head and applies nothing.
+    connection.exec_driver_sql(f"SELECT pg_advisory_lock({_MIGRATION_LOCK_ID})")
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
