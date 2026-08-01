@@ -46,20 +46,20 @@ def check_pinned(
     *,
     new: str | None,
     env: str | None,
-    secret_present: bool,
+    credential_present: bool,
     field_label: str,
     env_var: str,
-    secret_var: str,
+    credential_var: str,
 ) -> None:
     """Raise ValueError when a runtime edit would redirect an env-only secret."""
-    if not secret_present:
+    if not credential_present:
         return
     if not (new or "").strip():
         return
     if origin(new) == origin(env):
         return
     raise ValueError(
-        f"{secret_var} is set, so {field_label} is pinned to the environment's "
-        f"{env_var}. Change {env_var} and restart, or clear {secret_var}, before "
+        f"{credential_var} is set, so {field_label} is pinned to the environment's "
+        f"{env_var}. Change {env_var} and restart, or clear {credential_var}, before "
         "pointing this at another host."
     )

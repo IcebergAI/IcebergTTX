@@ -61,10 +61,10 @@ def validate_changes(row: EmailSettings, changes: dict[str, Any]) -> None:
     sink_pinning.check_pinned(
         new=changes.get("smtp_host", row.smtp_host),
         env=settings.smtp_host,
-        secret_present=bool(settings.smtp_password),
+        credential_present=bool(settings.smtp_password),
         field_label="the SMTP host",
         env_var="SMTP_HOST",
-        secret_var="SMTP_PASSWORD",
+        credential_var="SMTP_PASSWORD",
     )
 
 

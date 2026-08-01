@@ -75,10 +75,10 @@ def validate_changes(row: AuditSettings, changes: dict[str, Any]) -> None:
     sink_pinning.check_pinned(
         new=changes.get("http_endpoint", row.http_endpoint),
         env=settings.siem_http_endpoint,
-        secret_present=bool(settings.siem_http_token),
+        credential_present=bool(settings.siem_http_token),
         field_label="the SIEM HTTP endpoint",
         env_var="SIEM_HTTP_ENDPOINT",
-        secret_var="SIEM_HTTP_TOKEN",
+        credential_var="SIEM_HTTP_TOKEN",
     )
 
 

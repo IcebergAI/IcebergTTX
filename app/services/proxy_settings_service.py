@@ -78,10 +78,10 @@ def validate_changes(row: ProxySettings, changes: dict[str, Any]) -> None:
     sink_pinning.check_pinned(
         new=changes.get("proxy_url", row.proxy_url),
         env=settings.proxy_url,
-        secret_present=bool(settings.proxy_username or settings.proxy_password),
+        credential_present=bool(settings.proxy_username or settings.proxy_password),
         field_label="the proxy URL",
         env_var="PROXY_URL",
-        secret_var="PROXY_USERNAME/PROXY_PASSWORD",
+        credential_var="PROXY_USERNAME/PROXY_PASSWORD",
     )
 
 
