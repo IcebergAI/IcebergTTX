@@ -133,6 +133,16 @@ container uses a read-only root filesystem** — app, init, Caddy, Postgres, and
 backup CronJob alike. The Postgres StatefulSet runs as uid 999 with `fsGroup: 999`,
 which needs a StorageClass that honours `fsGroup`.
 
+### Backups cover two volumes, not one
+
+Durable state lives in the Postgres database **and** on the `app-uploads` PVC, which
+holds the inject attachments that `inject.attachment_path` points at. A database-only
+backup restores to a deployment whose records claim evidence that is no longer on
+disk. `k8s/postgres/backup-cronjob.yaml` captures both in one daily job under a shared
+timestamp; after a restore, run `python -m app.reconcile_attachments` to surface any
+row whose file is missing. The job co-schedules with the app pod because `app-uploads`
+is `ReadWriteOnce`.
+
 ### Origin checks
 
 Browser WebSocket auth verifies the upgrade's `Origin` against the request `Host`

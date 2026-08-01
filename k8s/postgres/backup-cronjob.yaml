@@ -1,10 +1,21 @@
-# Scheduled logical backup of the Postgres database to a dedicated PVC.
+# Scheduled logical backup of BOTH halves of the durable state to a dedicated PVC:
+# the Postgres database and the inject attachments on the app-uploads PVC.
+#
+# Backing up only the database produces a consistent-looking restore whose injects
+# reference attachment files that no longer exist — the DB says the evidence is there
+# and every download 404s (#268). The two are captured in one job, under one
+# timestamp, so a restore pairs a dump with the files that existed alongside it.
 #
 # This is a starting point, NOT a turnkey backup solution: it keeps dumps on an
 # in-cluster PVC (same failure domain as the cluster) and applies simple
 # time-based retention. For production, copy the dumps off-cluster (object
 # storage) and verify restores regularly. See the README "Backup & restore"
-# section for the manual pg_dump/pg_restore procedure.
+# section for the manual pg_dump/pg_restore procedure and the post-restore
+# `python -m app.reconcile_attachments` integrity check.
+#
+# app-uploads is ReadWriteOnce, so this pod must land on the node already running
+# the app pod — hence the podAffinity below. On a ReadWriteMany StorageClass the
+# affinity is unnecessary and can be dropped.
 #
 # Apply:  kubectl apply -f k8s/postgres/backup-cronjob.yaml
 ---
@@ -51,15 +62,29 @@ spec:
         spec:
           restartPolicy: OnFailure
           automountServiceAccountToken: false
+          # Co-schedule with the app pod: app-uploads is RWO and can only be mounted
+          # by pods on the node that already holds it.
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: iceberg-ttx-app
+                  topologyKey: kubernetes.io/hostname
           securityContext:
             runAsNonRoot: true
             runAsUser: 999
             runAsGroup: 999
             fsGroup: 999
+            # The app writes attachments as uid/gid 1000 with a default umask, so
+            # they are group- and world-readable; this membership keeps the read
+            # working on a stricter umask without granting write access (the
+            # uploads mount below is readOnly).
+            supplementalGroups: [1000]
             seccompProfile:
               type: RuntimeDefault
           containers:
-            - name: pg-dump
+            - name: backup
               # Must match the server's major version (see k8s/postgres/statefulset.yaml).
               image: postgres:17
               securityContext:
@@ -79,7 +104,7 @@ spec:
                     secretKeyRef:
                       name: iceberg-ttx-secrets
                       key: POSTGRES_PASSWORD
-                # Keep this many days of dumps on the PVC.
+                # Keep this many days of dumps and upload archives on the PVC.
                 - name: RETENTION_DAYS
                   value: "14"
               command: ["/bin/sh", "-c"]
@@ -91,15 +116,23 @@ spec:
                   set -eu
                   ts="$(date -u +%Y%m%dT%H%M%SZ)"
                   out="/backups/iceberg_ttx-${ts}.dump"
+                  uploads="/backups/uploads-${ts}.tar.gz"
                   echo "Dumping ${PGDATABASE} to ${out}"
                   pg_dump --format=custom --compress=9 --file="${out}"
-                  echo "Pruning dumps older than ${RETENTION_DAYS} days"
-                  find /backups -name 'iceberg_ttx-*.dump' -type f \
-                    -mtime "+${RETENTION_DAYS}" -print -delete
-                  echo "Backup complete: ${out}"
+                  # The attachments the dump's inject rows point at. Same timestamp,
+                  # same job: restoring the pair keeps attachment_path resolvable.
+                  echo "Archiving inject attachments to ${uploads}"
+                  tar czf "${uploads}" -C /uploads .
+                  echo "Pruning backups older than ${RETENTION_DAYS} days"
+                  find /backups \( -name 'iceberg_ttx-*.dump' -o -name 'uploads-*.tar.gz' \) \
+                    -type f -mtime "+${RETENTION_DAYS}" -print -delete
+                  echo "Backup complete: ${out} + ${uploads}"
               volumeMounts:
                 - name: backups
                   mountPath: /backups
+                - name: uploads
+                  mountPath: /uploads
+                  readOnly: true
               resources:
                 requests:
                   cpu: 100m
@@ -111,3 +144,7 @@ spec:
             - name: backups
               persistentVolumeClaim:
                 claimName: postgres-backups
+            - name: uploads
+              persistentVolumeClaim:
+                claimName: app-uploads
+                readOnly: true

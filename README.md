@@ -282,19 +282,29 @@ kubectl cp -n iceberg-ttx \
         -o jsonpath='{.items[0].metadata.name}')":/app/uploads ./uploads-backup
 ```
 
-#### Scheduled database backups (optional)
+#### Scheduled backups (optional)
 
-`k8s/postgres/backup-cronjob.yaml` is a ready-to-adapt `CronJob` that runs a daily
-`pg_dump` to a dedicated `postgres-backups` PVC with simple time-based retention:
+`k8s/postgres/backup-cronjob.yaml` is a ready-to-adapt `CronJob` that runs daily and
+captures **both** halves of the durable state to a dedicated `postgres-backups` PVC —
+a `pg_dump` of the database and a tar of the `app-uploads` PVC (inject attachments),
+under a shared timestamp — with simple time-based retention:
 
 ```bash
 kubectl apply -f k8s/postgres/backup-cronjob.yaml
 ```
 
-It is a **starting point**, not a complete backup strategy — the dumps sit on an
-in-cluster PVC (same failure domain as the database). For real durability, copy
-them off-cluster (e.g. to object storage), back up the `uploads/` PVC too, and
-**test your restores** regularly; a backup you have never restored is not a backup.
+A database-only backup restores into a consistent-looking deployment whose injects
+reference attachment files that no longer exist: the record says the evidence is
+there and every download fails. Restore the matching pair, then run
+`python -m app.reconcile_attachments` to confirm no row points at a missing file.
+
+Because `app-uploads` is `ReadWriteOnce`, the job carries a `podAffinity` rule to land
+on the node already running the app pod; drop it on a `ReadWriteMany` StorageClass.
+
+It is a **starting point**, not a complete backup strategy — the archives sit on an
+in-cluster PVC (same failure domain as the database). For real durability, copy them
+off-cluster (e.g. to object storage) and **test your restores** regularly; a backup
+you have never restored is not a backup.
 
 ## Forward security events to your SIEM
 
