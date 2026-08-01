@@ -23,7 +23,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
 from app.models.proxy_settings import ProxySettings
-from app.services import proxy
+from app.services import proxy, sink_pinning
 
 _SINGLETON_ID = 1
 
@@ -73,11 +73,24 @@ def _invalidate_dependent_caches() -> None:
     reset_registration()
 
 
+def validate_changes(row: ProxySettings, changes: dict[str, Any]) -> None:
+    """Refuse a patch that would offer the env-only proxy credentials elsewhere (#259)."""
+    sink_pinning.check_pinned(
+        new=changes.get("proxy_url", row.proxy_url),
+        env=settings.proxy_url,
+        credential_present=bool(settings.proxy_username or settings.proxy_password),
+        field_label="the proxy URL",
+        env_var="PROXY_URL",
+        credential_var="PROXY_USERNAME/PROXY_PASSWORD",
+    )
+
+
 async def update_settings(session: AsyncSession, changes: dict[str, Any]) -> ProxySettings:
     """Apply a whitelisted patch to the singleton row and refresh every cache."""
     from datetime import UTC, datetime
 
     row = await get_settings(session)
+    validate_changes(row, changes)
     for key in EDITABLE_FIELDS:
         if key in changes and changes[key] is not None:
             setattr(row, key, changes[key])

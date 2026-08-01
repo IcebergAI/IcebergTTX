@@ -7,7 +7,7 @@ retention config (#251); the HTTP bearer token is env-only and never exposed her
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -17,7 +17,7 @@ from app.dependencies import require_admin
 from app.models.audit import AuditEvent
 from app.models.audit_settings import AuditSettings
 from app.models.user import User
-from app.services import audit_service, audit_settings_service
+from app.services import audit_service, audit_settings_service, sink_pinning
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -103,7 +103,27 @@ async def update_audit_settings(
     session: SessionDep,
 ) -> AuditSettings:
     changes = body.model_dump(exclude_unset=True)
-    row = await audit_settings_service.update_settings(session, changes)
+    previous_endpoint = (await audit_settings_service.get_settings(session)).http_endpoint
+    try:
+        row = await audit_settings_service.update_settings(session, changes)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if sink_pinning.host_changed(previous_endpoint, row.http_endpoint):
+        # The HTTP sink carries the env-only SIEM token, so re-pointing it must be
+        # visible in the trail before anything is forwarded there (#259).
+        audit_service.emit(
+            "audit.sink_destination_changed",
+            actor=current_user,
+            target_type="audit_settings",
+            target_id=row.id,
+            reason=(
+                f"from={sink_pinning.origin(previous_endpoint) or 'unset'} "
+                f"to={sink_pinning.origin(row.http_endpoint) or 'unset'}"
+            ),
+            severity="critical",
+        )
     # Name the changed fields: "who shortened retention, and when" has to be answerable
     # from the trail, and every save was otherwise indistinguishable (mirrors general.py).
     audit_service.emit(

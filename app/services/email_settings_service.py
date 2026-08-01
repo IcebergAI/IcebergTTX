@@ -7,7 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
 from app.models.email_settings import EmailSettings
-from app.services import mail_service
+from app.services import mail_service, sink_pinning
 
 _SINGLETON_ID = 1
 EDITABLE_FIELDS = (
@@ -56,8 +56,21 @@ async def get_settings(session: AsyncSession) -> EmailSettings:
     return row
 
 
+def validate_changes(row: EmailSettings, changes: dict[str, Any]) -> None:
+    """Refuse a patch that would SMTP-AUTH the env-only password elsewhere (#259)."""
+    sink_pinning.check_pinned(
+        new=changes.get("smtp_host", row.smtp_host),
+        env=settings.smtp_host,
+        credential_present=bool(settings.smtp_password),
+        field_label="the SMTP host",
+        env_var="SMTP_HOST",
+        credential_var="SMTP_PASSWORD",
+    )
+
+
 async def update_settings(session: AsyncSession, changes: dict[str, Any]) -> EmailSettings:
     row = await get_settings(session)
+    validate_changes(row, changes)
     for key in EDITABLE_FIELDS:
         if key in changes and changes[key] is not None:
             setattr(row, key, changes[key])

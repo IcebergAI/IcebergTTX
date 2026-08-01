@@ -27,7 +27,56 @@ env:
   SHOULD_PUSH: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
 
 jobs:
+  # Branch protection covers pushes to main, not tag pushes — so without this job a
+  # `v*` tag on any commit (a branch, a commit that never saw a PR, one whose CI
+  # failed) would publish a signed, provenance-attested public image of untested
+  # code, with the signing machinery lending it credibility (#267).
+  verify:
+    name: Verify the tagged commit is releasable
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # read CI workflow-run conclusions for this commit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: merge-base needs main's ancestry, not a shallow tip.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert the commit is on main
+        if: env.SHOULD_PUSH == 'true'
+        run: |
+          # An annotated tag's GITHUB_SHA is the tag *object*, not the commit CI ran
+          # against — peel it first, or the CI-run lookup below finds zero runs and
+          # refuses a valid release. (merge-base peels implicitly; the API does not.)
+          sha="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          echo "RELEASE_COMMIT=${sha}" >> "$GITHUB_ENV"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::${sha} is not contained in origin/main — refusing to publish a release from an unmerged commit"
+            exit 1
+          fi
+          echo "OK: ${sha} is on main"
+
+      - name: Assert CI passed for this commit
+        if: env.SHOULD_PUSH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Query the CI workflow's own runs for this SHA rather than the commit's
+          # check-runs, which would also match this release workflow's jobs.
+          latest="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_COMMIT}&per_page=100" \
+            --jq '[.workflow_runs[] | select(.status == "completed")][0].conclusion // "none"')"
+          if [ "$latest" != "success" ]; then
+            echo "::error::the most recent completed CI run for ${RELEASE_COMMIT} concluded '${latest}' — refusing to publish"
+            exit 1
+          fi
+          echo "OK: CI succeeded for ${RELEASE_COMMIT}"
+
   release:
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub Release

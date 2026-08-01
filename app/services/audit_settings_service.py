@@ -13,7 +13,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
 from app.models.audit_settings import AuditSettings
-from app.services import siem_service
+from app.services import siem_service, sink_pinning
 
 _SINGLETON_ID = 1
 
@@ -76,9 +76,22 @@ async def get_settings(session: AsyncSession) -> AuditSettings:
     return row
 
 
+def validate_changes(row: AuditSettings, changes: dict[str, Any]) -> None:
+    """Refuse a patch that would send the env-only SIEM token elsewhere (#259)."""
+    sink_pinning.check_pinned(
+        new=changes.get("http_endpoint", row.http_endpoint),
+        env=settings.siem_http_endpoint,
+        credential_present=bool(settings.siem_http_token),
+        field_label="the SIEM HTTP endpoint",
+        env_var="SIEM_HTTP_ENDPOINT",
+        credential_var="SIEM_HTTP_TOKEN",
+    )
+
+
 async def update_settings(session: AsyncSession, changes: dict[str, Any]) -> AuditSettings:
     """Apply a whitelisted patch to the singleton row and refresh the cache."""
     row = await get_settings(session)
+    validate_changes(row, changes)
     for key in EDITABLE_FIELDS:
         if key in changes and changes[key] is not None:
             setattr(row, key, changes[key])

@@ -34,6 +34,8 @@ def smtp_on_fixture(monkeypatch):
     """Enable the email feature (smtp_enabled reads host+from)."""
     monkeypatch.setattr(settings, "smtp_host", "smtp.test")
     monkeypatch.setattr(settings, "smtp_from", "noreply@test")
+    # Emailed links are rooted at the configured base, never the request host (#258).
+    monkeypatch.setattr(settings, "public_base_url", "https://ttx.test")
 
 
 @pytest.fixture(name="mail")
@@ -104,7 +106,41 @@ async def test_request_local_account_sends_link_and_mints_token(
     to, subject, body = mail[0]
     assert to == facilitator.email
     assert "reset" in subject.lower()
-    assert "/reset-password?token=" in body
+    assert "https://ttx.test/reset-password?token=" in body
+
+
+# ── Link host is operator-pinned (#258) ───────────────────────────────────────
+
+
+async def test_link_ignores_forged_host_header(
+    client: AsyncClient, facilitator: User, smtp_on, mail
+):
+    """A client-supplied Host must never reach the emailed link (reset-link poisoning)."""
+    r = await client.post(
+        "/api/auth/password-reset/request",
+        json={"email": facilitator.email},
+        headers={"Host": "attacker.example"},
+    )
+    assert r.status_code == 200
+    await _tick()
+    assert len(mail) == 1
+    body = mail[0][2]
+    assert "https://ttx.test/reset-password?token=" in body
+    assert "attacker.example" not in body
+
+
+async def test_request_503_without_public_base_url(
+    client: AsyncClient, session: AsyncSession, facilitator: User, smtp_on, mail, monkeypatch
+):
+    """No configured base URL ⇒ refuse rather than fall back to the request host."""
+    monkeypatch.setattr(settings, "public_base_url", "")
+    r = await client.post(
+        "/api/auth/password-reset/request", json={"email": facilitator.email}
+    )
+    assert r.status_code == 503
+    await _tick()
+    assert mail == []
+    assert await _token_rows(session, facilitator.email) == []
 
 
 async def test_request_sso_account_sends_notice_no_token(

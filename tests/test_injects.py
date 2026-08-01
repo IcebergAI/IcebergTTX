@@ -712,3 +712,53 @@ def test_safe_filename_strips_traversal(raw, expected):
     assert "/" not in result
     assert not result.startswith(".")
     assert result  # never empty
+
+
+# ── Query-count ceilings (#263) ───────────────────────────────────────────────
+
+
+async def _seed_released_injects(
+    session: AsyncSession, exercise_id: int, count: int, prefix: str
+) -> None:
+    from app.models.inject import Inject, InjectState
+
+    for i in range(count):
+        session.add(
+            Inject(
+                exercise_id=exercise_id,
+                scenario_node_id="inject_01",
+                title=f"{prefix} {i}",
+                content="Body",
+                target_teams=["it_ops"],
+                sequence_order=100 + i,
+                state=InjectState.released,
+            )
+        )
+    await session.commit()
+
+
+async def test_participant_inject_list_does_not_scale_queries_with_inject_count(
+    client: AsyncClient,
+    session: AsyncSession,
+    participant_token: str,
+    active_exercise: Exercise,
+    count_statements,
+):
+    """Visibility re-ran an ExerciseMember lookup for every inject in the list (#263)."""
+    assert active_exercise.id is not None
+    headers = {"Authorization": f"Bearer {participant_token}"}
+    url = f"/api/exercises/{active_exercise.id}/injects"
+
+    await _seed_released_injects(session, active_exercise.id, 3, "small")
+    with count_statements() as small:
+        r = await client.get(url, headers=headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 3
+
+    await _seed_released_injects(session, active_exercise.id, 15, "large")
+    with count_statements() as large:
+        r = await client.get(url, headers=headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 18
+
+    assert len(large) == len(small)

@@ -3,7 +3,7 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -11,7 +11,7 @@ from app.database import get_session
 from app.dependencies import require_admin
 from app.models.email_settings import EmailSettings
 from app.models.user import User
-from app.services import audit_service, email_settings_service, mail_service
+from app.services import audit_service, email_settings_service, mail_service, sink_pinning
 
 logger = logging.getLogger("iceberg_ttx")
 router = APIRouter(prefix="/email", tags=["email"])
@@ -56,16 +56,46 @@ async def update_email_settings(
 ) -> EmailSettings:
     changes = body.model_dump(exclude_unset=True)
     current = await email_settings_service.get_settings(session)
+    # Copy the value out: update_settings mutates this very row instance, so a
+    # post-update read of `current` would compare the new host with itself.
+    previous_host = current.smtp_host
     starttls = changes.get("smtp_starttls", current.smtp_starttls)
     tls = changes.get("smtp_tls", current.smtp_tls)
     if starttls and tls:
-        from fastapi import HTTPException, status
-
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="STARTTLS and implicit TLS cannot both be enabled",
         )
-    row = await email_settings_service.update_settings(session, changes)
+    enabled = changes.get("enabled", current.enabled)
+    base_url = changes.get("public_base_url", current.public_base_url)
+    if enabled and not (base_url or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Set a public base URL before enabling email — reset and invite "
+                "links are never derived from the request host (#258)."
+            ),
+        )
+    try:
+        row = await email_settings_service.update_settings(session, changes)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if sink_pinning.host_changed(previous_host, row.smtp_host):
+        # SMTP AUTH offers the env-only password to whatever host is configured, so
+        # a host change is security-relevant on its own (#259).
+        audit_service.emit(
+            "email.smtp_host_changed",
+            actor=current_user,
+            target_type="email_settings",
+            target_id=row.id,
+            reason=(
+                f"from={sink_pinning.origin(previous_host) or 'unset'} "
+                f"to={sink_pinning.origin(row.smtp_host) or 'unset'}"
+            ),
+            severity="critical",
+        )
     audit_service.emit(
         "email.settings_updated",
         actor=current_user,

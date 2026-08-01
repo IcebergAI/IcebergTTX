@@ -20,7 +20,13 @@ from app.database import get_session
 from app.dependencies import require_admin
 from app.models.proxy_settings import ProxySettings
 from app.models.user import User
-from app.services import audit_service, proxy, proxy_settings_service, siem_service
+from app.services import (
+    audit_service,
+    proxy,
+    proxy_settings_service,
+    siem_service,
+    sink_pinning,
+)
 
 logger = logging.getLogger("iceberg_ttx")
 
@@ -120,7 +126,29 @@ async def update_proxy_settings(
     current_user: AdminDep,
     session: SessionDep,
 ) -> ProxySettings:
-    row = await proxy_settings_service.update_settings(session, body.model_dump(exclude_unset=True))
+    previous_url = (await proxy_settings_service.get_settings(session)).proxy_url
+    try:
+        row = await proxy_settings_service.update_settings(
+            session, body.model_dump(exclude_unset=True)
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if sink_pinning.host_changed(previous_url, row.proxy_url):
+        # The proxy carries env-only credentials, so a destination change is a
+        # security-relevant event in its own right (#259).
+        audit_service.emit(
+            "proxy.destination_changed",
+            actor=current_user,
+            target_type="proxy_settings",
+            target_id=row.id,
+            reason=(
+                f"from={sink_pinning.origin(previous_url) or 'unset'} "
+                f"to={sink_pinning.origin(row.proxy_url) or 'unset'}"
+            ),
+            severity="critical",
+        )
     audit_service.emit(
         "proxy.settings_updated",
         actor=current_user,

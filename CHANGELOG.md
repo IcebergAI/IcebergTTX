@@ -7,6 +7,40 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (see the
 
 ## [Unreleased]
 
+### Security
+- **Emailed links are rooted at `PUBLIC_BASE_URL`, never the request host** (#258) —
+  password-reset and invite links previously fell back to the client-supplied `Host`
+  header, so a forged host made the deployment mail a victim a genuine link (carrying a
+  valid single-use reset token) pointing at an attacker. `PUBLIC_BASE_URL` is now
+  required whenever SMTP is configured: startup refuses without it, the admin API
+  refuses to enable email while it is blank, and the reset/invite endpoints return 503
+  rather than send a request-derived link.
+- **OIDC JIT provisioning requires a verified email** (#257) — every adapter computed
+  `email_verified` and nothing read it, so on an IdP allowing self-set addresses an
+  attacker could pre-claim a colleague's email, lock them out, and receive the
+  enrolments facilitators make by email. Denied and audited by default;
+  `OIDC_ALLOW_UNVERIFIED_EMAIL=true` restores the old behaviour for IdPs that never
+  emit the claim.
+- **Secret-bearing sink hosts are pinned to the environment** (#259) — while
+  `SIEM_HTTP_TOKEN`, `SMTP_PASSWORD`, or the proxy credentials are set, the matching
+  destination's origin can no longer be re-pointed at runtime and the secret sent
+  there via the "test" button. Path edits and clearing the sink stay allowed, and any
+  destination change now emits a `critical` audit event.
+- **Releases are gated on the tagged commit's provenance** (#267) — branch protection
+  does not cover tag pushes, so a `v*` tag on any commit published a signed,
+  provenance-attested image. The workflow now verifies the commit is on `main` with a
+  green CI run for that SHA before building.
+
+### Fixed
+- **Scheduled Kubernetes backups cover the uploads PVC** (#268) — the CronJob dumped
+  Postgres only, so a restore produced a database whose injects referenced attachment
+  files that no longer existed. Database and attachments are now captured together
+  under one timestamp.
+- **Three list endpoints no longer query per row** (#263) — facilitator responses,
+  inject comments, and the participant inject list resolved suggestions, visibility,
+  and authors one row at a time. Each now costs a fixed number of queries regardless
+  of exercise activity, with regression tests pinning the ceiling.
+
 ## [0.1.0-beta.3] - 2026-07-14
 
 Third beta release focused on runtime configuration, admin usability, a redesigned

@@ -97,8 +97,8 @@ cp .env.example .env
 #                                HTTP(S)_PROXY/NO_PROXY vars; `explicit` routes outbound
 #                                LLM/SIEM-HTTP/OIDC via PROXY_URL, `none` forces direct
 #   SMTP_HOST + SMTP_FROM        off until both are set — enables password reset +
-#                                participant invites (also PUBLIC_BASE_URL, so emailed
-#                                links are absolute)
+#                                participant invites (PUBLIC_BASE_URL is then required:
+#                                emailed links are rooted there, never at the request Host)
 #   AUTH_MODE / OIDC_*           no SSO providers are configured by default; add OIDC_*
 #                                for OpenID Connect (Entra, Authentik, Auth0, Okta)
 #   SIEM_*                       off by default — forward audit events off-host
@@ -293,20 +293,30 @@ kubectl cp -n iceberg-ttx \
         -o jsonpath='{.items[0].metadata.name}')":/app/uploads ./uploads-backup
 ```
 
-#### Scheduled database backups (optional)
+#### Scheduled backups (optional)
 
-`k8s/base/postgres/backup-cronjob.yaml` is a ready-to-adapt `CronJob` that runs a daily
-`pg_dump` to a dedicated `postgres-backups` PVC with simple time-based retention
-(it is part of the base, so the overlay applies already include it):
+`k8s/base/postgres/backup-cronjob.yaml` is a ready-to-adapt `CronJob` that runs daily
+and captures **both** halves of the durable state to a dedicated `postgres-backups`
+PVC — a `pg_dump` of the database and a tar of the `app-uploads` PVC (inject
+attachments), under a shared timestamp — with simple time-based retention (it is part
+of the base, so the overlay applies already include it):
 
 ```bash
 kubectl apply -f k8s/base/postgres/backup-cronjob.yaml
 ```
 
-It is a **starting point**, not a complete backup strategy — the dumps sit on an
-in-cluster PVC (same failure domain as the database). For real durability, copy
-them off-cluster (e.g. to object storage), back up the `uploads/` PVC too, and
-**test your restores** regularly; a backup you have never restored is not a backup.
+A database-only backup restores into a consistent-looking deployment whose injects
+reference attachment files that no longer exist: the record says the evidence is
+there and every download fails. Restore the matching pair, then run
+`python -m app.reconcile_attachments` to confirm no row points at a missing file.
+
+Because `app-uploads` is `ReadWriteOnce`, the job carries a `podAffinity` rule to land
+on the node already running the app pod; drop it on a `ReadWriteMany` StorageClass.
+
+It is a **starting point**, not a complete backup strategy — the archives sit on an
+in-cluster PVC (same failure domain as the database). For real durability, copy them
+off-cluster (e.g. to object storage) and **test your restores** regularly; a backup
+you have never restored is not a backup.
 
 ## Forward security events to your SIEM
 
@@ -329,7 +339,12 @@ sidecar to run.
     authenticated with a bearer token.
 - **Secret handling**: the HTTP bearer token is set **only** via the
   `SIEM_HTTP_TOKEN` env var / Secret — it is never stored in the database, never
-  returned by the API, and never logged.
+  returned by the API, and never logged. While it is set, the HTTP endpoint's
+  **origin** is pinned to `SIEM_HTTP_ENDPOINT`: an admin may edit the path or clear
+  the sink, but cannot re-point the host and have the token follow it (#259). The
+  same pinning covers `SMTP_HOST` (paired with `SMTP_PASSWORD`) and `PROXY_URL`
+  (paired with the proxy credentials). Any destination change — pinned or not —
+  emits a `critical` audit event naming the old and new origin.
 - **Reliability**: a slow or unreachable SIEM (5-second timeouts) **never blocks
   or fails a request** — each sink is failure-isolated, and the persisted
   `AuditEvent` table (`AUDIT_PERSIST=true`) remains the durable record. Ensure
@@ -424,6 +439,13 @@ so the active administrator cannot remove the last viable login path.
 
 Set the public redirect base URL in Admin → Single sign-on (or seed it with
 `OIDC_REDIRECT_BASE_URL`) so the callback URL matches what you register with the IdP.
+
+Just-in-time account creation requires the IdP to assert `email_verified` (Entra:
+`xms_edov`). On an IdP where users can set their own address before verifying it, an
+unverified email would let an attacker pre-claim a colleague's address — locking the
+real person out and collecting the enrolments facilitators make by email. Logins with
+an unverified email are denied and audited; `OIDC_ALLOW_UNVERIFIED_EMAIL=true`
+restores the old behaviour for an IdP that genuinely never emits the claim.
 
 ### Microsoft Entra ID
 
@@ -559,8 +581,14 @@ SMTP_FROM="IcebergTTX <noreply@example.com>"
 SMTP_USERNAME=<username>          # optional
 SMTP_PASSWORD=<password>          # optional
 SMTP_STARTTLS=true                # or SMTP_TLS=true for implicit TLS
-PUBLIC_BASE_URL=https://ttx.example.com   # so emailed links are absolute
+PUBLIC_BASE_URL=https://ttx.example.com   # required: roots every emailed link
 ```
+
+`PUBLIC_BASE_URL` is mandatory once `SMTP_HOST` is set — startup fails without it, and the
+admin API refuses to enable email while it is blank. Emailed reset and invite links are
+**never** derived from the request's `Host` header: the reset request is unauthenticated, so
+a forged `Host` would make the real deployment mail a victim a genuine link pointing at the
+attacker, and the raw single-use token is the whole authorization (#258).
 
 `SMTP_PASSWORD` is environment-only: it is never accepted by the admin API, persisted,
 logged, or shown. The runtime cache is process-local, matching the SIEM and proxy caches,
@@ -679,7 +707,9 @@ docker pull ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.2
 ```
 
 Each release image ships an SBOM, a signed **SLSA build-provenance** attestation, and a
-**cosign** signature (keyless). The `latest` tag tracks the newest **stable** release only
+**cosign** signature (keyless) — and nothing is built until the release workflow has
+confirmed the tagged commit is on `main` with a green CI run for that exact SHA, so the
+signature never vouches for unvalidated code. The `latest` tag tracks the newest **stable** release only
 (never a beta). See the [CHANGELOG](CHANGELOG.md) for what's in each release and
 [docs/RELEASING.md](docs/RELEASING.md) for the release process and image-verification
 commands.

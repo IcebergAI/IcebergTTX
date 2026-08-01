@@ -15,7 +15,7 @@ from authlib.integrations.starlette_client import OAuth
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.config import OIDCProviderConfig
+from app.config import OIDCProviderConfig, settings
 from app.models.user import User, UserRole
 from app.services import audit_service, proxy, user_service, ws_manager
 from app.services.oidc import auth0 as _auth0  # noqa: F401 - registers adapter
@@ -188,7 +188,8 @@ async def provision_oidc_user(
       1. (auth_provider, stable subject) — returning OIDC user; validate tenant
          provenance and synchronize an IdP-managed role.
       2. any email collision → deny; mutable human-readable claims never link.
-      3. otherwise JIT-create an identity bound to the stable provider subject.
+      3. unverified email → deny JIT creation unless OIDC_ALLOW_UNVERIFIED_EMAIL.
+      4. otherwise JIT-create an identity bound to the stable provider subject.
     """
     # 1. Returning OIDC identity.
     existing = (
@@ -214,9 +215,13 @@ async def provision_oidc_user(
             raise OIDCProvisionError("account disabled")
         raise OIDCProvisionError("account linking required")
 
-    # 3. JIT create. The stable provider subject authenticates this account; an
-    # unverified email may be retained as contact/display data but cannot claim an
-    # existing row because every collision above is denied.
+    # 3. JIT create. The stable provider subject authenticates this account, but the
+    # email column is what facilitators enrol against, so an unverified address must
+    # not occupy it (#257): collisions above stop it *taking* an existing row, not
+    # pre-claiming a colleague's future one and receiving their injects. Audited by
+    # the router's OIDCProvisionError handler, like the collision denial above.
+    if not identity.email_verified and not settings.oidc_allow_unverified_email:
+        raise OIDCProvisionError("email not verified by the identity provider")
     user = User(
         email=normalized_email,
         display_name=identity.display_name or normalized_email,

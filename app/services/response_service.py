@@ -1,4 +1,6 @@
 
+from collections.abc import Sequence
+
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
@@ -144,14 +146,39 @@ async def compute_next_inject_ids(
     return response_next_inject_ids(definition, inject.scenario_node_id, selected_option)
 
 
-async def response_next_inject_suggestions(session: AsyncSession, response: Response) -> list[dict]:
-    next_ids = await compute_next_inject_ids(
-        session,
-        response.exercise_id,
-        response.inject_id,
-        response.selected_option,
-    )
-    return await pending_next_injects(session, response.exercise_id, next_ids, response.group_id)
+async def response_next_inject_suggestions_bulk(
+    session: AsyncSession, exercise_id: int, responses: Sequence[Response]
+) -> dict[int, list[dict]]:
+    """Suggestions for a whole response list, at a query cost that does not grow (#263).
+
+    The per-response helper reloaded the scenario definition, fetched the response's
+    inject, and scanned the exercise's entire pending set — once *per row*. On a long
+    exercise that is hundreds of queries every time a facilitator opens the dashboard.
+    Everything it needs is the same for every row, so load it once and resolve the
+    rest in memory.
+    """
+    if not responses:
+        return {}
+    definition = await definition_for_exercise(session, exercise_id)
+    injects = (
+        await session.exec(select(Inject).where(Inject.exercise_id == exercise_id))
+    ).all()
+    by_id = {inject.id: inject for inject in injects}
+    pending = [inject for inject in injects if inject.state == InjectState.pending]
+
+    suggestions: dict[int, list[dict]] = {}
+    for response in responses:
+        if response.id is None:
+            continue
+        inject = by_id.get(response.inject_id)
+        if definition is None or inject is None or not inject.scenario_node_id:
+            suggestions[response.id] = []
+            continue
+        node_ids = response_next_inject_ids(
+            definition, inject.scenario_node_id, response.selected_option
+        )
+        suggestions[response.id] = select_next_injects(pending, node_ids, response.group_id)
+    return suggestions
 
 
 async def pending_next_injects(
@@ -169,10 +196,21 @@ async def pending_next_injects(
             .where(Inject.state == InjectState.pending)
         )
     ).all()
+    return select_next_injects(injects, scenario_node_ids, group_id)
+
+
+def select_next_injects(
+    pending: Sequence[Inject],
+    scenario_node_ids: list[str],
+    group_id: str | None,
+) -> list[dict]:
+    """Order and filter already-loaded pending injects against a branch result."""
+    if not scenario_node_ids:
+        return []
     ordered_ids = {node_id: i for i, node_id in enumerate(scenario_node_ids)}
     matches = [
         inject
-        for inject in injects
+        for inject in pending
         if inject.scenario_node_id in ordered_ids and inject_matches_group(inject, group_id)
     ]
     matches.sort(key=lambda inject: ordered_ids.get(inject.scenario_node_id or "", 9999))

@@ -1,3 +1,6 @@
+from collections.abc import Sequence
+
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.inject import Inject
@@ -29,16 +32,41 @@ async def comment_payload(session: AsyncSession, comment: InjectComment) -> dict
     *inside* the transaction, so the payload has to be built before the commit.
     """
     author = await session.get(User, comment.user_id)
+    return _comment_payload(
+        comment, author.display_name if author else f"User #{comment.user_id}"
+    )
+
+
+def _comment_payload(comment: InjectComment, author_name: str) -> dict:
     return {
         "id": comment.id,
         "inject_id": comment.inject_id,
         "exercise_id": comment.exercise_id,
         "user_id": comment.user_id,
-        "author_name": author.display_name if author else f"User #{comment.user_id}",
+        "author_name": author_name,
         "group_id": comment.group_id,
         "content": comment.content,
         "created_at": comment.created_at.isoformat(),
     }
+
+
+async def comment_payloads(
+    session: AsyncSession, comments: Sequence[InjectComment]
+) -> list[dict]:
+    """Serialize a comment list, resolving every author in one query (#263).
+
+    The per-comment builder issued a `session.get(User, ...)` each time, so a busy
+    thread cost one round-trip per comment on every list load.
+    """
+    if not comments:
+        return []
+    user_ids = {comment.user_id for comment in comments}
+    authors = (await session.exec(select(User).where(col(User.id).in_(user_ids)))).all()
+    names = {author.id: author.display_name for author in authors}
+    return [
+        _comment_payload(comment, names.get(comment.user_id) or f"User #{comment.user_id}")
+        for comment in comments
+    ]
 
 
 async def create_inject_comment(

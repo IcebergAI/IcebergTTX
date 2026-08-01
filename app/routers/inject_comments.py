@@ -8,19 +8,20 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.database import get_session
 from app.dependencies import get_current_user
 from app.models.exercise import ExerciseState
-from app.models.inject import InjectState
+from app.models.inject import Inject, InjectState
 from app.models.inject_comment import InjectComment
 from app.models.user import User, UserRole
 from app.schemas.api import InjectCommentPublic
 from app.services.access_control import (
     exercise_group_for_user,
+    inject_visible_to,
     require_exercise_access,
     require_inject_visible,
     require_operational_mutability,
 )
 from app.services.inject_comment_service import (
     comment_group_for_user,
-    comment_payload,
+    comment_payloads,
     create_inject_comment,
 )
 from app.services.inject_service import get_inject_or_404
@@ -38,18 +39,23 @@ class CreateInjectCommentRequest(BaseModel):
 
 
 
-async def _can_see_comment(session: AsyncSession, comment: InjectComment, user: User) -> bool:
-    inject = await get_inject_or_404(session, comment.exercise_id, comment.inject_id)
-    try:
-        await require_inject_visible(session, inject, user)
-    except HTTPException:
-        return False
+def _can_see_comment(
+    comment: InjectComment,
+    user: User,
+    injects: dict[int, Inject],
+    group_id: str | None,
+) -> bool:
+    """Visibility against a pre-resolved inject map and exercise group (#263).
 
+    Both used to be re-fetched per comment — an inject lookup plus an ExerciseMember
+    query for every row in the thread.
+    """
+    inject = injects.get(comment.inject_id)
+    if inject is None or not inject_visible_to(inject, user, group_id):
+        return False
     if user.role in (UserRole.facilitator, UserRole.observer):
         return True
-
-    group_id = await exercise_group_for_user(session, comment.exercise_id, user) or user.team
-    return comment.group_id == group_id
+    return comment.group_id == (group_id or user.team)
 
 
 @router.get("", response_model=list[InjectCommentPublic])
@@ -66,11 +72,16 @@ async def list_inject_comments(
             .order_by(col(InjectComment.created_at))
         )
     ).all()
-    return [
-        await comment_payload(session, comment)
-        for comment in comments
-        if await _can_see_comment(session, comment, current_user)
-    ]
+    injects = {
+        inject.id: inject
+        for inject in (
+            await session.exec(select(Inject).where(Inject.exercise_id == exercise_id))
+        ).all()
+        if inject.id is not None
+    }
+    group_id = await exercise_group_for_user(session, exercise_id, current_user)
+    visible = [c for c in comments if _can_see_comment(c, current_user, injects, group_id)]
+    return await comment_payloads(session, visible)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=InjectCommentPublic)

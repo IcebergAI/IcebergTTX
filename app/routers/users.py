@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
@@ -72,7 +72,7 @@ async def create_user(body: AdminCreateUserRequest, admin: AdminDep, session: Se
 
 @router.post("/invite")
 async def invite_user(
-    body: InviteRequest, request: Request, admin: AdminDep, session: SessionDep
+    body: InviteRequest, admin: AdminDep, session: SessionDep
 ):
     """Email a participant a single-use registration link (#117).
 
@@ -81,6 +81,12 @@ async def invite_user(
     """
     if not mail_service.smtp_enabled():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    # The invite link's host is operator-pinned, never request-derived (#258).
+    if mail_service.link_base() is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Emailed links are not configured. Set PUBLIC_BASE_URL.",
+        )
     if await user_service.email_exists(session, body.email):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     if body.exercise_id is not None and await session.get(Exercise, body.exercise_id) is None:
@@ -94,7 +100,7 @@ async def invite_user(
         exercise_id=body.exercise_id,
         ttl=INVITE_TOKEN_TTL,
     )
-    link = mail_service.build_link(request, "/accept-invite", raw)
+    link = mail_service.build_link("/accept-invite", raw)
     spawn(
         mail_service.send(
             body.email,

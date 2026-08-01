@@ -54,10 +54,13 @@
         </div>
         <div>
           <label class="block smallcaps text-muted mb-1" for="public-base-url">Public base URL</label>
-          <input id="public-base-url" type="url" x-model="cfg.public_base_url"
+          <input id="public-base-url" type="url" x-model="cfg.public_base_url" required
                  placeholder="https://ttx.example.com"
                  class="w-full ring-rule rounded-md px-3 py-2 text-[13.5px] bg-surface mono" />
-          <p class="text-[11.5px] text-faint mt-1">Used for links in invitation and reset emails.</p>
+          <p class="text-[11.5px] text-faint mt-1">
+            Required. Roots every invitation and reset link — they are never taken from the
+            request host, which a client can forge.
+          </p>
         </div>
         <fieldset>
           <legend class="block smallcaps text-muted mb-2">Transport security</legend>
