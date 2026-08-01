@@ -264,13 +264,16 @@ async def test_start_enqueues_the_release(
     assert jobs[0]["scheduled_at"] > task_queue.now() + timedelta(minutes=29)
 
 
-async def test_the_release_job_survives_a_pause(
+async def test_the_release_job_survives_a_pause_without_duplicating(
     client: AsyncClient, facilitator_token: str, session: AsyncSession,
     facilitator: User, participant: User,
 ):
-    """Pausing cancels nothing. It does not need to: the job re-reads the exercise when
-    it fires and stands down, and resume enqueues a fresh one against the new clock.
-    Deleting jobs on pause would trade a guaranteed-correct no-op for a lost release."""
+    """Pausing cancels nothing, and resuming stacks nothing.
+
+    The job written at start is still live across the pause, so resume leaves it alone
+    rather than adding a second one per cycle. Its deadline is now early — a pause only
+    ever extends deadlines — and an early-firing job re-defers itself with the
+    recomputed remaining time, so correctness never depended on the re-enqueue."""
     ex = await _make_exercise(session, facilitator, participant, offset=30)
     inject = await _first_inject(session, ex.id)
     await client.post(f"/api/exercises/{ex.id}/start", headers=AUTH(facilitator_token))
@@ -279,7 +282,7 @@ async def test_the_release_job_survives_a_pause(
     assert len(await _release_jobs(session, inject.id)) == 1
 
     await client.post(f"/api/exercises/{ex.id}/resume", headers=AUTH(facilitator_token))
-    assert len(await _release_jobs(session, inject.id)) == 2
+    assert len(await _release_jobs(session, inject.id)) == 1
 
 
 async def test_a_paused_exercise_releases_nothing(
@@ -1014,6 +1017,49 @@ async def test_a_triggered_comm_job_delivers_once(
         )
     ).all()
     assert len(comms) == 1
+
+
+# ── Startup reconciliation ────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def reconcile_session(monkeypatch, session):
+    monkeypatch.setattr(
+        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
+    )
+    return session
+
+
+async def test_reconcile_enqueues_what_has_no_live_job(
+    reconcile_session: AsyncSession, facilitator: User, participant: User,
+):
+    """The cutover and safety-net path: an exercise active across a deploy from a build
+    whose schedules lived in memory has rows but no jobs, and startup restores them."""
+    ex = await _make_exercise(
+        reconcile_session, facilitator, participant, offset=30, active=True
+    )
+    inject = await _first_inject(reconcile_session, ex.id)
+    assert await _release_jobs(reconcile_session, inject.id) == []
+
+    await schedule_service.reconcile_release_jobs()
+
+    assert len(await _release_jobs(reconcile_session, inject.id)) == 1
+
+
+async def test_reconcile_is_idempotent_across_restarts(
+    reconcile_session: AsyncSession, facilitator: User, participant: User,
+):
+    """Every replica reconciles at every boot, so without the live-job check a rolling
+    deploy would stack one duplicate job set per active exercise per restart."""
+    ex = await _make_exercise(
+        reconcile_session, facilitator, participant, offset=30, active=True
+    )
+    inject = await _first_inject(reconcile_session, ex.id)
+
+    for _ in range(3):
+        await schedule_service.reconcile_release_jobs()
+
+    assert len(await _release_jobs(reconcile_session, inject.id)) == 1
 
 
 # ── Durability ────────────────────────────────────────────────────────────────

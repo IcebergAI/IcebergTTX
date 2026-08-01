@@ -6,6 +6,7 @@ discovered in production: that a job is written inside the caller's transaction,
 that the migration's way of executing a multi-statement script actually works.
 """
 
+import asyncio
 import json
 from datetime import timedelta
 
@@ -159,3 +160,52 @@ async def test_a_multi_statement_script_runs_on_the_migration_path():
         count = await raw.fetchval("SELECT count(*) FROM multi_stmt_probe")
 
     assert count == 2
+
+
+async def test_the_worker_picks_up_and_runs_a_committed_job():
+    """The whole delivery loop against a real database: open the pool, run the worker,
+    commit a job, and watch it execute.
+
+    Everything else in the suite invokes task functions directly, so without this a
+    wiring mistake — the connector DSN, the NOTIFY wake-up, a task procrastinate cannot
+    deserialise — would pass every test and hang silently on the first real deploy.
+
+    The job targets ids that do not exist, so the task itself is a guarded no-op; what
+    is under test is that the worker ran it at all.
+    """
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    await task_queue.start_worker()
+    try:
+        async with AsyncSession(engine) as session:
+            await task_queue.defer_job(
+                session,
+                task_queue.TASK_RELEASE_INJECT,
+                args={"exercise_id": 0, "inject_id": 0},
+            )
+            await session.commit()
+
+        status = None
+        for _ in range(100):
+            async with engine.connect() as connection:
+                status = (
+                    await connection.execute(
+                        text(
+                            "SELECT status FROM procrastinate_jobs "
+                            "WHERE task_name = :task AND args->>'inject_id' = '0' "
+                            "ORDER BY id DESC LIMIT 1"
+                        ),
+                        {"task": task_queue.TASK_RELEASE_INJECT},
+                    )
+                ).scalar_one_or_none()
+            if status == "succeeded":
+                break
+            await asyncio.sleep(0.1)
+
+        assert status == "succeeded"
+    finally:
+        await task_queue.stop_worker()
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM procrastinate_jobs WHERE args->>'inject_id' = '0'")
+            )

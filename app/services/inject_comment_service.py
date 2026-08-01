@@ -28,8 +28,9 @@ async def comment_group_for_user(session: AsyncSession, inject: Inject, user: Us
 async def comment_payload(session: AsyncSession, comment: InjectComment) -> dict:
     """Canonical comment serialization, shared by the HTTP reply and the WS frame.
 
-    Lives here rather than in the router because the event that carries it is recorded
-    *inside* the transaction, so the payload has to be built before the commit.
+    Called twice per comment on purpose: once pre-commit for the HTTP reply, and once
+    per replica when the projector rebuilds the frame from the committed row (#213).
+    Both reads resolve the same fields, so the two representations cannot drift.
     """
     author = await session.get(User, comment.user_id)
     return _comment_payload(

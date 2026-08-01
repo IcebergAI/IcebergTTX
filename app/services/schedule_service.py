@@ -31,9 +31,11 @@ is what rules that out.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
 
+from sqlalchemy import text
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -114,6 +116,38 @@ async def active_seconds_since(
 # ── Enqueueing ────────────────────────────────────────────────────────────────
 
 
+async def _live_job_args(session: AsyncSession, task_name: str) -> list[dict]:
+    """The args of every job for ``task_name`` still waiting to run.
+
+    Lets the bulk re-enqueue paths (resume, startup reconciliation) skip work that is
+    already queued, so restarts and pause cycles do not stack a duplicate job set each
+    time. ``todo`` only, deliberately: a ``doing`` job may have read its state *before*
+    the change that prompted this re-enqueue (a resume racing a job that fired during
+    the pause), so counting it as live could skip the only enqueue that was going to
+    happen. A duplicate against a mid-flight job is a cheap no-op; a skipped enqueue
+    against a job about to stand down is a stranded schedule.
+
+    Skipping a stale ``todo`` job is safe because a stale deadline is only ever *early*
+    — pauses extend deadlines, never shorten them — and a job that fires early re-defers
+    itself with the recomputed remaining time.
+    """
+    connection = await session.connection()
+    rows = (
+        (
+            await connection.execute(
+                text(
+                    "SELECT args FROM procrastinate_jobs "
+                    "WHERE task_name = :task AND status = 'todo'"
+                ),
+                {"task": task_name},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [json.loads(args) if isinstance(args, str) else args for args in rows]
+
+
 async def defer_inject_release(
     session: AsyncSession, exercise: Exercise, inject: Inject, *, delay: float | None = None
 ) -> None:
@@ -170,13 +204,17 @@ async def arm_inject_schedule(
 async def schedule_exercise_injects(session: AsyncSession, exercise: Exercise) -> None:
     """Enqueue every pending scheduled inject and undelivered comm — start and resume.
 
-    Resume is why this re-enqueues unconditionally: jobs written before the pause are
-    still in the table, pointing at deadlines computed against the old clock. Rather
-    than hunt them down, this adds correct ones and lets the stale ones fire and
-    re-defer or no-op.
+    An inject that already has a live job is skipped, so pause cycles and restarts do
+    not stack duplicates. The live job's deadline may predate a pause, but stale is
+    only ever *early*, and an early-firing job re-defers itself with the recomputed
+    remaining time (see ``_live_job_args``).
     """
     if exercise.state != ExerciseState.active or exercise.started_at is None or exercise.id is None:
         return
+    live = {
+        (args.get("exercise_id"), args.get("inject_id"))
+        for args in await _live_job_args(session, task_queue.TASK_RELEASE_INJECT)
+    }
     injects = (
         await session.exec(
             select(Inject).where(
@@ -187,6 +225,8 @@ async def schedule_exercise_injects(session: AsyncSession, exercise: Exercise) -
         )
     ).all()
     for inject in injects:
+        if (exercise.id, inject.id) in live:
+            continue
         await defer_inject_release(session, exercise, inject)
     await schedule_exercise_communications(session, exercise)
 
@@ -229,6 +269,12 @@ async def schedule_exercise_communications(session: AsyncSession, exercise: Exer
         ).all()
         if key is not None
     }
+    # Keyed on the logical trigger, not the physical inject: a multi-team node seeds one
+    # inject per team, and any of them satisfies the same delivery.
+    live = {
+        (args.get("exercise_id"), args.get("node_id"), args.get("trigger_index"))
+        for args in await _live_job_args(session, task_queue.TASK_DELIVER_COMM)
+    }
     transitions = list(
         (
             await session.exec(
@@ -250,6 +296,8 @@ async def schedule_exercise_communications(session: AsyncSession, exercise: Exer
             if trigger_key in considered:
                 continue
             considered.add(trigger_key)
+            if (exercise.id, node.id, index) in live:
+                continue
             await defer_triggered_comm(
                 session,
                 exercise_id=exercise.id,
