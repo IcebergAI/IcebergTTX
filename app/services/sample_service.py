@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise, ExerciseState
@@ -9,9 +9,11 @@ from app.models.inject import Inject
 from app.models.scenario import Scenario
 from app.models.user import UserRole
 from app.schemas.scenario_json import ScenarioDefinition
+from app.services.access_control import inject_matches_group
 from app.services.exercise_service import create_exercise, enrol_member, transition_state
 from app.services.inject_service import release_inject
 from app.services.scenario_service import create_scenario
+from app.services.schedule_service import schedule_exercise_injects
 
 SAMPLES_DIR = Path(__file__).resolve().parents[1] / "samples"
 
@@ -96,13 +98,24 @@ async def create_sample_demo_exercise(
     session.add(member)
     await session.commit()
     exercise = await transition_state(session, exercise, ExerciseState.active)
-    start_inject = (
+    # Arm any release_at_minutes timers the sample defines (#269): activating via
+    # transition_state alone left them dormant until a restart or pause/resume.
+    await schedule_exercise_injects(session, exercise)
+    # A multi-team start node seeds one physical inject per team; unordered .first()
+    # could pick another team's copy, whose audience (only the demo member's group
+    # is enrolled) is empty — and release_inject then 409s the whole demo load
+    # (#269). Pick deterministically, and only an inject the demo member can see.
+    start_injects = (
         await session.exec(
             select(Inject)
             .where(Inject.exercise_id == exercise.id)
             .where(Inject.scenario_node_id == exercise.current_node_id)
+            .order_by(col(Inject.sequence_order), col(Inject.id))
         )
-    ).first()
+    ).all()
+    start_inject = next(
+        (i for i in start_injects if inject_matches_group(i, demo_group)), None
+    )
     if start_inject:
         await release_inject(session, start_inject, released_by=created_by)
     return scenario, exercise
