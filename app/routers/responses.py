@@ -23,7 +23,7 @@ from app.services.inject_service import get_inject_or_404
 from app.services.llm_service import assessment_payload, queue_llm_pipeline
 from app.services.progression_service import progression_snapshot
 from app.services.response_service import (
-    response_next_inject_suggestions,
+    response_next_inject_suggestions_bulk,
     response_payload,
     response_validation_error,
     submit_response,
@@ -48,10 +48,11 @@ async def list_responses(
     if current_user.role == UserRole.participant:
         q = q.where(Response.user_id == current_user.id)
         return [response_payload(r) for r in (await session.exec(q)).all()]
-    return [
-        response_payload(r, await response_next_inject_suggestions(session, r))
-        for r in (await session.exec(q)).all()
-    ]
+    responses = (await session.exec(q)).all()
+    # Resolved in bulk: per-row suggestion lookups made this endpoint cost queries
+    # proportional to the exercise's response count (#263).
+    suggestions = await response_next_inject_suggestions_bulk(session, exercise_id, responses)
+    return [response_payload(r, suggestions.get(r.id or 0, [])) for r in responses]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=ResponsePublic)

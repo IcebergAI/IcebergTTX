@@ -279,3 +279,109 @@ async def test_ws_broadcasts_inject_comment_to_facilitator(
     assert message["type"] == "inject_comment_created"
     assert message["payload"]["inject_id"] == inject["id"]
     assert message["payload"]["content"] == "Live comment."
+
+
+# ── Query-count ceilings (#263) ───────────────────────────────────────────────
+
+
+async def _seed_comments(
+    session: AsyncSession,
+    exercise_id: int,
+    inject_id: int,
+    user_id: int,
+    count: int,
+    prefix: str,
+) -> None:
+    from app.models.inject_comment import InjectComment
+
+    for i in range(count):
+        session.add(
+            InjectComment(
+                exercise_id=exercise_id,
+                inject_id=inject_id,
+                user_id=user_id,
+                group_id="it_ops",
+                content=f"{prefix} {i}",
+            )
+        )
+    await session.commit()
+
+
+async def test_listing_comments_does_not_scale_queries_with_thread_size(
+    client: AsyncClient,
+    session: AsyncSession,
+    participant: User,
+    facilitator_token: str,
+    active_exercise: Exercise,
+    count_statements,
+):
+    """Each comment cost an inject fetch, a membership lookup, and an author fetch (#263)."""
+    assert participant.id is not None and active_exercise.id is not None
+    headers = {"Authorization": f"Bearer {facilitator_token}"}
+    url = f"/api/exercises/{active_exercise.id}/inject-comments"
+    inject = await _release_node(client, facilitator_token, active_exercise.id)
+
+    await _seed_comments(
+        session, active_exercise.id, inject["id"], participant.id, 3, "small"
+    )
+    with count_statements() as small:
+        r = await client.get(url, headers=headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 3
+
+    await _seed_comments(
+        session, active_exercise.id, inject["id"], participant.id, 15, "large"
+    )
+    with count_statements() as large:
+        r = await client.get(url, headers=headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 18
+
+    assert len(large) == len(small)
+
+
+async def test_comment_list_still_scopes_by_team_after_batching(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator_token: str,
+    participant_token: str,
+    participant: User,
+    active_exercise: Exercise,
+):
+    """Batching must not widen visibility: another team's thread stays hidden."""
+    from app.models.inject_comment import InjectComment
+
+    assert participant.id is not None and active_exercise.id is not None
+    inject = await _release_node(client, facilitator_token, active_exercise.id)
+    assert (
+        await _comment(
+            client, participant_token, active_exercise.id, inject["id"], "ours"
+        )
+    ).status_code == 201
+    session.add(
+        InjectComment(
+            exercise_id=active_exercise.id,
+            inject_id=inject["id"],
+            user_id=participant.id,
+            group_id="legal",
+            content="theirs",
+        )
+    )
+    await session.commit()
+
+    mine = (
+        await client.get(
+            f"/api/exercises/{active_exercise.id}/inject-comments",
+            headers={"Authorization": f"Bearer {participant_token}"},
+        )
+    ).json()
+    assert [c["content"] for c in mine] == ["ours"]
+    assert all(c["author_name"] == participant.display_name for c in mine)
+
+    all_of_them = (
+        await client.get(
+            f"/api/exercises/{active_exercise.id}/inject-comments",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+    ).json()
+    assert {c["content"] for c in all_of_them} == {"ours", "theirs"}

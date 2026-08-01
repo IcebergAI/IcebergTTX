@@ -714,3 +714,137 @@ async def test_unlinked_inject_is_releasable_only_before_the_first_response(
     )
     assert r.status_code == 409
     assert r.json()["detail"] == "Inject is not the current branch for its group"
+
+
+# ── Query-count ceilings (#263) ───────────────────────────────────────────────
+
+
+async def _seed_responses(
+    session: AsyncSession, exercise_id: int, user_id: int, count: int, prefix: str
+) -> None:
+    """Add responses on their own released injects (the uniqueness key needs both)."""
+    from app.models.inject import Inject, InjectState
+    from app.models.response import Response
+
+    for i in range(count):
+        inject = Inject(
+            exercise_id=exercise_id,
+            scenario_node_id="inject_01",
+            title=f"{prefix} {i}",
+            content="Body",
+            target_teams=["it_ops"],
+            sequence_order=100 + i,
+            state=InjectState.released,
+        )
+        session.add(inject)
+        await session.commit()
+        await session.refresh(inject)
+        assert inject.id is not None
+        session.add(
+            Response(
+                exercise_id=exercise_id,
+                inject_id=inject.id,
+                user_id=user_id,
+                group_id="it_ops",
+                content="Handled",
+                selected_option="opt_a",
+            )
+        )
+    await session.commit()
+
+
+async def test_listing_responses_does_not_scale_queries_with_response_count(
+    client: AsyncClient,
+    session: AsyncSession,
+    participant: User,
+    facilitator_token: str,
+    active_exercise: Exercise,
+    count_statements,
+):
+    """The facilitator list resolved branch suggestions per row — a full pending-inject
+    scan and an inject fetch each time (#263). The cost must not track the row count."""
+    assert participant.id is not None and active_exercise.id is not None
+    headers = {"Authorization": f"Bearer {facilitator_token}"}
+    url = f"/api/exercises/{active_exercise.id}/responses"
+
+    await _seed_responses(session, active_exercise.id, participant.id, 3, "small")
+    with count_statements() as small:
+        r = await client.get(url, headers=headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 3
+
+    await _seed_responses(session, active_exercise.id, participant.id, 15, "large")
+    with count_statements() as large:
+        r = await client.get(url, headers=headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 18
+
+    assert len(large) == len(small)
+
+
+async def test_bulk_suggestions_match_per_row_resolution(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator: User,
+    facilitator_token: str,
+    participant_token: str,
+    participant: User,
+):
+    """The batched path must produce exactly what resolving row-by-row produced.
+
+    Uses a single-team scenario so the branch actually resolves to a pending inject —
+    an all-empty comparison would pass no matter what the batching did.
+    """
+    from app.models.exercise import ExerciseState
+    from app.models.response import Response
+    from app.services.exercise_service import create_exercise, enrol_member, transition_state
+    from app.services.response_service import (
+        compute_next_inject_ids,
+        pending_next_injects,
+        response_next_inject_suggestions_bulk,
+    )
+    from app.services.scenario_service import create_scenario
+
+    scenario = await create_scenario(
+        session,
+        definition=ScenarioDefinition(
+            title="Single Team Branch",
+            participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+            injects=[
+                InjectNode(
+                    id="a",
+                    title="Start",
+                    content="Choose.",
+                    target_teams=["it_ops"],
+                    options=[InjectOption(id="go", label="Go", next_inject_id="b")],
+                ),
+                InjectNode(id="b", title="Next", content="Follow-up.", target_teams=["it_ops"]),
+            ],
+            start_inject_id="a",
+        ),
+        created_by=facilitator.id,
+    )
+    exercise = await create_exercise(
+        session, scenario_id=scenario.id, title="Bulk Branch", created_by=facilitator.id
+    )
+    await enrol_member(session, exercise=exercise, user_id=participant.id)
+    await transition_state(session, exercise, ExerciseState.active)
+    assert exercise.id is not None
+
+    first = await _first_released_inject_id(client, facilitator_token, exercise.id)
+    assert (
+        await _submit(client, participant_token, exercise.id, first, selected_option="go")
+    ).status_code == 201
+
+    responses = (
+        await session.exec(select(Response).where(Response.exercise_id == exercise.id))
+    ).all()
+    assert responses
+    bulk = await response_next_inject_suggestions_bulk(session, exercise.id, responses)
+    assert any(bulk[r.id] for r in responses), "expected a resolvable branch to compare"
+    for r in responses:
+        next_ids = await compute_next_inject_ids(
+            session, r.exercise_id, r.inject_id, r.selected_option
+        )
+        expected = await pending_next_injects(session, r.exercise_id, next_ids, r.group_id)
+        assert bulk[r.id] == expected

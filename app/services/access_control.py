@@ -142,6 +142,21 @@ async def exercise_group_for_user(
     return None
 
 
+def inject_visible_to(inject: Inject, user: User, group_id: str | None) -> bool:
+    """Visibility decision against an already-resolved exercise group.
+
+    Pure, so a list endpoint can resolve the caller's membership once and filter N
+    injects without N membership queries (#263).
+    """
+    if user.role == UserRole.facilitator:
+        return True
+    if inject.state not in (InjectState.released, InjectState.resolved):
+        return False
+    if user.role == UserRole.observer:
+        return True
+    return inject_matches_group(inject, group_id, user_team=user.team)
+
+
 async def is_inject_visible_to_user(session: AsyncSession, inject: Inject, user: User) -> bool:
     if user.role == UserRole.facilitator:
         return True
@@ -150,7 +165,7 @@ async def is_inject_visible_to_user(session: AsyncSession, inject: Inject, user:
     if user.role == UserRole.observer:
         return True
     group_id = await exercise_group_for_user(session, inject.exercise_id, user)
-    return inject_matches_group(inject, group_id, user_team=user.team)
+    return inject_visible_to(inject, user, group_id)
 
 
 async def require_inject_visible(session: AsyncSession, inject: Inject, user: User) -> None:
