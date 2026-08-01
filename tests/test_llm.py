@@ -5,15 +5,17 @@ is constructed and no real network requests are made. Per-provider adapter/confi
 behaviour is covered in test_llm_providers.py.
 """
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import Exercise
 from app.models.user import User
+from app.services import task_queue
 
 
 def test_provider_json_boundary_rejects_non_objects_and_invalid_fields():
@@ -309,7 +311,8 @@ async def test_trigger_assess_endpoint(
         )
     assert r.status_code == 202
     assert r.json() == {"detail": "Assessment queued"}
-    queue.assert_called_once_with(resp["id"], inject_id, active_exercise.id)
+    # ANY is the session: the enqueue rides the caller's transaction now (#213).
+    queue.assert_called_once_with(ANY, resp["id"], inject_id, active_exercise.id)
 
 
 async def test_trigger_assess_rejects_exercise_ai_opt_out(
@@ -622,21 +625,44 @@ async def test_other_facilitator_denied_assessment_and_suggestion_routes(
     assert suggested.status == SuggestedInjectStatus.pending_review
 
 
-def test_queue_llm_pipeline_deduplicates_inflight_response():
+async def test_queue_llm_pipeline_deduplicates_across_replicas(session: AsyncSession):
+    """One assessment per response, arbitrated by the database rather than by one
+    process's memory (#213).
+
+    The old in-process set could not see a manual re-trigger served by another replica,
+    so each would have bought its own provider call. A queueing lock is a partial unique
+    index over jobs still to do, so the second enqueue simply loses.
+    """
     from app.services import llm_service
 
-    llm_service._assessment_inflight.clear()
-    task = MagicMock()
-    with patch("app.services.llm_service.spawn", return_value=task) as spawn:
-        assert llm_service.queue_llm_pipeline(101, 202, 303) is True
-        assert llm_service.queue_llm_pipeline(101, 202, 303) is False
+    assert await llm_service.queue_llm_pipeline(session, 101, 202, 303) is True
+    assert await llm_service.queue_llm_pipeline(session, 101, 202, 303) is False
 
-    spawn.assert_called_once()
-    coroutine = spawn.call_args.args[0]
-    coroutine.close()
-    done_callback = task.add_done_callback.call_args.args[0]
-    done_callback(task)
-    assert 101 not in llm_service._assessment_inflight
+    connection = await session.connection()
+    count = (
+        await connection.execute(
+            text(
+                "SELECT count(*) FROM procrastinate_jobs "
+                "WHERE task_name = :task AND queueing_lock = 'assess:101'"
+            ),
+            {"task": task_queue.TASK_ASSESS_RESPONSE},
+        )
+    ).scalar_one()
+    assert count == 1
+
+
+async def test_a_losing_enqueue_does_not_poison_the_callers_transaction(
+    session: AsyncSession,
+):
+    """The savepoint in defer_job_once earning its keep: a raw unique violation would
+    abort everything the request had done before it."""
+    from app.services import llm_service
+
+    await llm_service.queue_llm_pipeline(session, 111, 222, 333)
+    await llm_service.queue_llm_pipeline(session, 111, 222, 333)
+
+    # The session is still usable, which it would not be after an unhandled IntegrityError.
+    assert (await session.exec(select(Exercise).limit(1))) is not None
 
 
 @pytest.mark.asyncio

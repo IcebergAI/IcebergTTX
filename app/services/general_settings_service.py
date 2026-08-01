@@ -8,6 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
 from app.models.general_settings import GeneralSettings
+from app.services import pg_bus
 
 _SINGLETON_ID = 1
 EDITABLE_FIELDS = (
@@ -89,6 +90,7 @@ async def update_settings(session: AsyncSession, changes: dict[str, Any]) -> Gen
             setattr(row, key, changes[key])
     row.updated_at = datetime.now(UTC)
     session.add(row)
+    await pg_bus.publish_config_changed(session, "general")
     await session.commit()
     await session.refresh(row)
     set_config(_to_config(row))

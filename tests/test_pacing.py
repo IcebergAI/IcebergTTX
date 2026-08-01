@@ -1,11 +1,22 @@
-"""Pacing: exercise clock and durable exercise schedules (#116, #194, #218)."""
+"""Pacing: exercise clock and durable exercise schedules (#116, #194, #218, #213).
 
-import asyncio
+Schedules are rows in procrastinate's job table now, not tasks in a dict, so these
+assert on jobs. That is not merely a change of spelling: a job enqueued by the test's
+own transaction is *visible to that transaction*, which is what lets the flagship tests
+below assert the property the whole design turns on — the job exists if and only if the
+work that warranted it committed.
+
+The worker never runs here (no lifespan, no queue worker), so tasks are invoked
+directly, exactly as the previous version invoked ``_release_when_due``.
+"""
+
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
 from httpx_ws import aconnect_ws
+from sqlalchemy import text
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -14,16 +25,71 @@ from app.models.exercise import Exercise, ExerciseState, ExerciseStateTransition
 from app.models.inject import Inject, InjectState
 from app.models.user import User
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition, TriggerComm
-from app.services import background, progression_service, schedule_service
+from app.services import schedule_service, task_queue
 from app.services.exercise_service import (
     create_exercise,
     enrol_member,
     transition_state,
 )
-from app.services.response_service import submit_response
 from app.services.scenario_service import create_scenario
 
 AUTH = lambda t: {"Authorization": f"Bearer {t}"}  # noqa: E731
+
+
+# ── Reading the queue ─────────────────────────────────────────────────────────
+
+
+async def _jobs(session: AsyncSession, task_name: str | None = None) -> list[dict]:
+    """Job rows this transaction can see."""
+    connection = await session.connection()
+    sql = "SELECT id, task_name, args, scheduled_at, status FROM procrastinate_jobs"
+    params: dict = {}
+    if task_name is not None:
+        sql += " WHERE task_name = :task_name"
+        params["task_name"] = task_name
+    rows = (await connection.execute(text(sql + " ORDER BY id"), params)).mappings().all()
+    return [
+        {**row, "args": json.loads(row["args"]) if isinstance(row["args"], str) else row["args"]}
+        for row in rows
+    ]
+
+
+async def _release_jobs(session: AsyncSession, inject_id: int | None = None) -> list[dict]:
+    jobs = await _jobs(session, task_queue.TASK_RELEASE_INJECT)
+    if inject_id is None:
+        return jobs
+    return [job for job in jobs if job["args"].get("inject_id") == inject_id]
+
+
+async def _comm_jobs(session: AsyncSession, node_id: str | None = None) -> list[dict]:
+    jobs = await _jobs(session, task_queue.TASK_DELIVER_COMM)
+    if node_id is None:
+        return jobs
+    return [job for job in jobs if job["args"].get("node_id") == node_id]
+
+
+class _CtxSession:
+    """Async-context wrapper so a task reuses the test's transactional session
+    (an independent AsyncSession(engine) would not see the test's uncommitted rows)."""
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.fixture
+def task_session(monkeypatch, session):
+    """Run queue tasks against the test's session."""
+    monkeypatch.setattr(task_queue, "AsyncSession", lambda *a, **k: _CtxSession(session))
+    return session
+
+
+# ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
 async def _scheduled_scenario(session: AsyncSession, facilitator: User, *, offset: int = 30):
@@ -136,100 +202,9 @@ async def test_state_change_broadcast_over_ws(
     assert msg["payload"]["paused_at"] is not None
 
 
-# ── Scheduler registry: arm / defer / cancel / re-arm ─────────────────────────
-
-
-async def test_start_arms_schedule(
-    client: AsyncClient, facilitator_token: str, session: AsyncSession,
-    facilitator: User, participant: User,
-):
-    ex = await _make_exercise(session, facilitator, participant, offset=30)
-    inject = await _first_inject(session, ex.id)
-    await client.post(f"/api/exercises/{ex.id}/start", headers=AUTH(facilitator_token))
-    assert ex.id in schedule_service._scheduled
-    assert inject.id in schedule_service._scheduled[ex.id]
-
-
-async def test_pause_defers_and_resume_rearms(
-    client: AsyncClient, facilitator_token: str, session: AsyncSession,
-    facilitator: User, participant: User,
-):
-    ex = await _make_exercise(session, facilitator, participant, offset=30)
-    inject = await _first_inject(session, ex.id)
-    await client.post(f"/api/exercises/{ex.id}/start", headers=AUTH(facilitator_token))
-    await client.post(f"/api/exercises/{ex.id}/pause", headers=AUTH(facilitator_token))
-    assert ex.id not in schedule_service._scheduled  # deferred
-    await client.post(f"/api/exercises/{ex.id}/resume", headers=AUTH(facilitator_token))
-    assert inject.id in schedule_service._scheduled.get(ex.id, {})  # re-armed
-
-
-async def test_triggered_comms_rehydrate_and_follow_pause_resume(
-    client: AsyncClient,
-    facilitator_token: str,
-    session: AsyncSession,
-    active_exercise: Exercise,
-    sample_scenario,
-):
-    """Pending trigger timers derive from durable state after restart or resume (#194)."""
-    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
-    definition.injects[0].triggers_communications = [
-        TriggerComm(
-            external_entity="NCSC",
-            direction="inbound",
-            subject="Delayed advisory",
-            body="Call the incident hotline.",
-            delay_after_release_seconds=300,
-        )
-    ]
-    sample_scenario.definition = definition.model_dump_json()
-    inject = await _first_inject(session, active_exercise.id)
-    inject.state = InjectState.released
-    inject.released_at = datetime.now(UTC) - timedelta(seconds=30)
-    session.add(sample_scenario)
-    session.add(inject)
-    await session.commit()
-
-    # Startup rehydration delegates to this persisted-state reconstruction.
-    await schedule_service.schedule_exercise_injects(session, active_exercise)
-    assert "inject_01:0" in schedule_service._scheduled_comms.get(active_exercise.id, {})
-
-    await client.post(
-        f"/api/exercises/{active_exercise.id}/pause", headers=AUTH(facilitator_token)
-    )
-    assert active_exercise.id not in schedule_service._scheduled_comms
-    await client.post(
-        f"/api/exercises/{active_exercise.id}/resume", headers=AUTH(facilitator_token)
-    )
-    assert "inject_01:0" in schedule_service._scheduled_comms.get(active_exercise.id, {})
-
-    # A persisted delivery key wins over reconstruction, including after a restart.
-    schedule_service.cancel_exercise_schedules(active_exercise.id)
-    session.add(
-        Communication(
-            exercise_id=active_exercise.id,
-            direction=CommDirection.inbound,
-            external_entity="NCSC",
-            subject="Delayed advisory",
-            body="Call the incident hotline.",
-            triggered_by_inject_id=inject.id,
-            trigger_key="inject_01:0",
-        )
-    )
-    await session.commit()
-    await session.refresh(active_exercise)
-    await schedule_service.schedule_exercise_injects(session, active_exercise)
-    assert active_exercise.id not in schedule_service._scheduled_comms
-
-
 def test_trigger_delay_excludes_multiple_persisted_pause_spans(monkeypatch):
     now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
-
-    class FrozenDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return now
-
-    monkeypatch.setattr(schedule_service, "datetime", FrozenDateTime)
+    monkeypatch.setattr(task_queue, "now", lambda: now)
     exercise = Exercise(
         id=7,
         scenario_id=3,
@@ -270,36 +245,102 @@ def test_trigger_delay_excludes_multiple_persisted_pause_spans(monkeypatch):
     assert elapsed == 210
 
 
-async def test_complete_cancels_schedules(
-    client: AsyncClient, facilitator_token: str, session: AsyncSession,
-    facilitator: User, participant: User,
-):
-    ex = await _make_exercise(session, facilitator, participant, offset=30)
-    await client.post(f"/api/exercises/{ex.id}/start", headers=AUTH(facilitator_token))
-    await client.post(f"/api/exercises/{ex.id}/complete", headers=AUTH(facilitator_token))
-    assert ex.id not in schedule_service._scheduled
+# ── Enqueueing ────────────────────────────────────────────────────────────────
 
 
-async def test_release_early_cancels_schedule(
+async def test_start_enqueues_the_release(
     client: AsyncClient, facilitator_token: str, session: AsyncSession,
     facilitator: User, participant: User,
 ):
     ex = await _make_exercise(session, facilitator, participant, offset=30)
     inject = await _first_inject(session, ex.id)
+
+    await client.post(f"/api/exercises/{ex.id}/start", headers=AUTH(facilitator_token))
+
+    jobs = await _release_jobs(session, inject.id)
+    assert len(jobs) == 1
+    assert jobs[0]["args"] == {"exercise_id": ex.id, "inject_id": inject.id}
+    # Thirty minutes out, give or take the second this test took to run.
+    assert jobs[0]["scheduled_at"] > task_queue.now() + timedelta(minutes=29)
+
+
+async def test_the_release_job_survives_a_pause_without_duplicating(
+    client: AsyncClient, facilitator_token: str, session: AsyncSession,
+    facilitator: User, participant: User,
+):
+    """Pausing cancels nothing, and resuming stacks nothing.
+
+    The job written at start is still live across the pause, so resume leaves it alone
+    rather than adding a second one per cycle. Its deadline is now early — a pause only
+    ever extends deadlines — and an early-firing job re-defers itself with the
+    recomputed remaining time, so correctness never depended on the re-enqueue."""
+    ex = await _make_exercise(session, facilitator, participant, offset=30)
+    inject = await _first_inject(session, ex.id)
+    await client.post(f"/api/exercises/{ex.id}/start", headers=AUTH(facilitator_token))
+
+    await client.post(f"/api/exercises/{ex.id}/pause", headers=AUTH(facilitator_token))
+    assert len(await _release_jobs(session, inject.id)) == 1
+
+    await client.post(f"/api/exercises/{ex.id}/resume", headers=AUTH(facilitator_token))
+    assert len(await _release_jobs(session, inject.id)) == 1
+
+
+async def test_a_paused_exercise_releases_nothing(
+    task_session: AsyncSession, facilitator: User, participant: User,
+):
+    ex = await _make_exercise(task_session, facilitator, participant, offset=5, active=True)
+    ex = await transition_state(task_session, ex, ExerciseState.paused)
+    inject = await _first_inject(task_session, ex.id)
+
+    await task_queue.release_scheduled_inject(exercise_id=ex.id, inject_id=inject.id)
+
+    assert inject.state == InjectState.pending
+
+
+async def test_a_job_that_fires_early_re_defers_itself(
+    task_session: AsyncSession, facilitator: User, participant: User, monkeypatch,
+):
+    """A pause moves the deadline out from under a job already in the table.
+
+    Rather than sleep — the model this replaces — the task puts itself back with the
+    remaining time and lets go of its worker.
+    """
+    ex = await _make_exercise(task_session, facilitator, participant, offset=30, active=True)
+    inject = await _first_inject(task_session, ex.id)
+    before = len(await _release_jobs(task_session, inject.id))
+
+    await task_queue.release_scheduled_inject(exercise_id=ex.id, inject_id=inject.id)
+
+    assert inject.state == InjectState.pending
+    assert len(await _release_jobs(task_session, inject.id)) == before + 1
+
+
+async def test_releasing_early_leaves_a_harmless_job(
+    client: AsyncClient, facilitator_token: str, task_session: AsyncSession,
+    facilitator: User, participant: User,
+):
+    """The stale job is not chased down — it fires, finds the inject already released,
+    and stops. The CAS in release_inject is what makes that safe."""
+    ex = await _make_exercise(task_session, facilitator, participant, offset=30)
+    inject = await _first_inject(task_session, ex.id)
     await client.post(f"/api/exercises/{ex.id}/start", headers=AUTH(facilitator_token))
     r = await client.post(
         f"/api/exercises/{ex.id}/injects/{inject.id}/release", headers=AUTH(facilitator_token)
     )
     assert r.status_code == 200
-    assert r.json()["state"] == "released"
-    assert inject.id not in schedule_service._scheduled.get(ex.id, {})
+
+    await task_queue.release_scheduled_inject(exercise_id=ex.id, inject_id=inject.id)
+
+    assert inject.state == InjectState.released
+    assert inject.released_by == facilitator.id  # not overwritten by a second release
 
 
 # ── Runtime schedule editing (PATCH) ──────────────────────────────────────────
 
 
-async def test_schedule_patch_sets_and_clears(
-    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
+async def test_schedule_patch_enqueues_against_the_new_offset(
+    client: AsyncClient, facilitator_token: str, session: AsyncSession,
+    active_exercise: Exercise,
 ):
     ir = await client.get(
         f"/api/exercises/{active_exercise.id}/injects", headers=AUTH(facilitator_token)
@@ -313,7 +354,9 @@ async def test_schedule_patch_sets_and_clears(
     )
     assert r.status_code == 200
     assert r.json()["release_offset_minutes"] == 12
-    assert inject_id in schedule_service._scheduled.get(active_exercise.id, {})
+    jobs = await _release_jobs(session, inject_id)
+    assert len(jobs) == 1
+    assert jobs[0]["scheduled_at"] < task_queue.now() + timedelta(minutes=13)
 
     r = await client.patch(
         f"/api/exercises/{active_exercise.id}/injects/{inject_id}/schedule",
@@ -321,7 +364,9 @@ async def test_schedule_patch_sets_and_clears(
         headers=AUTH(facilitator_token),
     )
     assert r.json()["release_offset_minutes"] is None
-    assert inject_id not in schedule_service._scheduled.get(active_exercise.id, {})
+    # Clearing the offset enqueues nothing new; the existing job will find a null offset
+    # when it fires and stand down.
+    assert len(await _release_jobs(session, inject_id)) == 1
 
 
 async def test_schedule_patch_rejects_negative(
@@ -358,73 +403,33 @@ async def test_schedule_patch_rejects_released_inject(
     assert r.status_code == 409
 
 
-# ── Worker fire path ──────────────────────────────────────────────────────────
-
-
-class _CtxSession:
-    """Async-context wrapper so the worker reuses the test's transactional session
-    (an independent AsyncSession(engine) would not see the test's uncommitted rows)."""
-
-    def __init__(self, session: AsyncSession):
-        self._session = session
-
-    async def __aenter__(self):
-        return self._session
-
-    async def __aexit__(self, *exc):
-        return False
+# ── The fire path ─────────────────────────────────────────────────────────────
 
 
 async def test_scheduled_release_fires_and_broadcasts(
     client: AsyncClient,
     facilitator_token: str,
-    session: AsyncSession,
+    task_session: AsyncSession,
     facilitator: User,
     participant: User,
-    monkeypatch,
 ):
-    ex = await _make_exercise(session, facilitator, participant, offset=5, active=True)
-    inject = await _first_inject(session, ex.id)
-
-    monkeypatch.setattr(
-        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
-    )
+    ex = await _make_exercise(task_session, facilitator, participant, offset=0, active=True)
+    inject = await _first_inject(task_session, ex.id)
 
     async with aconnect_ws(
         f"/ws/exercises/{ex.id}", client,
         headers={"origin": "http://testserver", "cookie": f"access_token={facilitator_token}"},
     ) as ws:
-        await schedule_service._release_when_due(ex.id, inject.id, 0)
+        await task_queue.release_scheduled_inject(exercise_id=ex.id, inject_id=inject.id)
         msg = await ws.receive_json()
 
     assert msg["type"] == "inject_released"
     assert msg["payload"]["id"] == inject.id
     assert msg["payload"]["state"] == "released"
     assert msg["payload"]["released_by"] is None  # system/auto release
-    session.expire_all()
-    refreshed = await session.get(Inject, inject.id)
+    task_session.expire_all()
+    refreshed = await task_session.get(Inject, inject.id)
     assert refreshed.state == InjectState.released
-
-
-async def test_worker_skips_when_paused(
-    client: AsyncClient,
-    session: AsyncSession,
-    facilitator: User,
-    participant: User,
-    monkeypatch,
-):
-    ex = await _make_exercise(session, facilitator, participant, offset=5, active=True)
-    ex = await transition_state(session, ex, ExerciseState.paused)
-    inject = await _first_inject(session, ex.id)
-
-    monkeypatch.setattr(
-        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
-    )
-    await schedule_service._release_when_due(ex.id, inject.id, 0)
-
-    # Guard held — no release while paused. The worker shares this session's identity
-    # map, so the in-memory inject is authoritative (and unchanged).
-    assert inject.state == InjectState.pending
 
 
 async def test_release_inject_refused_when_exercise_paused(
@@ -517,40 +522,42 @@ async def _inject_by_node(session: AsyncSession, exercise_id: int, node_id: str)
 
 
 async def test_due_release_is_deferred_when_the_cursor_has_not_arrived(
-    session: AsyncSession,
+    task_session: AsyncSession,
     facilitator: User,
     participant: User,
     monkeypatch,
     caplog,
 ):
-    """A timer coming due early is *deferred*, not failed.
+    """A job coming due early is *deferred*, not failed.
 
     The team has not responded their way to `escalate` yet, so it must not release. The
-    point of this test is the *manner* of the refusal: the worker checks the gate itself
+    point of this test is the *manner* of the refusal: the task checks the gate itself
     and returns, so nothing is logged as an error. Before #218 the release attempt raised
-    409 inside release_inject and the worker's `except Exception` swallowed it, which is
-    what made a routine "not yet" indistinguishable from a genuine failure.
+    409 and the worker's `except Exception` swallowed it, which is what made a routine
+    "not yet" indistinguishable from a genuine failure.
     """
-    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
-    escalate = await _inject_by_node(session, exercise.id, "escalate")
+    exercise = await _linear_scheduled_exercise(
+        task_session, facilitator, participant, offset=0
+    )
+    escalate = await _inject_by_node(task_session, exercise.id, "escalate")
+    from app.services import audit_service
+
     events: list[tuple[str, dict]] = []
     monkeypatch.setattr(
-        schedule_service.audit_service, "emit", lambda action, **kw: events.append((action, kw))
-    )
-    monkeypatch.setattr(
-        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
+        audit_service, "emit", lambda action, **kw: events.append((action, kw))
     )
 
-    with caplog.at_level("INFO", logger="app.services.schedule_service"):
-        await schedule_service._release_when_due(exercise.id, escalate.id, 0)
+    with caplog.at_level("INFO", logger="app.services.task_queue"):
+        await task_queue.release_scheduled_inject(
+            exercise_id=exercise.id, inject_id=escalate.id
+        )
 
     assert escalate.state == InjectState.pending
-    assert not [r for r in caplog.records if "Scheduled release failed" in r.message]
     assert [action for action, _ in events] == ["inject.release_deferred"]
     assert events[0][1]["reason"] == "cursor_not_reached"
 
 
-async def test_a_response_rearms_the_scheduled_inject_the_cursor_reaches(
+async def test_a_response_enqueues_the_release_the_cursor_reaches(
     client: AsyncClient,
     session: AsyncSession,
     facilitator: User,
@@ -558,12 +565,10 @@ async def test_a_response_rearms_the_scheduled_inject_the_cursor_reaches(
     participant_token: str,
     facilitator_token: str,
 ):
-    """The deferred timer comes back the moment the team's response unlocks the node.
+    """The half of #218 that turns "never" into "when they get there".
 
-    This is the half of #218 that turns "never" into "when they get there": the timer is
-    one-shot, so without a re-arm on cursor advance the deferral above would be permanent.
-    The offset is still in the future here, so the re-armed task just sleeps — asserting on
-    the registry keeps it deterministic (see the note on _CtxSession above).
+    A job that fired before the team arrived stopped for good; the response that advances
+    the cursor onto the node is what puts a new one in the table.
     """
     exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
     detect = await _inject_by_node(session, exercise.id, "detect")
@@ -573,7 +578,7 @@ async def test_a_response_rearms_the_scheduled_inject_the_cursor_reaches(
         f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
         headers=AUTH(facilitator_token),
     )
-    assert escalate.id not in schedule_service._scheduled.get(exercise.id, {})
+    assert await _release_jobs(session, escalate.id) == []
 
     assert (
         await client.post(
@@ -583,39 +588,65 @@ async def test_a_response_rearms_the_scheduled_inject_the_cursor_reaches(
         )
     ).status_code == 201
 
-    assert escalate.id in schedule_service._scheduled[exercise.id]
+    assert len(await _release_jobs(session, escalate.id)) == 1
 
 
-async def test_an_overdue_scheduled_inject_arms_at_zero_when_the_cursor_arrives(
+async def test_the_cursor_enqueue_rides_the_responses_transaction(
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+):
+    """The #218 race, made unrepresentable.
+
+    The old in-memory version had to coordinate by hand around a worker deciding to stand
+    down while a response was mid-commit. Now the enqueue is part of the response's unit
+    of work: roll that back and the job goes with it, so there is no state in which the
+    cursor advanced but nothing was scheduled.
+    """
+    from app.services.response_service import submit_response
+
+    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
+    detect = await _inject_by_node(session, exercise.id, "detect")
+    escalate = await _inject_by_node(session, exercise.id, "escalate")
+    detect.state = InjectState.released
+    detect.released_at = datetime.now(UTC)
+    session.add(detect)
+    await session.commit()
+
+    await submit_response(
+        session,
+        inject_id=detect.id,
+        exercise_id=exercise.id,
+        user_id=participant.id,
+        content="Investigating.",
+        group_id="it_ops",
+    )
+
+    assert len(await _release_jobs(session, escalate.id)) == 1
+
+
+async def test_an_overdue_scheduled_inject_is_enqueued_for_now_when_the_cursor_arrives(
     client: AsyncClient,
     session: AsyncSession,
     facilitator: User,
     participant: User,
     participant_token: str,
     facilitator_token: str,
-    monkeypatch,
 ):
     """A cursor arriving *after* the offset has passed releases the inject immediately.
 
-    The delay comes off the offset's absolute basis, so "overdue" falls out as delay 0
-    rather than needing a branch of its own. Spy _arm instead of awaiting the task: it may
-    already have run and been forgotten by the time we look.
+    The delay comes off the offset's absolute basis, so "overdue" falls out as "schedule
+    it for now" rather than needing a branch of its own.
     """
     exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
     detect = await _inject_by_node(session, exercise.id, "detect")
     escalate = await _inject_by_node(session, exercise.id, "escalate")
     # 45 minutes into a 30-minute offset: the countdown expired while the team was still
-    # working on `detect`, and its timer has long since deferred and dropped.
+    # working on `detect`.
     exercise.started_at = datetime.now(UTC) - timedelta(minutes=45)
     session.add(exercise)
     await session.flush()
 
-    armed: list[tuple[int, int, float]] = []
-    monkeypatch.setattr(
-        schedule_service,
-        "_arm",
-        lambda ex_id, inject_id, delay: armed.append((ex_id, inject_id, delay)),
-    )
     await client.post(
         f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
         headers=AUTH(facilitator_token),
@@ -626,10 +657,12 @@ async def test_an_overdue_scheduled_inject_arms_at_zero_when_the_cursor_arrives(
         headers=AUTH(participant_token),
     )
 
-    assert armed == [(exercise.id, escalate.id, 0.0)]
+    jobs = await _release_jobs(session, escalate.id)
+    assert len(jobs) == 1
+    assert jobs[0]["scheduled_at"] <= task_queue.now() + timedelta(seconds=1)
 
 
-async def test_a_response_does_not_arm_the_branch_the_team_did_not_take(
+async def test_a_response_does_not_enqueue_the_branch_the_team_did_not_take(
     client: AsyncClient,
     session: AsyncSession,
     facilitator: User,
@@ -637,7 +670,7 @@ async def test_a_response_does_not_arm_the_branch_the_team_did_not_take(
     participant_token: str,
     facilitator_token: str,
 ):
-    """Re-arming follows the cursor, so it can only ever arm the chosen branch."""
+    """Enqueueing follows the cursor, so it can only ever reach the chosen branch."""
     definition = ScenarioDefinition(
         title="Fork",
         participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
@@ -689,138 +722,23 @@ async def test_a_response_does_not_arm_the_branch_the_team_did_not_take(
         headers=AUTH(participant_token),
     )
 
-    assert containment.id in schedule_service._scheduled[exercise.id]
-    assert spread.id not in schedule_service._scheduled[exercise.id]
-
-
-async def test_rearming_does_not_replace_a_live_timer(
-    client: AsyncClient,
-    session: AsyncSession,
-    facilitator: User,
-    participant: User,
-    participant_token: str,
-    facilitator_token: str,
-):
-    """A second response must not cancel-and-replace a timer that is already armed.
-
-    arm_inject_schedule cancels before it arms, and cancel_inject_schedule only refuses to
-    cancel the *calling* task. So a blind re-arm could kill a worker mid-release — between
-    its commit and its dispatch — leaving an inject released in the database with no frame
-    and no triggered comms. The deadline cannot have moved, so the armed task must survive
-    untouched.
-    """
-    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
-    detect = await _inject_by_node(session, exercise.id, "detect")
-    escalate = await _inject_by_node(session, exercise.id, "escalate")
-
-    await client.post(
-        f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
-        headers=AUTH(facilitator_token),
-    )
-    await client.post(
-        f"/api/exercises/{exercise.id}/responses",
-        json={"inject_id": detect.id, "content": "Investigating."},
-        headers=AUTH(participant_token),
-    )
-    timer = schedule_service._scheduled[exercise.id][escalate.id]
-
-    # A second cursor advance over the same node — here, the same team replaying its way
-    # through the exercise via a fresh response on the next inject — re-runs the arming.
-    await schedule_service.arm_cursor_reached_injects(session, exercise)
-
-    assert schedule_service._scheduled[exercise.id][escalate.id] is timer
-    assert not timer.task.cancelled()
-
-
-async def test_a_response_landing_mid_deferral_still_leaves_a_timer(
-    client: AsyncClient,
-    session: AsyncSession,
-    facilitator: User,
-    participant: User,
-    participant_token: str,
-    facilitator_token: str,
-    monkeypatch,
-):
-    """Both sides must not stand down at once, or the inject is stranded after all.
-
-    The registry entry outlives the worker's decision to defer, so there is a window where
-    a response can commit, see a live-looking timer, and skip arming — while that worker's
-    gate query had already read the *pre-commit* cursor and is about to defer and vanish.
-    Neither side arms, and the inject sits pending forever: #218 again, just narrower.
-
-    Drive the interleaving precisely by blocking the worker inside the gate, advancing the
-    cursor, and running the arm handler while it is still registered.
-    """
-    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=0)
-    detect = await _inject_by_node(session, exercise.id, "detect")
-    escalate = await _inject_by_node(session, exercise.id, "escalate")
-    await client.post(
-        f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
-        headers=AUTH(facilitator_token),
-    )
-
-    in_gate = asyncio.Event()
-    resume_gate = asyncio.Event()
-    real_gate = progression_service.release_is_allowed
-
-    async def blocking_gate(session_, inject, *, scheduled=False):
-        allowed = await real_gate(session_, inject, scheduled=scheduled)
-        if inject.id == escalate.id:
-            # The answer is now fixed on the pre-response cursor — exactly the stale read.
-            in_gate.set()
-            await resume_gate.wait()
-        return allowed
-
-    monkeypatch.setattr(progression_service, "release_is_allowed", blocking_gate)
-    monkeypatch.setattr(
-        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
-    )
-
-    schedule_service._arm(exercise.id, escalate.id, 0)
-    worker = schedule_service._scheduled[exercise.id][escalate.id].task
-    await asyncio.wait_for(in_gate.wait(), timeout=5)
-
-    # The response commits and dispatches (arming the cursor-reached injects as it goes)
-    # while the worker sits blocked on its stale answer.
-    await submit_response(
-        session,
-        inject_id=detect.id,
-        exercise_id=exercise.id,
-        user_id=participant.id,
-        content="Investigating.",
-        group_id="it_ops",
-    )
-
-    # Spy the re-arm rather than letting it run: a second delay-0 worker would re-enter this
-    # test's session while it is still in use (see the _CtxSession note above).
-    rearmed: list[tuple[int, int, float]] = []
-    monkeypatch.setattr(
-        schedule_service,
-        "_arm",
-        lambda ex_id, inject_id, delay: rearmed.append((ex_id, inject_id, delay)),
-    )
-    resume_gate.set()
-    await asyncio.wait_for(worker, timeout=5)
-
-    # The worker took the news the response left it and re-armed, instead of both sides
-    # standing down. Delay 0, because the offset has long since passed.
-    assert rearmed == [(exercise.id, escalate.id, 0.0)]
+    assert len(await _release_jobs(session, containment.id)) == 1
+    assert await _release_jobs(session, spread.id) == []
 
 
 async def test_scheduled_release_of_an_unreferenced_node_survives_the_first_response(
     client: AsyncClient,
-    session: AsyncSession,
+    task_session: AsyncSession,
     facilitator: User,
     participant: User,
     participant_token: str,
     facilitator_token: str,
-    monkeypatch,
 ):
     """A timed node nothing links to fires on its clock, first response or not.
 
-    No cursor will *ever* point at an orphan, so re-arming cannot save it — the cursor lock
-    has to let a *scheduled* release through instead. It still refuses a manual one, which
-    test_responses.py::test_unlinked_inject_is_releasable_only_before_the_first_response
+    No cursor will *ever* point at an orphan, so re-enqueueing cannot save it — the cursor
+    lock has to let a *scheduled* release through instead. It still refuses a manual one,
+    which test_responses.py::test_unlinked_inject_is_releasable_only_before_the_first_response
     pins from the other side. This is the "at T+40 the press calls" shape: a parallel
     timeline that depends on no branch.
     """
@@ -839,19 +757,23 @@ async def test_scheduled_release_of_an_unreferenced_node_survives_the_first_resp
                 title="The press calls",
                 content="A journalist has the story.",
                 target_teams=["it_ops"],
-                release_at_minutes=40,
+                release_at_minutes=0,
             ),
         ],
         start_inject_id="detect",
     )
-    scenario = await create_scenario(session, definition=definition, created_by=facilitator.id)
-    exercise = await create_exercise(
-        session, scenario_id=scenario.id, title="Parallel Ex", created_by=facilitator.id
+    scenario = await create_scenario(
+        task_session, definition=definition, created_by=facilitator.id
     )
-    await enrol_member(session, exercise=exercise, user_id=participant.id, group_id="it_ops")
-    exercise = await transition_state(session, exercise, ExerciseState.active)
-    detect = await _inject_by_node(session, exercise.id, "detect")
-    press_call = await _inject_by_node(session, exercise.id, "press_call")
+    exercise = await create_exercise(
+        task_session, scenario_id=scenario.id, title="Parallel Ex", created_by=facilitator.id
+    )
+    await enrol_member(
+        task_session, exercise=exercise, user_id=participant.id, group_id="it_ops"
+    )
+    exercise = await transition_state(task_session, exercise, ExerciseState.active)
+    detect = await _inject_by_node(task_session, exercise.id, "detect")
+    press_call = await _inject_by_node(task_session, exercise.id, "press_call")
 
     # The first response anywhere is what used to shut the orphan's release window.
     await client.post(
@@ -864,146 +786,302 @@ async def test_scheduled_release_of_an_unreferenced_node_survives_the_first_resp
         headers=AUTH(participant_token),
     )
 
-    monkeypatch.setattr(
-        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
+    await task_queue.release_scheduled_inject(
+        exercise_id=exercise.id, inject_id=press_call.id
     )
-    await schedule_service._release_when_due(exercise.id, press_call.id, 0)
 
-    # The worker shares this session's identity map, so release_inject's refresh lands on
-    # the instance we already hold.
     assert press_call.state == InjectState.released
 
 
 async def test_scheduled_release_fires_once_the_team_has_reached_the_inject(
     client: AsyncClient,
-    session: AsyncSession,
+    task_session: AsyncSession,
     facilitator: User,
     participant: User,
     participant_token: str,
     facilitator_token: str,
-    monkeypatch,
 ):
     """The same schedule does fire once a response has advanced the cursor onto it."""
-    exercise = await _linear_scheduled_exercise(session, facilitator, participant, offset=30)
-    detect = await _inject_by_node(session, exercise.id, "detect")
-    escalate = await _inject_by_node(session, exercise.id, "escalate")
+    exercise = await _linear_scheduled_exercise(
+        task_session, facilitator, participant, offset=0
+    )
+    detect = await _inject_by_node(task_session, exercise.id, "detect")
+    escalate = await _inject_by_node(task_session, exercise.id, "escalate")
 
     assert (
         await client.post(
             f"/api/exercises/{exercise.id}/injects/{detect.id}/release",
-            headers={"Authorization": f"Bearer {facilitator_token}"},
+            headers=AUTH(facilitator_token),
         )
     ).status_code == 200
     assert (
         await client.post(
             f"/api/exercises/{exercise.id}/responses",
             json={"inject_id": detect.id, "content": "Investigating."},
-            headers={"Authorization": f"Bearer {participant_token}"},
+            headers=AUTH(participant_token),
         )
     ).status_code == 201
 
-    monkeypatch.setattr(
-        schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
-    )
-    await schedule_service._release_when_due(exercise.id, escalate.id, 0)
+    await task_queue.release_scheduled_inject(exercise_id=exercise.id, inject_id=escalate.id)
 
     assert escalate.state == InjectState.released
 
 
-# ── Graceful shutdown drains armed timers (#250) ───────────────────────────────
+# ── Triggered communications ──────────────────────────────────────────────────
 
 
-async def test_shutdown_cancels_a_still_sleeping_timer(
+async def test_releasing_an_inject_enqueues_its_triggered_comms_transactionally(
     session: AsyncSession,
     facilitator: User,
     participant: User,
+    sample_scenario,
+    active_exercise: Exercise,
 ):
-    """A timer still in its sleep is cancelled outright on shutdown (restart re-arms it).
+    """#211, closed structurally.
 
-    cancel_all_schedules empties the registry and returns the worker so the caller can
-    await its settling; the worker resolves as cancelled without ever touching the DB.
+    The comms used to be armed by a post-commit subscriber, so a release that committed
+    and then lost its process left them unarmed forever. Enqueued in the release's own
+    transaction, the jobs exist if and only if the release does.
     """
-    ex = await _make_exercise(session, facilitator, participant, offset=5, active=True)
-    inject = await _first_inject(session, ex.id)
+    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
+    definition.injects[0].triggers_communications = [
+        TriggerComm(
+            external_entity="NCSC",
+            direction="inbound",
+            subject="Delayed advisory",
+            body="Call the incident hotline.",
+            delay_after_release_seconds=300,
+        )
+    ]
+    sample_scenario.definition = definition.model_dump_json()
+    session.add(sample_scenario)
+    await session.commit()
+    inject = await _first_inject(session, active_exercise.id)
 
-    schedule_service._arm(ex.id, inject.id, 3600)  # long sleep — nowhere near due
-    worker = schedule_service._scheduled[ex.id][inject.id].task
-    await asyncio.sleep(0)  # let the worker reach its sleep
+    from app.services.inject_service import release_inject
 
-    pending = schedule_service.cancel_all_schedules()
+    await release_inject(session, inject, released_by=facilitator.id)
 
-    assert worker in pending
-    assert not schedule_service._scheduled  # registry emptied
-    assert not schedule_service._scheduled_comms
-    await background.drain(collect_extra=lambda: pending)
-    assert worker.cancelled()
-    assert inject.state == InjectState.pending
+    jobs = await _comm_jobs(session, "inject_01")
+    assert len(jobs) == 1
+    assert jobs[0]["args"]["trigger_index"] == 0
+    assert jobs[0]["scheduled_at"] > task_queue.now() + timedelta(seconds=290)
 
 
-async def test_shutdown_lets_a_mid_release_worker_finish(
-    client: AsyncClient,
-    facilitator_token: str,
+async def test_triggered_comms_are_reconstructed_from_durable_state(
     session: AsyncSession,
-    facilitator: User,
-    participant: User,
-    monkeypatch,
+    active_exercise: Exercise,
+    sample_scenario,
 ):
-    """A worker past its sleep is drained, not killed between its commit and dispatch.
+    """Resume and startup reconciliation both derive owed comms from rows alone (#194)."""
+    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
+    definition.injects[0].triggers_communications = [
+        TriggerComm(
+            external_entity="NCSC",
+            direction="inbound",
+            subject="Delayed advisory",
+            body="Call the incident hotline.",
+            delay_after_release_seconds=300,
+        )
+    ]
+    sample_scenario.definition = definition.model_dump_json()
+    inject = await _first_inject(session, active_exercise.id)
+    inject.state = InjectState.released
+    inject.released_at = datetime.now(UTC) - timedelta(seconds=30)
+    session.add(sample_scenario)
+    session.add(inject)
+    await session.commit()
 
-    This is the shutdown face of the released-with-no-frame window #218 closed: once a
-    scheduled worker has entered its critical section, cancel_all_schedules must leave it
-    running — no cancellation even requested — and background.drain must let it commit and
-    broadcast its ``inject_released`` frame before shutdown proceeds (#250).
-    """
-    ex = await _make_exercise(session, facilitator, participant, offset=5, active=True)
-    inject = await _first_inject(session, ex.id)
+    await schedule_service.schedule_exercise_communications(session, active_exercise)
 
+    jobs = await _comm_jobs(session, "inject_01")
+    assert len(jobs) == 1
+    # 300s delay, 30s already elapsed since the release.
+    assert jobs[0]["scheduled_at"] < task_queue.now() + timedelta(seconds=275)
+
+
+async def test_an_already_delivered_trigger_is_not_reconstructed(
+    session: AsyncSession,
+    active_exercise: Exercise,
+    sample_scenario,
+):
+    """The persisted trigger_key is the record of delivery, and it wins over any
+    reconstruction — which is what stops a restart from re-sending it."""
+    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
+    definition.injects[0].triggers_communications = [
+        TriggerComm(
+            external_entity="NCSC",
+            direction="inbound",
+            subject="Delayed advisory",
+            body="Call the incident hotline.",
+            delay_after_release_seconds=300,
+        )
+    ]
+    sample_scenario.definition = definition.model_dump_json()
+    inject = await _first_inject(session, active_exercise.id)
+    inject.state = InjectState.released
+    inject.released_at = datetime.now(UTC) - timedelta(seconds=30)
+    session.add_all([sample_scenario, inject])
+    session.add(
+        Communication(
+            exercise_id=active_exercise.id,
+            direction=CommDirection.inbound,
+            external_entity="NCSC",
+            subject="Delayed advisory",
+            body="Call the incident hotline.",
+            triggered_by_inject_id=inject.id,
+            trigger_key="inject_01:0",
+        )
+    )
+    await session.commit()
+
+    await schedule_service.schedule_exercise_communications(session, active_exercise)
+
+    assert await _comm_jobs(session, "inject_01") == []
+
+
+async def test_a_triggered_comm_job_reads_its_content_at_delivery_time(
+    task_session: AsyncSession,
+    active_exercise: Exercise,
+    sample_scenario,
+):
+    """Content lives in the scenario, not the job args, so a facilitator's edit between
+    enqueue and delivery is honoured rather than delivering the superseded text."""
+    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
+    definition.injects[0].triggers_communications = [
+        TriggerComm(
+            external_entity="NCSC",
+            direction="inbound",
+            subject="Edited subject",
+            body="Edited body.",
+            delay_after_release_seconds=0,
+        )
+    ]
+    sample_scenario.definition = definition.model_dump_json()
+    inject = await _first_inject(task_session, active_exercise.id)
+    inject.state = InjectState.released
+    inject.released_at = datetime.now(UTC)
+    task_session.add_all([sample_scenario, inject])
+    await task_session.commit()
+
+    await task_queue.deliver_triggered_comm(
+        exercise_id=active_exercise.id,
+        inject_id=inject.id,
+        node_id="inject_01",
+        trigger_index=0,
+    )
+
+    comms = (
+        await task_session.exec(
+            select(Communication).where(Communication.exercise_id == active_exercise.id)
+        )
+    ).all()
+    assert [c.subject for c in comms] == ["Edited subject"]
+
+
+async def test_a_triggered_comm_job_delivers_once(
+    task_session: AsyncSession,
+    active_exercise: Exercise,
+    sample_scenario,
+):
+    """Duplicate jobs are expected — the unique (exercise_id, trigger_key) insert is what
+    makes them cost nothing."""
+    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
+    definition.injects[0].triggers_communications = [
+        TriggerComm(
+            external_entity="NCSC",
+            direction="inbound",
+            subject="Advisory",
+            body="Hotline.",
+            delay_after_release_seconds=0,
+        )
+    ]
+    sample_scenario.definition = definition.model_dump_json()
+    inject = await _first_inject(task_session, active_exercise.id)
+    inject.state = InjectState.released
+    inject.released_at = datetime.now(UTC)
+    task_session.add_all([sample_scenario, inject])
+    await task_session.commit()
+
+    for _ in range(3):
+        await task_queue.deliver_triggered_comm(
+            exercise_id=active_exercise.id,
+            inject_id=inject.id,
+            node_id="inject_01",
+            trigger_index=0,
+        )
+
+    comms = (
+        await task_session.exec(
+            select(Communication).where(Communication.exercise_id == active_exercise.id)
+        )
+    ).all()
+    assert len(comms) == 1
+
+
+# ── Startup reconciliation ────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def reconcile_session(monkeypatch, session):
     monkeypatch.setattr(
         schedule_service, "AsyncSession", lambda *a, **k: _CtxSession(session)
     )
+    return session
 
-    in_gate = asyncio.Event()
-    resume = asyncio.Event()
-    real_gate = progression_service.release_is_allowed
 
-    async def blocking_gate(session_, inject_, *, scheduled=False):
-        # Answer the gate, then park the worker *inside* its critical section (it has
-        # already marked itself releasing) so shutdown races it exactly mid-release.
-        allowed = await real_gate(session_, inject_, scheduled=scheduled)
-        in_gate.set()
-        await resume.wait()
-        return allowed
+async def test_reconcile_enqueues_what_has_no_live_job(
+    reconcile_session: AsyncSession, facilitator: User, participant: User,
+):
+    """The cutover and safety-net path: an exercise active across a deploy from a build
+    whose schedules lived in memory has rows but no jobs, and startup restores them."""
+    ex = await _make_exercise(
+        reconcile_session, facilitator, participant, offset=30, active=True
+    )
+    inject = await _first_inject(reconcile_session, ex.id)
+    assert await _release_jobs(reconcile_session, inject.id) == []
 
-    monkeypatch.setattr(progression_service, "release_is_allowed", blocking_gate)
+    await schedule_service.reconcile_release_jobs()
 
-    async with aconnect_ws(
-        f"/ws/exercises/{ex.id}",
-        client,
-        headers={
-            "origin": "http://testserver",
-            "cookie": f"access_token={facilitator_token}",
-        },
-    ) as ws:
-        schedule_service._arm(ex.id, inject.id, 0)
-        worker = schedule_service._scheduled[ex.id][inject.id].task
-        await asyncio.wait_for(in_gate.wait(), timeout=5)
+    assert len(await _release_jobs(reconcile_session, inject.id)) == 1
 
-        pending = schedule_service.cancel_all_schedules()
-        assert worker in pending
-        assert worker.cancelling() == 0  # left running, not even a cancel requested
-        assert not schedule_service._scheduled  # registry still emptied
 
-        resume.set()
-        # Re-feed the already-collected worker each round (the registry is cleared, so a
-        # bare cancel_all_schedules would no longer surface it) and let the drain await it.
-        await background.drain(collect_extra=lambda: pending)
-        msg = await asyncio.wait_for(ws.receive_json(), timeout=5)
+async def test_reconcile_is_idempotent_across_restarts(
+    reconcile_session: AsyncSession, facilitator: User, participant: User,
+):
+    """Every replica reconciles at every boot, so without the live-job check a rolling
+    deploy would stack one duplicate job set per active exercise per restart."""
+    ex = await _make_exercise(
+        reconcile_session, facilitator, participant, offset=30, active=True
+    )
+    inject = await _first_inject(reconcile_session, ex.id)
 
-    assert worker.done() and worker.exception() is None
-    assert msg["type"] == "inject_released"
-    assert msg["payload"]["id"] == inject.id
-    assert msg["payload"]["state"] == "released"
+    for _ in range(3):
+        await schedule_service.reconcile_release_jobs()
 
-    session.expire_all()
-    refreshed = await session.get(Inject, inject.id)
-    assert refreshed.state == InjectState.released
+    assert len(await _release_jobs(reconcile_session, inject.id)) == 1
+
+
+# ── Durability ────────────────────────────────────────────────────────────────
+
+
+async def test_a_release_that_rolls_back_enqueues_nothing(
+    session: AsyncSession, facilitator: User, participant: User
+):
+    """The property the whole design turns on, stated directly.
+
+    A job written outside the transaction could outlive a rollback and release an inject
+    for a state change that never happened; a job written inside it cannot.
+    """
+    ex = await _make_exercise(session, facilitator, participant, offset=30, active=True)
+    inject = await _first_inject(session, ex.id)
+    # Held as plain ints: the rollback below expires every instance, and re-reading one
+    # to learn its id would be a query about the state under test.
+    inject_id = inject.id
+
+    await session.begin_nested()
+    await schedule_service.defer_inject_release(session, ex, inject)
+    assert len(await _release_jobs(session, inject_id)) == 1
+    await session.rollback()
+
+    assert await _release_jobs(session, inject_id) == []

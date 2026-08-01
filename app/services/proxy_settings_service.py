@@ -23,7 +23,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
 from app.models.proxy_settings import ProxySettings
-from app.services import proxy, sink_pinning
+from app.services import pg_bus, proxy, sink_pinning
 
 _SINGLETON_ID = 1
 
@@ -96,6 +96,9 @@ async def update_settings(session: AsyncSession, changes: dict[str, Any]) -> Pro
             setattr(row, key, changes[key])
     row.updated_at = datetime.now(UTC)
     session.add(row)
+    # Announced from inside the transaction, so a rollback takes the announcement with
+    # it and every replica's cache reflects exactly what committed (#213).
+    await pg_bus.publish_config_changed(session, "proxy")
     await session.commit()
     await session.refresh(row)
     proxy.set_config(_to_config(row))
@@ -107,3 +110,14 @@ async def refresh_cache(session: AsyncSession) -> None:
     """Load the singleton row into the proxy in-memory cache (startup)."""
     row = await get_settings(session)
     proxy.set_config(_to_config(row))
+
+
+async def refresh_cache_and_dependents(session: AsyncSession) -> None:
+    """Reload the cache *and* drop the clients that captured the previous proxy.
+
+    What ``update_settings`` does locally after a save, for a replica learning about
+    that save over the bus (#213). Startup uses the plain ``refresh_cache``: nothing has
+    been constructed yet at that point, so there is nothing to invalidate.
+    """
+    await refresh_cache(session)
+    _invalidate_dependent_caches()

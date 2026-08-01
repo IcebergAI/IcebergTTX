@@ -1,0 +1,15 @@
+# Inject attachments are served by whichever replica takes the request, so the
+# uploads volume has to be mountable by all of them at once.
+#
+# Access modes are immutable once a PVC exists: this cannot upgrade an install
+# that is already running the ReadWriteOnce base. Provision a new claim on an
+# RWX StorageClass and copy the data over.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-uploads
+  namespace: iceberg-ttx
+spec:
+  accessModes:
+    - ReadWriteMany
+  # storageClassName: ""  # Set to your cluster's RWX class (EFS, Filestore, CephFS, NFS…)

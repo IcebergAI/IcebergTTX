@@ -1,11 +1,11 @@
 """Tests for the generated after-action report + executive summary (#113)."""
 
-import asyncio
 import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import AsyncClient
+from sqlalchemy import text
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -425,8 +425,13 @@ async def test_summary_endpoint_dedupes_inflight_requests(
     session: AsyncSession,
     sample_scenario,
 ):
-    """A double-click is one paid provider call, not two (#269)."""
-    from app.services import llm_service
+    """A double-click is one paid provider call, not two (#269).
+
+    Since #213 the guard is a queueing lock rather than a process-local set, so it also
+    holds when the two clicks land on different replicas — and one enqueued job, not one
+    running task, is what "already-running" now means.
+    """
+    from app.services import task_queue
     from app.services.exercise_service import create_exercise, transition_state
 
     ex = await create_exercise(
@@ -438,24 +443,23 @@ async def test_summary_endpoint_dedupes_inflight_requests(
     )
     await transition_state(session, ex, ExerciseState.active)
 
-    started: list[int] = []
-    release = asyncio.Event()
-
-    async def slow_pipeline(exercise_id: int) -> None:
-        started.append(exercise_id)
-        await release.wait()
-
     url = f"/api/exercises/{ex.id}/report/summary"
     hdr = _bearer(facilitator_token)
-    with (
-        patch("app.routers.exercises.active_provider", return_value=_fake_provider("x")),
-        patch.object(llm_service, "run_summary_pipeline", slow_pipeline),
-    ):
+    with patch("app.routers.exercises.active_provider", return_value=_fake_provider("x")):
         first = await client.post(url, headers=hdr)
         second = await client.post(url, headers=hdr)
-        release.set()
-        await asyncio.sleep(0)
 
     assert first.status_code == 202 and first.json()["status"] == "accepted"
     assert second.status_code == 202 and second.json()["status"] == "already-running"
-    assert started == [ex.id]
+
+    connection = await session.connection()
+    count = (
+        await connection.execute(
+            text(
+                "SELECT count(*) FROM procrastinate_jobs "
+                "WHERE task_name = :task AND queueing_lock = :lock"
+            ),
+            {"task": task_queue.TASK_GENERATE_SUMMARY, "lock": f"summary:{ex.id}"},
+        )
+    ).scalar_one()
+    assert count == 1

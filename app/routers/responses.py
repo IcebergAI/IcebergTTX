@@ -129,7 +129,8 @@ async def submit(
 
     if exercise.llm_enabled:
         assert response.id is not None
-        queue_llm_pipeline(response.id, body.inject_id, exercise_id)
+        await queue_llm_pipeline(session, response.id, body.inject_id, exercise_id)
+        await session.commit()
 
     participant_progression = await progression_snapshot(session, exercise_id, group_id=group_id)
     return response_payload(response, progression=participant_progression)
@@ -178,7 +179,8 @@ async def trigger_assess(
             session.add(r)
             await session.commit()
         return {"detail": "Assessment already exists"}
-    queued = queue_llm_pipeline(response_id, r.inject_id, exercise_id)
+    queued = await queue_llm_pipeline(session, response_id, r.inject_id, exercise_id)
+    await session.commit()
     return {"detail": "Assessment queued" if queued else "Assessment already queued"}
 
 

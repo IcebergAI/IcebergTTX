@@ -36,8 +36,11 @@ structure. Subsystem deep-dives are indexed there and live in [PLAN.md](PLAN.md)
   transaction; **whoever commits dispatches** (`await dispatch(session)`, session open).
 - Services own queries; routers authorize/call/serialize; `app/schemas/` holds only
   boundary-crossing models (placement rule #214).
-- **Single-replica app**: all cross-request state (ws_manager, timers, rate limits,
-  config caches) is in-process. Read that section before adding any.
+- **Multi-replica**: cross-request state goes through Postgres — `pg_bus` (LISTEN/NOTIFY)
+  for anything other replicas must hear, `task_queue` for anything that must happen later.
+  Never add in-process cross-request state; `ws_manager` (this process's own sockets) is
+  the one legitimate exception. Publish and enqueue **inside** the transaction that makes
+  the thing true, never after the commit.
 - New UI control classes must re-assert the 40px min-height floor (class selectors beat
   the global floor; a Playwright touch-target test enforces ≥40/44px).
 - Branching wording trap: **participants choose the path; the facilitator controls the

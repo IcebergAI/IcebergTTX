@@ -48,6 +48,29 @@ navigation and console layout, and the internal seams (event dispatch, service
 ownership, projection) that the multi-replica work depends on.
 
 ### Added
+- **The app runs on more than one replica** (#213) — every piece of cross-request state
+  moves into PostgreSQL, so there is no longer a single-replica constraint and no Redis
+  or broker to operate. WebSocket frames and config invalidation travel over
+  `LISTEN`/`NOTIFY` as compact id descriptors that each replica reads back and renders
+  for its own sockets; scheduled inject releases, triggered communications, LLM
+  pipelines and the nightly audit purge become durable jobs (procrastinate); rate-limit
+  counters become rows, so the login, registration, and reset limits no longer multiply
+  by the replica count; and startup migrations serialise on a Postgres advisory lock.
+
+  Everything is published or enqueued **inside** the transaction that makes it true.
+  Postgres holds a `NOTIFY` until COMMIT and discards it on rollback, and a job row
+  commits with the state change that warranted it — so "committed but never announced"
+  and "committed but never enqueued" stop being possible. That closes the bug class
+  behind #211 (triggered communications lost on restart) and #218 (a scheduled release
+  stranded when a worker stood down mid-response) structurally rather than case by case,
+  and retires the hand-built coordination those fixes needed.
+
+  Kubernetes manifests keep `replicas: 1` in the base for a storage reason rather than a
+  state one — the uploads volume is `ReadWriteOnce` and a PVC's access modes cannot be
+  changed in place. Clusters with an RWX StorageClass apply the new
+  `k8s/overlays/multi-replica` for two replicas and rolling deploys. Do not front the app
+  with a transaction-mode connection pooler: `LISTEN` needs a session that outlives a
+  transaction.
 - **Runtime configuration** — non-secret settings move out of env-only config and into
   the admin UI, following the singleton-row + cached-config pattern already used by
   `/admin/audit` and `/admin/proxy`. Email/SMTP, general settings (registration, token

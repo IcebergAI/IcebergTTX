@@ -29,6 +29,20 @@ def make_async_url(url: str) -> str:
     return url
 
 
+def make_asyncpg_dsn(url: str) -> str:
+    """Strip the SQLAlchemy driver marker so raw asyncpg can dial the same database.
+
+    ``asyncpg.connect`` speaks libpq DSNs and rejects SQLAlchemy's ``+driver`` suffix.
+    The LISTEN connection (#213) is raw asyncpg rather than a pooled checkout, so it
+    needs the plain form of whatever ``DATABASE_URL`` was configured with.
+    """
+    async_url = make_async_url(url)
+    for prefix in ("postgresql+asyncpg://", "postgres+asyncpg://"):
+        if async_url.startswith(prefix):
+            return "postgresql://" + async_url[len(prefix) :]
+    return async_url
+
+
 engine = create_async_engine(make_async_url(settings.database_url), pool_pre_ping=True)
 
 
@@ -59,8 +73,12 @@ async def run_migrations() -> None:
 
     Run in a worker thread because Alembic's async ``env.py`` calls
     ``asyncio.run``, which cannot be invoked from the already-running lifespan
-    event loop. Safe for the single-replica deployment; multi-replica rollouts
-    should instead run ``alembic upgrade head`` as a dedicated deploy step.
+    event loop.
+
+    Safe with several replicas starting at once: ``env.py`` takes a Postgres advisory
+    lock first, so they migrate one at a time and the losers find the schema already at
+    head (#213). Migrations must still be forward-compatible across one release — during
+    a rolling update the previous version is serving against the new schema.
     """
     await asyncio.to_thread(_upgrade_to_head)
 

@@ -15,6 +15,7 @@ from app.config import (
     settings,
 )
 from app.models.llm_settings import LLMSettings
+from app.services import pg_bus
 
 _SINGLETON_ID = 1
 EDITABLE_FIELDS = (
@@ -201,6 +202,7 @@ async def update_settings(session: AsyncSession, changes: dict[str, Any]) -> LLM
         setattr(row, field, getattr(candidate, field))
     row.updated_at = datetime.now(UTC)
     session.add(row)
+    await pg_bus.publish_config_changed(session, "llm")
     await session.commit()
     await session.refresh(row)
     set_config(_to_config(row))

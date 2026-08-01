@@ -36,7 +36,7 @@ from app.services.inject_service import (
     inject_payload,
     release_inject,
 )
-from app.services.schedule_service import arm_inject_schedule, cancel_inject_schedule
+from app.services.schedule_service import arm_inject_schedule
 
 router = APIRouter(prefix="/exercises/{exercise_id}/injects", tags=["injects"])
 
@@ -376,14 +376,14 @@ async def update_schedule(
         )
     inject.release_offset_minutes = body.release_offset_minutes
     session.add(inject)
-    record(session, InjectUpdated(exercise_id=exercise_id, inject=inject))
+    record(session, InjectUpdated(exercise_id=exercise_id, inject_id=inject_id))
+    # Enqueued in the same transaction as the new offset (only affects a running
+    # exercise; start/resume enqueue the rest). Any job written against the old offset
+    # is left alone: it fires, finds itself early or late against the value it re-reads,
+    # and re-defers or loses the release CAS (#213).
+    await arm_inject_schedule(session, exercise, inject)
     await session.commit()
     await session.refresh(inject)
-
-    # Re-arm the in-memory timer to match the new value (only affects a running exercise;
-    # start/resume arm the rest). Cancel first so a cleared/edited offset can't double-fire.
-    cancel_inject_schedule(exercise_id, inject_id)
-    arm_inject_schedule(exercise, inject)
 
     audit_service.emit(
         "inject.schedule",

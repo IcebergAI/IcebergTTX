@@ -29,6 +29,7 @@ from app.models import (  # noqa: F401
     inject_comment,
     llm_settings,
     proxy_settings,
+    rate_limit,
     report_summary,
     response,
     scenario,
@@ -70,7 +71,6 @@ from app.routers import (
 )
 from app.routers.ui import UIRedirect
 from app.services import audit_service, background
-from app.services.retention_service import retention_task
 from app.services.ws_manager import heartbeat_task
 
 logger = logging.getLogger("iceberg_ttx")
@@ -184,47 +184,55 @@ async def lifespan(app: FastAPI):
     from app.services.oidc import service as oidc_service
 
     oidc_service.register_providers()
-    # Re-arm persisted inject and communication schedules for exercises that were active
-    # before a restart (#116, #194). Timers remain single-process only.
-    from app.services.schedule_service import rehydrate_schedules
+    # Subscribe to the cross-replica bus, so a config saved on another replica lands in
+    # this one's caches (#213). Started after the loaders above: the first connect has
+    # nothing to recover, and connecting is deliberately not awaited to completion —
+    # a database blip must not stop a replica from serving what it already can.
+    from app.services import config_sync, ws_relay
+    from app.services.pg_listener import listener
 
-    await rehydrate_schedules()
+    config_sync.install()
+    ws_relay.install()
+    await listener.start()
+    # Run a queue worker in this replica, so a single container is still the whole
+    # deployment (#213). Schedules are durable jobs now, so nothing has to be rehydrated
+    # from memory; reconcile_release_jobs is a safety net that also carries over
+    # exercises which were running under a build that kept its timers in a dict.
+    from app.services import task_queue
+    from app.services.schedule_service import reconcile_release_jobs
+
+    await task_queue.start_worker()
+    await reconcile_release_jobs()
     audit_service.emit("app.startup", severity="info")
     task = asyncio.create_task(heartbeat_task())
-    # Prune audit history past the configured window and dead auth tokens: once now,
-    # then daily (#251). Not awaited inline like rehydrate_schedules above — a first
-    # pass over a legacy table is unbounded and would delay readiness. Single-process,
-    # like the timers: a second live replica would run a second concurrent sweep.
-    retention = asyncio.create_task(retention_task())
     yield
     # Graceful teardown (#250), strictly ordered:
     # 1. Record app.shutdown FIRST, while the loop is still live, so its audit-persist and
     #    SIEM-forward tasks are spawned in time to join the drain below instead of being
     #    abandoned into a dying loop (which reliably lost the shutdown record to stdout).
     audit_service.emit("app.shutdown", severity="info")
-    # 2. Stop the recurring loops and await their cancellation. Both are bare
-    #    create_task, so background.drain below never sees them — dropping this leaves a
-    #    task holding a pooled connection when engine.dispose() runs. It must also come
-    #    *before* the drain: a sweep's own audit event spawns persist/forward children
-    #    that are drainable, so cancelling first means they are drained, not abandoned
-    #    (same reasoning as step 1). A sweep cancelled mid-batch rolls back and redoes
-    #    that batch next boot.
-    for loop_task in (task, retention):
-        loop_task.cancel()
-    for loop_task in (task, retention):
-        with suppress(asyncio.CancelledError):
-            await loop_task
-    # 3. Drain in-flight background work (mail, audit persist, SIEM forward, LLM runs) and
-    #    armed timers in one bounded, converging pass. cancel_all_schedules, re-invoked each
-    #    round, cancels still-sleeping timers (rehydration re-arms them next boot) and hands
-    #    back any worker already mid-release so it finishes its commit and dispatch atomically
-    #    (#218); the drain re-collects the task sets after each wait so audit/SIEM writes and
-    #    triggered-comm timers spawned *by* those releases are drained too, not disposed out
-    #    from under (see background.drain).
-    from app.services.schedule_service import cancel_all_schedules
-
-    await background.drain(collect_extra=cancel_all_schedules)
-    # 4. Close the asyncpg pool cleanly so Postgres doesn't log unexpected EOFs on deploy.
+    # 2. Stop the socket heartbeat and await its cancellation. It is a bare create_task,
+    #    so background.drain below never sees it — dropping this leaves a task holding a
+    #    pooled connection when engine.dispose() runs. It must also come *before* the
+    #    drain: its own audit events spawn persist/forward children that are drainable,
+    #    so cancelling first means they are drained, not abandoned (as in step 1).
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+    # 3. Stop the queue worker, letting a running job finish within a bounded grace.
+    #    A job killed here is not lost: it stays *doing* until retry_stalled_jobs
+    #    returns it to the queue, and every task is safe to run twice (#213).
+    await task_queue.stop_worker()
+    # 4. Unsubscribe from the bus (#213). Same reasoning: a handler mid-refresh is
+    #    holding a pooled connection, and nothing arriving now can be acted on by a
+    #    replica that is going away.
+    await listener.stop()
+    # 5. Drain in-flight background work (mail, audit persist, SIEM forward) in one
+    #    bounded, converging pass — the drain re-collects the task set after each wait,
+    #    so audit and SIEM writes spawned *by* the work above are drained too rather
+    #    than disposed out from under (see background.drain).
+    await background.drain()
+    # 6. Close the asyncpg pool cleanly so Postgres doesn't log unexpected EOFs on deploy.
     from app.database import engine
 
     await engine.dispose()

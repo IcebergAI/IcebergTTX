@@ -13,7 +13,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
 from app.models.audit_settings import AuditSettings
-from app.services import siem_service, sink_pinning
+from app.services import pg_bus, siem_service, sink_pinning
 
 _SINGLETON_ID = 1
 
@@ -96,6 +96,7 @@ async def update_settings(session: AsyncSession, changes: dict[str, Any]) -> Aud
         if key in changes and changes[key] is not None:
             setattr(row, key, changes[key])
     session.add(row)
+    await pg_bus.publish_config_changed(session, "siem")
     await session.commit()
     await session.refresh(row)
     siem_service.set_config(_to_config(row))

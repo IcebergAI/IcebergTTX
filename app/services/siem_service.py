@@ -15,8 +15,9 @@ built by ``audit_service.emit`` is shipped, off the response path, to every
 Every sink is wrapped so a failing/unreachable SIEM is logged locally but **never**
 raises — auditing must not break the request that triggered it. Routing is read
 from an in-memory snapshot (``get_config``/``set_config``) refreshed at startup and
-whenever an admin saves, so the sync ``emit`` path never does a per-event DB read
-(single-process, like ``ws_manager``/``rate_limit``).
+whenever an admin saves, so the sync ``emit`` path never does a per-event DB read. The
+snapshot is per-process; a save on another replica reaches this one over the config bus
+(``config_sync``, #213).
 """
 
 import asyncio

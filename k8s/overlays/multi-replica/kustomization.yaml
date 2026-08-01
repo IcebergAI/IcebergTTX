@@ -1,0 +1,33 @@
+# Multi-replica overlay: high availability and rolling deploys (#213).
+#
+# The app keeps no cross-request state in process any more — WebSocket fan-out
+# and config invalidation ride Postgres LISTEN/NOTIFY, scheduled releases and
+# triggered communications are durable jobs in a procrastinate table, and
+# rate-limit counters are rows. Startup migrations serialise on a Postgres
+# advisory lock, so several replicas may boot at once.
+#
+# PREREQUISITE — read before applying. This overlay patches the uploads PVC to
+# ReadWriteMany, because every replica serves inject attachments from it. A
+# PVC's access modes are immutable, so an existing install cannot be upgraded in
+# place: create a new RWX claim and copy the data across, or stay on the base.
+# Clusters without an RWX StorageClass (EFS, Filestore, CephFS, NFS…) should
+# keep the single-replica base until uploads move to object storage.
+#
+#   kubectl apply -k k8s/overlays/multi-replica
+#
+# Compose the ingress you need alongside it — this overlay only changes scale.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - path: deployment.yaml
+    target:
+      kind: Deployment
+      name: iceberg-ttx-app
+  - path: pvc.yaml
+    target:
+      kind: PersistentVolumeClaim
+      name: app-uploads

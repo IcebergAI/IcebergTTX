@@ -153,6 +153,13 @@ async def _sync_returning_user(
 
     if dirty:
         session.add(user)
+        if user.role != previous_role and user.id is not None:
+            # Announced inside the transaction, so peers drop this user's sockets only
+            # if the downgrade actually commits (#213). This replica's own sockets are
+            # closed below, once the row is durable.
+            from app.services.ws_relay import publish_user_connections_close
+
+            await publish_user_connections_close(session, user.id)
         await session.commit()
         await session.refresh(user)
 

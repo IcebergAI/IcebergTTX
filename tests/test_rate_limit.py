@@ -1,96 +1,168 @@
-"""Unit tests for the login RateLimiter, incl. bounded memory (#49).
+"""The rate limiter, now backed by Postgres (#11, #49, #67, #117, #213).
 
-Uses a controllable monotonic clock so window expiry and the periodic sweep are
-deterministic rather than time-dependent.
+Assertions are on behaviour rather than on a private dict: the counters are rows, and
+what matters is the window semantics, not how they are stored. A settable clock keeps
+window expiry deterministic instead of making the suite sleep through it.
 """
 
-import pytest
+from datetime import UTC, datetime, timedelta
 
+import pytest
+from sqlalchemy import text
+
+from app.database import engine
 from app.services import rate_limit
 from app.services.rate_limit import RateLimiter
 
 
 @pytest.fixture
 def clock(monkeypatch):
-    """A settable stand-in for time.monotonic within the rate_limit module."""
+    """A settable stand-in for the limiter's notion of now."""
 
     class Clock:
         def __init__(self) -> None:
-            self.now = 1000.0
+            self.now = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
 
-        def __call__(self) -> float:
+        def __call__(self):
             return self.now
 
+        def advance(self, seconds: float) -> None:
+            self.now += timedelta(seconds=seconds)
+
     c = Clock()
-    monkeypatch.setattr(rate_limit.time, "monotonic", c)
+    monkeypatch.setattr(rate_limit, "now", c)
     return c
 
 
-def test_checking_novel_key_does_not_materialise_it(clock):
-    limiter = RateLimiter(max_attempts=5, window_seconds=300)
-    assert limiter.is_limited("ip:novel") is False
-    assert limiter.retry_after("ip:absent") == 0
-    # Read-only checks must never leave a permanent entry behind (#49).
-    assert limiter._hits == {}
+@pytest.fixture
+async def limiter():
+    """A limiter on its own scope, so these never collide with the app's three."""
+    instance = RateLimiter("test_scope", max_attempts=5, window_seconds=300)
+    await instance.clear()
+    yield instance
+    await instance.clear()
 
 
-def test_key_evicted_once_its_window_empties(clock):
-    limiter = RateLimiter(max_attempts=5, window_seconds=300)
-    limiter.record_failure("ip:a")
-    assert "ip:a" in limiter._hits
+async def _row_count(scope: str) -> int:
+    async with engine.connect() as connection:
+        return (
+            await connection.execute(
+                text("SELECT count(*) FROM rate_limit_hits WHERE scope = :scope"),
+                {"scope": scope},
+            )
+        ).scalar_one()
 
-    clock.now += 301  # entry now older than the window
-    assert limiter.is_limited("ip:a") is False
-    # Accessing an expired key prunes it to empty and drops it.
-    assert "ip:a" not in limiter._hits
+
+async def test_a_novel_key_is_not_limited(clock, limiter):
+    assert await limiter.is_limited("ip:novel") is False
+    assert await limiter.retry_after("ip:absent") == 0
+    # Merely asking about a key must not record anything against it.
+    assert await _row_count("test_scope") == 0
 
 
-def test_lockout_after_max_attempts(clock):
-    limiter = RateLimiter(max_attempts=3, window_seconds=300)
+async def test_lockout_after_max_attempts(clock, limiter):
+    for _ in range(4):
+        await limiter.record_failure("ip:a")
+    assert await limiter.is_limited("ip:a") is False
+
+    await limiter.record_failure("ip:a")
+
+    limited, retry_after = await limiter.check("ip:a")
+    assert limited is True
+    assert 0 < retry_after <= 300
+
+
+async def test_the_window_slides_rather_than_resetting_in_a_block(clock, limiter):
+    """A fixed bucket would let an attacker spend the whole allowance at the end of one
+    window and again at the start of the next. Expiring the oldest hit individually is
+    what prevents that."""
+    for _ in range(5):
+        await limiter.record_failure("ip:a")
+    assert await limiter.is_limited("ip:a") is True
+
+    # Just short of the window: the oldest hit still counts.
+    clock.advance(299)
+    assert await limiter.is_limited("ip:a") is True
+
+    # Past it: one hit falls out and the caller is under the threshold again.
+    clock.advance(2)
+    assert await limiter.is_limited("ip:a") is False
+
+
+async def test_retry_after_counts_down_as_the_window_moves(clock, limiter):
+    for _ in range(5):
+        await limiter.record_failure("ip:a")
+    _, initial = await limiter.check("ip:a")
+
+    clock.advance(200)
+
+    _, later = await limiter.check("ip:a")
+    assert later < initial
+    # Never zero while still limited — a caller told to retry after 0 retries at once.
+    assert later >= 1
+
+
+async def test_reset_clears_only_its_own_key(clock, limiter):
+    for _ in range(5):
+        await limiter.record_failure("ip:a")
+    await limiter.record_failure("ip:b")
+
+    await limiter.reset("ip:a")
+
+    assert await limiter.is_limited("ip:a") is False
+    assert await _row_count("test_scope") == 1
+
+
+async def test_scopes_cannot_count_each_others_attempts(clock):
+    """The three limiters share a table; a registration flood must not lock out logins."""
+    first = RateLimiter("scope_one", max_attempts=2, window_seconds=300)
+    second = RateLimiter("scope_two", max_attempts=2, window_seconds=300)
+    await first.clear()
+    await second.clear()
+    try:
+        for _ in range(2):
+            await first.record_failure("ip:shared")
+
+        assert await first.is_limited("ip:shared") is True
+        assert await second.is_limited("ip:shared") is False
+    finally:
+        await first.clear()
+        await second.clear()
+
+
+async def test_reconfigure_preserves_hits_and_applies_a_tighter_threshold(clock, limiter):
+    """An admin tightening the policy locks out a host that is already over the new
+    line, rather than granting it a fresh allowance."""
     for _ in range(3):
-        assert limiter.is_limited("ip:a") is False
-        limiter.record_failure("ip:a")
-    assert limiter.is_limited("ip:a") is True
-    assert limiter.retry_after("ip:a") >= 1
+        await limiter.record_failure("ip:a")
+    assert await limiter.is_limited("ip:a") is False
+
+    limiter.reconfigure(max_attempts=3, window_seconds=300)
+
+    assert await limiter.is_limited("ip:a") is True
 
 
-def test_reset_clears_counter(clock):
-    limiter = RateLimiter(max_attempts=3, window_seconds=300)
-    for _ in range(3):
-        limiter.record_failure("ip:a")
-    limiter.reset("ip:a")
-    assert limiter._hits == {}
-    assert limiter.is_limited("ip:a") is False
+async def test_sweep_removes_only_expired_hits(clock, monkeypatch):
+    """Keys are attacker-controlled (a spoofed X-Forwarded-For, an arbitrary email), so
+    the table has to shed old rows on a schedule rather than when someone happens to
+    look (#49)."""
+    instance = RateLimiter("sweep_scope", max_attempts=5, window_seconds=60)
+    monkeypatch.setattr(rate_limit, "ALL_LIMITERS", (instance,))
+    await instance.clear()
+    try:
+        await instance.record_failure("ip:old")
+        clock.advance(120)
+        await instance.record_failure("ip:fresh")
+
+        removed = await rate_limit.sweep()
+
+        assert removed == 1
+        assert await _row_count("sweep_scope") == 1
+    finally:
+        await instance.clear()
 
 
-def test_reconfigure_preserves_hits_and_applies_tighter_threshold(clock):
-    limiter = RateLimiter(max_attempts=5, window_seconds=300)
-    limiter.record_failure("ip:a")
-    limiter.record_failure("ip:a")
-
-    limiter.reconfigure(max_attempts=2, window_seconds=600)
-
-    assert len(limiter._hits["ip:a"]) == 2
-    assert limiter.is_limited("ip:a") is True
-    assert limiter.retry_after("ip:a") > 300
-
-
-def test_periodic_sweep_bounds_rotating_keys(clock):
-    """Rotating attacker keys (unique X-Forwarded-For / email) must not grow
-    the dict without bound — expired keys are purged once per window (#49)."""
-    limiter = RateLimiter(max_attempts=5, window_seconds=300)
-
-    # First burst of unique keys, each with a single failed attempt.
-    for i in range(50):
-        key = f"attacker:{i}"
-        limiter.is_limited(key)
-        limiter.record_failure(key)
-    assert len(limiter._hits) == 50
-
-    # Advance past the window and mint one more key. The access triggers the
-    # opportunistic sweep, which reclaims all 50 now-expired keys.
-    clock.now += 301
-    limiter.is_limited("attacker:new")
-    limiter.record_failure("attacker:new")
-    assert len(limiter._hits) == 1
-    assert "attacker:new" in limiter._hits
+async def test_the_app_limiters_have_distinct_scopes():
+    """A shared scope would silently pool three different policies' counters."""
+    scopes = [limiter.scope for limiter in rate_limit.ALL_LIMITERS]
+    assert len(set(scopes)) == len(scopes)

@@ -20,7 +20,8 @@ persisted on the DB row and never rendered back to an admin.
 
 Routing is read from an in-memory snapshot (``get_config``/``set_config``) refreshed
 at startup and whenever an admin saves — the sync ``audit_service.emit`` path has no
-DB session, exactly as with ``siem_service`` (single-process, like ``ws_manager``).
+DB session, exactly as with ``siem_service``. The snapshot is per-process, so a save on
+another replica reaches this one over the config bus (``config_sync``, #213).
 
 Callers must treat a ``None`` config as "feature not loaded" and pass no kwargs at
 all, so behaviour is byte-for-byte what it was before this feature:

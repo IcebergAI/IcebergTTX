@@ -30,6 +30,7 @@ from app.models import (  # noqa: F401
     llm_settings,
     oidc_settings,
     proxy_settings,
+    rate_limit,
     report_summary,
     response,
     scenario,
@@ -38,7 +39,11 @@ from app.models import (  # noqa: F401
 )
 
 config = context.config
-config.set_main_option("sqlalchemy.url", make_async_url(settings.database_url))
+# Settings are the source of truth, but an explicitly configured URL wins — that is how
+# a caller migrates a database other than the app's own (the migration tests point this
+# at a throwaway one; ``settings`` is bound at import and cannot be redirected).
+if not config.get_main_option("sqlalchemy.url", None):
+    config.set_main_option("sqlalchemy.url", make_async_url(settings.database_url))
 
 if config.config_file_name is not None:
     # run_migrations() runs Alembic in-process during the app lifespan, so the
@@ -50,6 +55,19 @@ if config.config_file_name is not None:
 target_metadata = SQLModel.metadata
 
 
+def include_name(name, type_, parent_names) -> bool:
+    """Keep procrastinate's own tables out of autogenerate and ``alembic check``.
+
+    The task queue's schema is owned by the library and installed verbatim by its own
+    revision (#213), so it is deliberately absent from ``SQLModel.metadata``. Without
+    this filter every autogenerate would propose dropping it, and the ``alembic check``
+    that gates CI would fail on a database that is in fact correct.
+    """
+    if type_ == "table" and name is not None:
+        return not name.startswith("procrastinate_")
+    return True
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=config.get_main_option("sqlalchemy.url"),
@@ -57,9 +75,15 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()
+
+
+# Any 64-bit constant works; this one is arbitrary and only has to stay stable, since
+# two processes agree on a lock by using the same number.
+_MIGRATION_LOCK_ID = 8_213_100_213
 
 
 def _do_run_migrations(connection) -> None:
@@ -67,8 +91,20 @@ def _do_run_migrations(connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
+        # Serialise migrations across replicas (#213). Every replica migrates on startup,
+        # so a rollout would otherwise run several `alembic upgrade head` concurrently
+        # against one database — two processes creating the same table is a crash loop,
+        # not a race you can retry past. Whoever loses the lock waits, then finds the
+        # schema already at head and applies nothing.
+        #
+        # Taken *inside* Alembic's transaction, and an xact lock rather than a session
+        # one, for two reasons: it is released automatically however the migration ends,
+        # and issuing any statement before this block would autobegin a second
+        # transaction that Alembic never commits — silently discarding every migration.
+        connection.exec_driver_sql(f"SELECT pg_advisory_xact_lock({_MIGRATION_LOCK_ID})")
         context.run_migrations()
 
 

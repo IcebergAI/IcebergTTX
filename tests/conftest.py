@@ -106,47 +106,40 @@ def seed_playwright_users():
 
 @pytest.fixture(autouse=True)
 def _reset_login_rate_limiter():
-    """Isolate the in-memory login/registration limiters between tests (#11, #67)."""
-    from app.services.rate_limit import (
-        login_rate_limiter,
-        password_reset_rate_limiter,
-        registration_rate_limiter,
-    )
+    """Isolate the login/registration/reset limiters between tests (#11, #67).
 
-    login_rate_limiter.clear()
-    registration_rate_limiter.clear()
-    password_reset_rate_limiter.clear()
+    The counters are rows now (#213), and they are written on their own connections so a
+    test's rollback does not remove them — hence a real DELETE rather than clearing a
+    dict. Over a *synchronous* psycopg connection, not asyncio.run: this autouse fixture
+    also tears down test_ui.py's sync Playwright tests, which execute while the
+    session-scoped event loop is live — where an async fixture fails them wholesale and
+    asyncio.run refuses with "cannot be called from a running event loop".
+    """
+    import psycopg
+
+    from app.database import make_asyncpg_dsn
+
     yield
-    login_rate_limiter.clear()
-    registration_rate_limiter.clear()
-    password_reset_rate_limiter.clear()
+    with psycopg.connect(
+        make_asyncpg_dsn(os.environ["DATABASE_URL"]), autocommit=True
+    ) as connection:
+        connection.execute("DELETE FROM rate_limit_hits")
 
 
 @pytest.fixture(autouse=True)
-def _clear_schedules():
-    """Cancel any timers a test armed so sleeping tasks don't leak between tests.
+def _freeze_queue_clock():
+    """Keep the scheduler's clock indirection un-frozen between tests.
 
-    Global rather than local to test_pacing, because arming is no longer something only
-    that module provokes: since #218 *any* response submitted in an exercise with a
-    scheduled inject arms a real task, from whichever test file happens to do it.
-
-    Sync, and cancelling the tasks by hand rather than through cancel_exercise_schedules:
-    an autouse fixture here also applies to test_ui.py's *synchronous* Playwright tests, so
-    an async one fails them all with "Runner.run() cannot be called from a running event
-    loop" — and the service helper calls asyncio.current_task(), which needs a running loop
-    that a sync teardown does not have. Task.cancel() itself does not.
+    Schedules are durable jobs now, so there are no timers to cancel here (#213) — but
+    a test that freezes ``task_queue.now`` to reason about a deadline must not leak that
+    clock into the next one. Sync, because this fixture also applies to test_ui.py's
+    synchronous Playwright tests, which an async autouse fixture fails wholesale.
     """
-    from app.services import schedule_service
+    from app.services import task_queue
 
+    original = task_queue.now
     yield
-    for timers in schedule_service._scheduled.values():
-        for timer in timers.values():
-            timer.task.cancel()
-    schedule_service._scheduled.clear()
-    for tasks in schedule_service._scheduled_comms.values():
-        for task in tasks.values():
-            task.cancel()
-    schedule_service._scheduled_comms.clear()
+    task_queue.now = original
 
 
 @pytest.fixture(autouse=True)
@@ -201,9 +194,14 @@ def _create_schema():
     # The test suite builds a throwaway schema directly from the models rather
     # than running Alembic migrations; create_db_and_tables uses the (already
     # reassigned) module engine, so it targets the test database.
-    from app.database import create_db_and_tables
+    from app.database import create_db_and_tables, make_asyncpg_dsn
+    from app.services.task_queue import apply_schema
 
     asyncio.run(create_db_and_tables())
+    # The task queue's tables are procrastinate's, not SQLModel's, so create_all does
+    # not know about them (#213). Applied here for the same reason as everything else in
+    # this fixture: Alembic, which installs them in production, never runs in tests.
+    apply_schema(make_asyncpg_dsn(os.environ["DATABASE_URL"]))
     yield
 
 

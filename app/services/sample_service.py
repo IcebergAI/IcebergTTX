@@ -98,9 +98,12 @@ async def create_sample_demo_exercise(
     session.add(member)
     await session.commit()
     exercise = await transition_state(session, exercise, ExerciseState.active)
-    # Arm any release_at_minutes timers the sample defines (#269): activating via
-    # transition_state alone left them dormant until a restart or pause/resume.
+    # Enqueue any release_at_minutes schedules the sample defines (#269): activating via
+    # transition_state alone leaves them dormant until a resume or restart. Committed
+    # here and not left to a later caller: the release below is conditional, so without
+    # this the no-start-inject path would silently roll the jobs back at teardown.
     await schedule_exercise_injects(session, exercise)
+    await session.commit()
     # A multi-team start node seeds one physical inject per team; unordered .first()
     # could pick another team's copy, whose audience (only the demo member's group
     # is enrolled) is empty — and release_inject then 409s the whole demo load

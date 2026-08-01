@@ -114,10 +114,13 @@ ignored). Client secrets are env-only.
 ## Operator responsibilities
 
 Deployment hardening — secret management, TLS termination, network policy, and the
-[single-replica constraint](deployment.md) — is the operator's responsibility. Note the
-security-relevant edge of that constraint: the **rate limiters are per process**, so running
-more than one replica silently multiplies the effective login, registration, and
-password-reset attempt limits by the replica count, and the **SIEM and proxy config caches**
-are per process too, so a policy change can leave another replica forwarding to the old sink.
+[storage prerequisites for scaling out](deployment.md) — is the operator's responsibility.
+Rate-limit counters and config caches are shared through PostgreSQL, so the login,
+registration, and password-reset limits hold however many replicas are running, and a
+policy change reaches all of them. Two operational notes carry security weight: do not
+place a **transaction-mode connection pooler** in front of the app (it silently breaks the
+`LISTEN`/`NOTIFY` subscription that carries those invalidations), and a migration must be
+forward-compatible across one release, since a rolling update serves the previous version
+against the new schema.
 See [Deployment](deployment.md) for the full list and the hardened Compose and Kubernetes
 baselines.

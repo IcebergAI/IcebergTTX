@@ -87,7 +87,12 @@ _KUSTOMIZATIONS = (
     "k8s/base/kustomization.yaml",
     "k8s/overlays/nginx/kustomization.yaml",
     "k8s/overlays/eks/kustomization.yaml",
+    "k8s/overlays/multi-replica/kustomization.yaml",
 )
+
+
+def _patch_paths(path: str) -> list[str]:
+    return [patch["path"] for patch in _documents(path)[0].get("patches", [])]
 
 
 def test_every_kustomization_resource_exists() -> None:
@@ -129,3 +134,31 @@ def test_eks_overlay_confines_targetgroupbinding_and_uses_ip_targets() -> None:
     assert tgb["spec"]["targetType"] == "ip"
     # It must bind to the caddy Service the base ships.
     assert tgb["spec"]["serviceRef"]["name"] == "caddy"
+
+
+def test_multi_replica_overlay_scales_out_and_rolls() -> None:
+    """The opt-in path to HA (#213). The base stays at one replica because its uploads
+    PVC is ReadWriteOnce; this overlay is what a cluster with RWX storage applies."""
+    kustomization = "k8s/overlays/multi-replica/kustomization.yaml"
+    assert "../../base" in _kustomization_resources(kustomization)
+    for patch in _patch_paths(kustomization):
+        assert (ROOT / "k8s/overlays/multi-replica" / patch).exists()
+
+    deployment = _documents("k8s/overlays/multi-replica/deployment.yaml")[0]
+    assert deployment["spec"]["replicas"] >= 2
+    strategy = deployment["spec"]["strategy"]
+    assert strategy["type"] == "RollingUpdate"
+    # The old pod must keep serving until the new one is ready, or a deploy is still a
+    # visible gap in service — the thing this overlay exists to remove.
+    assert strategy["rollingUpdate"]["maxUnavailable"] == 0
+
+    pvc = _documents("k8s/overlays/multi-replica/pvc.yaml")[0]
+    assert pvc["spec"]["accessModes"] == ["ReadWriteMany"]
+
+
+def test_base_no_longer_claims_a_single_replica_is_required() -> None:
+    """The constraint is gone (#213); a stale comment saying otherwise would send an
+    operator looking for a limitation that no longer exists."""
+    text = (ROOT / "k8s/base/app/deployment.yaml").read_text(encoding="utf-8")
+    assert "replicas must remain 1" not in text
+    assert "Redis" not in text

@@ -20,15 +20,6 @@ from app.models.user import User, UserRole
 from app.services import audit_service, mail_service, token_service
 
 
-@pytest.fixture(autouse=True)
-def _reset_reset_limiter():
-    from app.services.rate_limit import password_reset_rate_limiter
-
-    password_reset_rate_limiter.clear()
-    yield
-    password_reset_rate_limiter.clear()
-
-
 @pytest.fixture(name="smtp_on")
 def smtp_on_fixture(monkeypatch):
     """Enable the email feature (smtp_enabled reads host+from)."""

@@ -115,7 +115,19 @@ async def submit_response(
         # Inside the transaction: the IntegrityError branch below rolls back, which
         # discards this — so a duplicate submission cannot broadcast. That used to be
         # guaranteed only by the broadcast sitting after the try block.
-        record(session, ResponseSubmitted(exercise_id=exercise_id, response=response))
+        assert response.id is not None
+        record(session, ResponseSubmitted(exercise_id=exercise_id, response_id=response.id))
+        # A response is the only thing that advances a progression cursor, and a cursor
+        # advance is the only thing that unlocks a scheduled inject the team had not
+        # reached (#218). Enqueued here, in the response's own transaction: the release
+        # job exists if and only if the cursor advance it depends on committed, which is
+        # the race the previous post-commit version had to coordinate around by hand.
+        from app.models.exercise import Exercise
+        from app.services.schedule_service import arm_cursor_reached_injects
+
+        exercise = await session.get(Exercise, exercise_id)
+        if exercise is not None:
+            await arm_cursor_reached_injects(session, exercise)
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()

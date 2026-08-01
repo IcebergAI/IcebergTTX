@@ -6,11 +6,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import engine
 from app.schemas.api import AssessmentPublic, ExecutiveSummaryPublic, SuggestedInjectPublic
 from app.services import llm_settings_service
-from app.services.background import spawn
 from app.services.domain_events import (
     InjectSuggested,
     ResponseAssessed,
@@ -45,12 +45,6 @@ class SuggestedInjectOutput(BaseModel):
     content: str = Field(min_length=1, max_length=_MAX_LLM_TEXT)
     target_teams: list[str] | None = Field(default=None, max_length=_MAX_LLM_TEAMS)
 
-
-# The application is deliberately single-replica while its real-time and rate-limit
-# state is in memory (CLAUDE.md). Keep one assessment task per response in flight so
-# automatic and manual triggers cannot duplicate provider calls within that supported
-# deployment model. The worker also checks persisted state before calling a provider.
-_assessment_inflight: set[int] = set()
 
 _ASSESSMENT_SYSTEM = (
     "You are an expert tabletop exercise facilitator. "
@@ -199,7 +193,7 @@ async def _assess_response_result(session, response, inject, definition):
             ResponseAssessed(
                 exercise_id=inject.exercise_id,
                 response_id=response_id,
-                payload=assessment_payload(assessment),
+                assessment_id=assessment.id,
             ),
         )
         await session.commit()
@@ -282,9 +276,10 @@ async def _suggest_inject_result(session, response, inject, exercise, definition
     session.add(suggested)
     try:
         await session.flush()
+        assert suggested.id is not None
         record(
             session,
-            InjectSuggested(exercise_id=exercise.id, suggested=suggested),
+            InjectSuggested(exercise_id=exercise.id, suggested_id=suggested.id),
         )
         await session.commit()
     except IntegrityError:
@@ -323,20 +318,28 @@ async def run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) -
         logger.exception("LLM pipeline failed for response %d", response_id)
 
 
-def queue_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) -> bool:
-    """Queue one assessment per response; return whether a task was created."""
-    if response_id in _assessment_inflight:
-        return False
-    _assessment_inflight.add(response_id)
-    coroutine = run_llm_pipeline(response_id, inject_id, exercise_id)
-    try:
-        task = spawn(coroutine)
-    except Exception:
-        coroutine.close()
-        _assessment_inflight.discard(response_id)
-        raise
-    task.add_done_callback(lambda _: _assessment_inflight.discard(response_id))
-    return True
+async def queue_llm_pipeline(
+    session: AsyncSession, response_id: int, inject_id: int, exercise_id: int
+) -> bool:
+    """Queue one assessment per response; return whether a job was created.
+
+    De-duplication is a queueing lock rather than a process-local set (#213): an
+    automatic trigger on one replica and a facilitator's manual re-trigger on another
+    would otherwise each buy a provider call. The persisted-assessment check inside the
+    pipeline remains the backstop for a job that runs after one already succeeded.
+    """
+    from app.services import task_queue
+
+    return await task_queue.defer_job_once(
+        session,
+        task_queue.TASK_ASSESS_RESPONSE,
+        queueing_lock=f"assess:{response_id}",
+        args={
+            "response_id": response_id,
+            "inject_id": inject_id,
+            "exercise_id": exercise_id,
+        },
+    )
 
 
 async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) -> None:
@@ -466,12 +469,13 @@ async def generate_executive_summary(session, exercise_id: int):
     session.add(summary)
     try:
         await session.flush()
+        assert summary.id is not None
         # Inside the transaction: the IntegrityError branch below rolls back, which
         # discards the buffered event — the loser must not broadcast a frame for a
         # row it never created (same discipline as the assess path).
         record(
             session,
-            SummaryGenerated(exercise_id=exercise_id, payload=summary_payload(summary)),
+            SummaryGenerated(exercise_id=exercise_id, summary_id=summary.id),
         )
         await session.commit()
     except IntegrityError:
@@ -493,28 +497,22 @@ async def generate_executive_summary(session, exercise_id: int):
     return summary
 
 
-_summary_inflight: set[int] = set()
-
-
-def queue_summary_pipeline(exercise_id: int) -> bool:
-    """Queue one summary draft per exercise; return whether a task was created.
+async def queue_summary_pipeline(session: AsyncSession, exercise_id: int) -> bool:
+    """Queue one summary draft per exercise; return whether a job was created.
 
     Without this, a double-click on "draft summary" fired two paid provider calls
     racing each other into the unique constraint (#269) — same guard shape as
-    ``queue_llm_pipeline``.
+    ``queue_llm_pipeline``, and since #213 it holds across replicas rather than
+    within one process.
     """
-    if exercise_id in _summary_inflight:
-        return False
-    _summary_inflight.add(exercise_id)
-    coroutine = run_summary_pipeline(exercise_id)
-    try:
-        task = spawn(coroutine)
-    except Exception:
-        coroutine.close()
-        _summary_inflight.discard(exercise_id)
-        raise
-    task.add_done_callback(lambda _: _summary_inflight.discard(exercise_id))
-    return True
+    from app.services import task_queue
+
+    return await task_queue.defer_job_once(
+        session,
+        task_queue.TASK_GENERATE_SUMMARY,
+        queueing_lock=f"summary:{exercise_id}",
+        args={"exercise_id": exercise_id},
+    )
 
 
 async def run_summary_pipeline(exercise_id: int) -> None:

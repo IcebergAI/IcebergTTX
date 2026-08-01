@@ -44,6 +44,8 @@ dependencies = [
     # Feature-flagged: only used when SMTP_* is configured. Raw socket — goes direct,
     # not through the httpx outbound-proxy layer (#97).
     "aiosmtplib>=3.0",
+    "procrastinate>=3.9",
+    "psycopg[binary]>=3.3.4",
 ]
 
 [project.optional-dependencies]
