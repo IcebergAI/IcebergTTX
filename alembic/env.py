@@ -39,7 +39,11 @@ from app.models import (  # noqa: F401
 )
 
 config = context.config
-config.set_main_option("sqlalchemy.url", make_async_url(settings.database_url))
+# Settings are the source of truth, but an explicitly configured URL wins — that is how
+# a caller migrates a database other than the app's own (the migration tests point this
+# at a throwaway one; ``settings`` is bound at import and cannot be redirected).
+if not config.get_main_option("sqlalchemy.url", None):
+    config.set_main_option("sqlalchemy.url", make_async_url(settings.database_url))
 
 if config.config_file_name is not None:
     # run_migrations() runs Alembic in-process during the app lifespan, so the
@@ -83,12 +87,6 @@ _MIGRATION_LOCK_ID = 8_213_100_213
 
 
 def _do_run_migrations(connection) -> None:
-    # Serialise migrations across replicas (#213). Every replica migrates on startup, so
-    # a rollout would otherwise run several `alembic upgrade head` concurrently against
-    # one database — two processes creating the same table is a crash loop, not a race
-    # you can retry past. The lock is held until the connection closes; whoever loses
-    # simply finds the schema at head and applies nothing.
-    connection.exec_driver_sql(f"SELECT pg_advisory_lock({_MIGRATION_LOCK_ID})")
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -96,6 +94,17 @@ def _do_run_migrations(connection) -> None:
         include_name=include_name,
     )
     with context.begin_transaction():
+        # Serialise migrations across replicas (#213). Every replica migrates on startup,
+        # so a rollout would otherwise run several `alembic upgrade head` concurrently
+        # against one database — two processes creating the same table is a crash loop,
+        # not a race you can retry past. Whoever loses the lock waits, then finds the
+        # schema already at head and applies nothing.
+        #
+        # Taken *inside* Alembic's transaction, and an xact lock rather than a session
+        # one, for two reasons: it is released automatically however the migration ends,
+        # and issuing any statement before this block would autobegin a second
+        # transaction that Alembic never commits — silently discarding every migration.
+        connection.exec_driver_sql(f"SELECT pg_advisory_xact_lock({_MIGRATION_LOCK_ID})")
         context.run_migrations()
 
 
