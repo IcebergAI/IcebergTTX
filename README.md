@@ -349,8 +349,18 @@ sidecar to run.
   or fails a request** — each sink is failure-isolated, and the persisted
   `AuditEvent` table (`AUDIT_PERSIST=true`) remains the durable record. Ensure
   hosts are NTP-synced to UTC so SIEM correlation is accurate.
+- **Retention**: `AUDIT_RETENTION_DAYS` / `/admin/audit` bounds how long persisted
+  audit history is kept. It defaults to `0` — **keep forever** — so an upgrade never
+  silently destroys security records; `365` is a typical compliance value. A sweep
+  prunes past the window on startup and once daily, and the deletion is irreversible
+  (there is no soft-delete and no undo). Because forwarding is best-effort with no
+  retry or outbox, enable a forwarder and confirm it is receiving events **before**
+  turning pruning on: events lost during a forwarder outage are gone for good once
+  pruned. Expired and used password-reset/invite tokens are purged by the same sweep
+  regardless of this setting — they are spent single-use hashes, and the audit trail
+  independently records their issuance and acceptance.
 
-Seed the defaults from the `SIEM_*` env vars (see `.env.example`); routing is then
+Seed the defaults from the `SIEM_*`/`AUDIT_*` env vars (see `.env.example`); routing is then
 edited live from `/admin/audit`. In Kubernetes the non-secret routing lives in
 `k8s/base/configmap.yaml` and the token in `k8s/base/secrets.yaml`.
 
@@ -530,6 +540,10 @@ registration, and password-reset rate limits at **`/admin/settings`**. The corre
 environment values seed the singleton row on first startup; after that, the database row is
 authoritative. Rate-limit changes reach the live limiters without clearing active attempt
 histories, and token-lifetime changes affect newly issued tokens only.
+
+Audit **retention** is the exception: it sits with the forwarding config at
+**`/admin/audit`**, not `/admin/settings`, so the destructive knob and the archival
+path it depends on are configured together.
 
 Security-sensitive process settings such as `SECRET_KEY`, `TRUSTED_ORIGINS`, `DEV_MODE`, and
 cookie security are deliberately not exposed by this page or API.

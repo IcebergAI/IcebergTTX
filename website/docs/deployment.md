@@ -24,6 +24,7 @@ single host, and **Kubernetes** manifests for a cluster. Both front the app with
     | **Login / registration / reset rate limiters** | Attempt counters are per process, so the effective limit multiplies by the replica count | A shared store |
     | **SIEM and proxy config caches** | An admin's change on replica A leaves replica B forwarding to the old sink, or egressing via the old proxy | Cache invalidation across replicas |
     | **In-flight LLM assessments** | Best-effort background tasks, tracked per process | A task queue |
+    | **Audit-retention sweeper** | Every replica runs its own daily purge, so the same batched deletes compete concurrently for the same rows | A task queue, or leader election |
 
     `rehydrate_schedules()` reconstructs pending inject releases and delayed triggered
     communications on startup. Pause cancels both timer types and resume re-arms their
@@ -174,6 +175,37 @@ Schema is managed by **Alembic**. The app self-migrates on startup
 (`alembic upgrade head` runs in the async lifespan), which suits the single-replica
 model. For multi-replica rollouts, run `alembic upgrade head` as a dedicated deploy
 step instead.
+
+## Data growth and retention
+
+Two tables grow with traffic rather than with exercise activity, and both hold
+personal data:
+
+- **`auditevent`** — one row per security-relevant event while `AUDIT_PERSIST` is on,
+  carrying actor emails and source IPs. Unauthenticated endpoints (login, register,
+  password-reset request) emit rows too, so growth is partly driven by whoever is
+  probing you, bounded only by the rate limiters.
+- **`authtoken`** — one row per password-reset request and per invite, each an email
+  address plus a hashed single-use token.
+
+`AUDIT_RETENTION_DAYS` (env seed) / **`/admin/audit`** (authoritative once the row
+exists) bounds the first. It defaults to `0`, meaning **keep forever**: an upgrade
+must never silently destroy security records. Set a day count to enable pruning; a
+sweep runs on startup and once daily, deleting in bounded batches.
+
+Order matters. SIEM forwarding is the archival path once pruning is on, but it is
+**best-effort — no retry, no outbox** — so a forwarder outage that overlaps a purge
+window loses those events permanently. Enable a forwarder, confirm it is receiving
+events, and only then set a retention window. Pruning is irreversible: there is no
+soft-delete and no undo.
+
+Dead `authtoken` rows are purged by the same sweep **unconditionally** — unused rows
+7 days past expiry, used rows 24 hours after being burnt. They are spent by then and
+the audit trail independently records issuance and acceptance, so nothing is lost.
+
+Still unbounded and deliberately untouched: `exercisestatetransition` (lifecycle
+history, which intentionally survives `AUDIT_PERSIST=false`), communications, and
+responses — all domain data with real read paths. Size the database accordingly.
 
 ## Local development
 

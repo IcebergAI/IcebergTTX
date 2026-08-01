@@ -8,6 +8,9 @@ data:
   REGISTRATION_ENABLED: "true"
   ACCESS_TOKEN_EXPIRE_MINUTES: "480"
   AUDIT_PERSIST: "true"
+  # 0 = keep audit history forever; set a day count to prune (#251). Seeds the
+  # AuditSettings row on first startup only — change it at /admin/audit thereafter.
+  AUDIT_RETENTION_DAYS: "0"
   LOGIN_MAX_ATTEMPTS: "5"
   LOGIN_LOCKOUT_SECONDS: "300"
   REGISTRATION_MAX_ATTEMPTS: "5"

@@ -1,9 +1,10 @@
 """Manage the singleton AuditSettings row + the in-memory SIEM config cache (#24).
 
 The row (``id == 1``) is the admin-editable routing config; on first read it is
-seeded from the ``SIEM_*`` env defaults. Every read/update pushes a
+seeded from the ``SIEM_*``/``AUDIT_*`` env defaults. Every read/update pushes a
 ``SiemConfig`` snapshot into ``siem_service`` so the sync ``audit_service.emit``
-path forwards without touching the DB.
+path forwards without touching the DB. ``retention_days`` (#251) rides the same row
+but not that cache — see ``_to_config``.
 """
 
 from typing import Any
@@ -29,9 +30,13 @@ EDITABLE_FIELDS = (
     "syslog_facility",
     "http_endpoint",
     "http_verify_tls",
+    "retention_days",
 )
 
 
+# Note the deliberate omission of retention_days: SiemConfig is the forwarding
+# projection consumed by the sync `audit_service.emit` path, and retention is read
+# straight off the row by retention_service's async sweep (#251).
 def _to_config(row: AuditSettings) -> siem_service.SiemConfig:
     return siem_service.SiemConfig(
         enabled=row.enabled,
@@ -63,6 +68,7 @@ async def get_settings(session: AsyncSession) -> AuditSettings:
             syslog_facility=settings.siem_syslog_facility,
             http_endpoint=settings.siem_http_endpoint,
             http_verify_tls=settings.siem_http_verify_tls,
+            retention_days=settings.audit_retention_days,
         )
         session.add(row)
         await session.commit()

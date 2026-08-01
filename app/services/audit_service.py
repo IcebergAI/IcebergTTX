@@ -3,7 +3,8 @@
 Events are always emitted as JSON lines to the ``iceberg_ttx.audit`` logger so
 they survive even if the database write fails (per the OWASP Logging Cheat
 Sheet). When the runtime ``audit_persist`` policy is enabled they are also written to the
-append-only ``AuditEvent`` table.
+``AuditEvent`` table, which nothing in the request path ever updates or deletes —
+the sole exception is the opt-in retention sweep in ``retention_service`` (#251).
 
 Never pass secrets, password hashes, tokens, or full response/communication
 bodies to ``emit`` — only identifiers and metadata. All free-text values are
