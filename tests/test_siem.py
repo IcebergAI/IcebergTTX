@@ -55,7 +55,7 @@ async def _get_status(client: AsyncClient, path: str, token: str) -> int:
 
 async def test_disabled_is_noop():
     await siem_service.emit(_event(), SiemConfig(enabled=False, methods=frozenset({"stdout"})))
-    assert siem_service.OUTBOX == []
+    assert len(siem_service.OUTBOX) == 0
 
 
 async def test_limited_background_bucket_drops_excess_work():
@@ -78,9 +78,23 @@ async def test_limited_background_bucket_drops_excess_work():
 async def test_min_severity_gate():
     cfg = SiemConfig(enabled=True, methods=frozenset({"stdout"}), min_severity="warning")
     await siem_service.emit(_event("info"), cfg)
-    assert siem_service.OUTBOX == []
+    assert len(siem_service.OUTBOX) == 0
     await siem_service.emit(_event("critical"), cfg)
     assert len(siem_service.OUTBOX) == 1
+
+
+async def test_outbox_is_bounded():
+    # The OUTBOX must not grow without bound in a long-running process (#260):
+    # it's a ring buffer that retains only the most recent maxlen events.
+    cfg = SiemConfig(enabled=True, methods=frozenset({"stdout"}))
+    cap = siem_service.OUTBOX.maxlen
+    assert cap is not None
+    for i in range(cap + 25):
+        await siem_service.emit(_event(action=f"evt.{i}"), cfg)
+    assert len(siem_service.OUTBOX) == cap
+    # The oldest events were dropped; the newest are retained in order.
+    assert siem_service.OUTBOX[-1]["action"] == f"evt.{cap + 24}"
+    assert siem_service.OUTBOX[0]["action"] == "evt.25"
 
 
 async def test_only_selected_methods_invoked(monkeypatch):
@@ -154,7 +168,7 @@ async def test_http_sink_uses_env_token_and_verify(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer super-secret-token"
     # The secret token must never end up in the forwarded body or the test OUTBOX.
     assert "super-secret-token" not in captured["content"]
-    assert "super-secret-token" not in json.dumps(siem_service.OUTBOX)
+    assert "super-secret-token" not in json.dumps(list(siem_service.OUTBOX))
 
 
 async def test_syslog_sink_rfc5424_framing(monkeypatch):
@@ -218,7 +232,7 @@ async def test_emit_does_not_ship_when_disabled():
     siem_service.set_config(SiemConfig(enabled=False))
     audit_service.emit("auth.login", actor_email="x@example.com")
     await _drain()
-    assert siem_service.OUTBOX == []
+    assert len(siem_service.OUTBOX) == 0
 
 
 # --------------------------------------------------------------------------- #

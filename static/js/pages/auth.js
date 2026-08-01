@@ -25,8 +25,8 @@ document.addEventListener('alpine:init', () => {
       });
       this.loading = false;
       if (resp.ok) {
-        const data = await resp.json();
-        localStorage.setItem('dt_token', data.access_token);
+        // The JWT is never stored in JS-readable localStorage (#264); the httpOnly
+        // access_token cookie set by this response authenticates the next page load.
         window.location.href = '/dashboard';
       } else {
         this.error = 'Invalid email or password.';
@@ -67,8 +67,8 @@ document.addEventListener('alpine:init', () => {
       });
       this.loading = false;
       if (resp.ok) {
-        const data = await resp.json();
-        localStorage.setItem('dt_token', data.access_token);
+        // The JWT is never stored in JS-readable localStorage (#264); the httpOnly
+        // access_token cookie set by this response authenticates the next page load.
         window.location.href = '/dashboard';
       } else {
         const data = await resp.json();
@@ -98,8 +98,8 @@ document.addEventListener('alpine:init', () => {
       });
       this.loading = false;
       if (resp.ok) {
-        const data = await resp.json();
-        localStorage.setItem('dt_token', data.access_token);
+        // The JWT is never stored in JS-readable localStorage (#264); the httpOnly
+        // access_token cookie set by this response authenticates the next page load.
         window.location.href = '/dashboard';
       } else {
         const data = await resp.json();

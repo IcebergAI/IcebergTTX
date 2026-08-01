@@ -1,5 +1,6 @@
 """Tests for the generated after-action report + executive summary (#113)."""
 
+import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,6 +13,8 @@ from app.models.inject import Inject, InjectState
 from app.models.response import Response
 from app.models.user import User, UserRole
 from app.services.auth_service import hash_password
+from app.services.report_service import build_report
+from app.services.timeline_service import load_exercise_bundle
 
 
 def _bearer(token: str) -> dict:
@@ -63,6 +66,37 @@ async def _seed_completed(session: AsyncSession, exercise, participant) -> None:
     exercise.debrief_notes = "Containment was fast; the notification decision lagged."
     session.add(exercise)
     await session.commit()
+
+
+async def test_report_names_every_actor_without_loading_unrelated_users(
+    session: AsyncSession, active_exercise, participant: User
+):
+    """The bundle loads only the users an exercise references — enough to name every actor,
+    but never the whole instance roster (#245)."""
+    await _seed_completed(session, active_exercise, participant)
+    unrelated = User(
+        email="unrelated@example.com",
+        display_name="Not In This Exercise",
+        hashed_password=hash_password("password1234"),
+        role=UserRole.participant,
+    )
+    session.add(unrelated)
+    await session.commit()
+    await session.refresh(unrelated)
+
+    bundle = await load_exercise_bundle(session, active_exercise.id)
+    assert bundle is not None
+    loaded = {u.id for u in bundle.users}
+    # (b) the unrelated user is NOT loaded; the referenced actors ARE.
+    assert unrelated.id not in loaded
+    assert participant.id in loaded
+    assert active_exercise.created_by in loaded
+
+    report = await build_report(session, active_exercise.id, bundle=bundle)
+    serialised = json.dumps(report)
+    # (a) every actor is named — no "User #<id>" fallback anywhere in the report.
+    assert "User #" not in serialised
+    assert "Not In This Exercise" not in serialised
 
 
 async def test_report_markdown_assembles_sections(

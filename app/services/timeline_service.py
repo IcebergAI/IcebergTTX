@@ -30,6 +30,7 @@ from app.models.response import Response
 from app.models.scenario import Scenario
 from app.models.user import User
 from app.schemas.scenario_json import ScenarioDefinition
+from app.services import user_service
 from app.services.scenario_service import export_definition
 
 # Stable secondary sort so events sharing a timestamp never swap between calls.
@@ -133,7 +134,25 @@ async def load_exercise_bundle(
             select(ExecutiveSummary).where(ExecutiveSummary.exercise_id == exercise_id)
         )
     ).first()
-    users = tuple((await session.exec(select(User))).all())
+    # Only the users this exercise actually references — the bundle's sole use of them is
+    # the report name map (report_service). An unscoped `select(User)` loaded every account
+    # on the instance to name a handful of participants (#245).
+    referenced_ids = {
+        exercise.created_by,
+        *(member.user_id for member in members),
+        *(inject.released_by for inject in injects),
+        *(inject.resolved_by for inject in injects),
+        *(resolution.resolved_by for resolution in resolutions),
+        *(response.user_id for response in responses),
+        *(communication.sender_id for communication in communications),
+        *(comment.user_id for comment in comments),
+        *(transition.actor_id for transition in transitions),
+    }
+    users = tuple(
+        await user_service.get_by_ids(
+            session, {uid for uid in referenced_ids if uid is not None}
+        )
+    )
     return ExerciseBundle(
         exercise=exercise,
         scenario=scenario,

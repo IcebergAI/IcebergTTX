@@ -60,7 +60,7 @@ The UI ships with a light/dark theme toggle (system-aware):
 - **Backend**: Python 3.14+, FastAPI (fully async), SQLModel + async SQLAlchemy, PostgreSQL (asyncpg)
 - **Frontend**: Jinja2 templates, Tailwind CSS v4 (CLI-compiled), Alpine.js
 - **Real-time**: WebSockets (FastAPI native)
-- **Auth**: JWT tokens (httpOnly cookie + localStorage)
+- **Auth**: JWT in an httpOnly cookie (never JS-readable; the server also accepts an `Authorization: Bearer` header for non-browser API clients)
 - **LLM**: pluggable AI backend — Anthropic (direct), Amazon Bedrock, OpenAI, Ollama, or Gemini, selected by `LLM_PROVIDER` (async; prompt caching on the Anthropic path)
 
 ## Setup
@@ -159,30 +159,36 @@ docker compose down -v     # also deletes volumes — permanent data loss
 
 ## Kubernetes Deployment
 
-Manifests are in `k8s/`. Apply in order:
+Manifests are in `k8s/`, laid out as a Kustomize **base + overlays**:
+
+- `k8s/base/` — the cloud-agnostic stack (namespace, config, secrets,
+  NetworkPolicies, app/postgres/caddy workloads and their ClusterIP Services).
+  It references no CRDs, so it applies on any conformant cluster.
+- `k8s/overlays/nginx/` — base **+ a standard Ingress** (ingress-nginx by
+  default). This is the portable default.
+- `k8s/overlays/eks/` — base **+ an AWS ALB `TargetGroupBinding`** (needs the AWS
+  Load Balancer Controller). The only AWS-specific piece lives here; the base and
+  the nginx overlay stay usable everywhere. See `k8s/overlays/eks/README.md`.
+
+Before applying, replace placeholder values in `k8s/base/secrets.yaml`. The
+manifests reference the published image `ghcr.io/icebergai/iceberg-ttx:<version>`
+in `k8s/base/app/deployment.yaml` and `k8s/base/caddy/deployment.yaml` (the
+copy-static initContainer reuses the app image) — set the tag you want, and pin
+by digest (`image@sha256:…`) in production. Then fill in the
+hostname/issuer/ingressClassName placeholders in your chosen overlay
+(`k8s/overlays/nginx/ingress.yaml` or `k8s/overlays/eks/targetgroupbinding.yaml`).
+
+The whole stack applies with a single overlay build:
 
 ```bash
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/secrets.yaml -f k8s/configmap.yaml
+# Generic clusters (Ingress controller):
+kubectl apply -k k8s/overlays/nginx
+# AWS EKS (ALB via the AWS Load Balancer Controller):
+kubectl apply -k k8s/overlays/eks
 
-# Before applying, replace placeholder values in k8s/secrets.yaml. The manifests
-# reference the published image ghcr.io/icebergai/iceberg-ttx:<version> in
-# k8s/app/deployment.yaml and k8s/caddy/deployment.yaml (the copy-static
-# initContainer reuses the app image) — set the tag you want, and pin by digest
-# (image@sha256:…) in production for reproducible rollouts. Then set the
-# hostname/issuer/ingressClassName placeholders in k8s/caddy/ingress.yaml.
-
-kubectl apply -f k8s/postgres/
 kubectl rollout status statefulset/postgres -n iceberg-ttx
-
-kubectl apply -f k8s/app/
 kubectl rollout status deployment/iceberg-ttx-app -n iceberg-ttx
-
-kubectl apply -f k8s/caddy/          # Deployment + ClusterIP Service + TLS Ingress
 kubectl rollout status deployment/caddy -n iceberg-ttx
-
-# Confine east-west traffic (requires a NetworkPolicy-enforcing CNI):
-kubectl apply -f k8s/networkpolicy.yaml
 
 # Create the first admin account (idempotent). -it is required: with no --password and
 # no ADMIN_PASSWORD, the tool prompts for one and needs a TTY to read it.
@@ -190,9 +196,14 @@ kubectl exec -it -n iceberg-ttx deploy/iceberg-ttx-app -- \
     python -m app.bootstrap_admin --email you@example.com --name "You"
 ```
 
-> **TLS**: in Kubernetes, Caddy runs as a plain-HTTP (`:8080`) internal reverse proxy — TLS is terminated by the cluster **Ingress** (unchanged). The `caddy` Service is `ClusterIP`; `k8s/caddy/ingress.yaml` terminates HTTPS (cert-manager annotation + `force-ssl-redirect`) and forwards to it. Fill in the hostname, `ingressClassName`, and issuer before applying. Do **not** switch the `caddy` Service to a `LoadBalancer` on `:80` — that serves auth over plaintext. (Caddy's automatic-HTTPS mode is used only in the Docker Compose deployment, where it is the edge.)
+Prefer plain `kubectl apply -f` over Kustomize? Apply the individual files under
+`k8s/base/` (namespace → secrets + configmap → `postgres/` → `app/` →
+`caddy/` → `networkpolicy.yaml`), then your ingress
+(`kubectl apply -f k8s/overlays/nginx/ingress.yaml`).
+
+> **TLS**: in Kubernetes, Caddy runs as a plain-HTTP (`:8080`) internal reverse proxy — TLS is terminated by the cluster **Ingress** (unchanged). The `caddy` Service is `ClusterIP`; `k8s/overlays/nginx/ingress.yaml` terminates HTTPS (cert-manager annotation + `force-ssl-redirect`) and forwards to it. Fill in the hostname, `ingressClassName`, and issuer before applying. On EKS the ALB is the TLS edge instead (`k8s/overlays/eks/`). Do **not** switch the `caddy` Service to a `LoadBalancer` on `:80` — that serves auth over plaintext. (Caddy's automatic-HTTPS mode is used only in the Docker Compose deployment, where it is the edge.)
 >
-> **Origin checks**: browser WebSocket auth verifies the upgrade's `Origin` against the request `Host` (plus `TRUSTED_ORIGINS`). This works out of the box because every hop preserves `Host` — but if you configure the Ingress or proxy chain to rewrite it, set `TRUSTED_ORIGINS` in `k8s/configmap.yaml` to your public hostname so live updates keep working.
+> **Origin checks**: browser WebSocket auth verifies the upgrade's `Origin` against the request `Host` (plus `TRUSTED_ORIGINS`). This works out of the box because every hop preserves `Host` — but if you configure the Ingress or proxy chain to rewrite it, set `TRUSTED_ORIGINS` in `k8s/base/configmap.yaml` to your public hostname so live updates keep working.
 >
 > **Pod hardening**: every workload runs non-root under a PSS-`restricted`-style `securityContext` (no privilege escalation, all capabilities dropped, `RuntimeDefault` seccomp), and every container uses a read-only root filesystem — app, init, Caddy, Postgres, and the backup CronJob alike. The Postgres StatefulSet runs as uid 999 with `fsGroup: 999`, which needs a StorageClass that honours `fsGroup`.
 
@@ -284,13 +295,14 @@ kubectl cp -n iceberg-ttx \
 
 #### Scheduled backups (optional)
 
-`k8s/postgres/backup-cronjob.yaml` is a ready-to-adapt `CronJob` that runs daily and
-captures **both** halves of the durable state to a dedicated `postgres-backups` PVC —
-a `pg_dump` of the database and a tar of the `app-uploads` PVC (inject attachments),
-under a shared timestamp — with simple time-based retention:
+`k8s/base/postgres/backup-cronjob.yaml` is a ready-to-adapt `CronJob` that runs daily
+and captures **both** halves of the durable state to a dedicated `postgres-backups`
+PVC — a `pg_dump` of the database and a tar of the `app-uploads` PVC (inject
+attachments), under a shared timestamp — with simple time-based retention (it is part
+of the base, so the overlay applies already include it):
 
 ```bash
-kubectl apply -f k8s/postgres/backup-cronjob.yaml
+kubectl apply -f k8s/base/postgres/backup-cronjob.yaml
 ```
 
 A database-only backup restores into a consistent-looking deployment whose injects
@@ -340,7 +352,7 @@ sidecar to run.
 
 Seed the defaults from the `SIEM_*` env vars (see `.env.example`); routing is then
 edited live from `/admin/audit`. In Kubernetes the non-secret routing lives in
-`k8s/configmap.yaml` and the token in `k8s/secrets.yaml`.
+`k8s/base/configmap.yaml` and the token in `k8s/base/secrets.yaml`.
 
 ### Outbound proxy
 
@@ -644,7 +656,7 @@ website/             # Public documentation site (zensical)
 Dockerfile           # Multi-stage build (Tailwind compile + Python runtime)
 docker-compose.yml   # db + app + caddy-init + caddy (auto-HTTPS, non-root)
 docker/Caddyfile     # Caddy reverse proxy (automatic HTTPS) + static serving
-k8s/                 # Kubernetes manifests (namespace, secrets, postgres, app, caddy)
+k8s/                 # Kustomize base/ (cloud-agnostic manifests) + overlays/ (nginx Ingress · eks ALB TargetGroupBinding)
 ```
 
 ## Quick Workflow

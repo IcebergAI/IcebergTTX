@@ -72,6 +72,72 @@ async def test_close_user_connections_removes_and_closes_only_target_user():
     assert all(c.user_id != 42 for room in manager._rooms.values() for c in room)
     assert any(c.user_id == 7 for room in manager._rooms.values() for c in room)
 
+
+async def _never_returns(*args, **kwargs):
+    """A coroutine that blocks forever — models a socket that never drains (TCP
+    backpressure) or a close that hangs. wait_for cancels it at the timeout."""
+    await asyncio.Event().wait()
+
+
+async def test_send_to_many_prunes_stalled_socket_and_delivers_to_others(monkeypatch):
+    """One stalled client must not block delivery to the others, and is pruned (#252)."""
+    monkeypatch.setattr("app.services.ws_manager._SEND_TIMEOUT", 0.05)
+
+    manager = ConnectionManager()
+    stalled = AsyncMock()
+    stalled.send_json = _never_returns
+    healthy_one = AsyncMock()
+    healthy_two = AsyncMock()
+    # Stalled first: with the old serial loop the healthy sockets would never be reached.
+    await manager.connect(stalled, 1, user_id=1, role="participant", group_id="it_ops")
+    await manager.connect(healthy_one, 1, user_id=2, role="participant", group_id="it_ops")
+    await manager.connect(healthy_two, 1, user_id=3, role="facilitator", group_id=None)
+
+    msg = {"type": "inject_released"}
+    # Outer bound: if the fan-out were still serial/unbounded this would hang, not pass.
+    await asyncio.wait_for(manager.broadcast_to_exercise(1, msg), timeout=2)
+
+    healthy_one.send_json.assert_awaited_once_with(msg)
+    healthy_two.send_json.assert_awaited_once_with(msg)
+    remaining = {id(c.ws) for room in manager._rooms.values() for c in room}
+    assert id(stalled) not in remaining  # timed-out socket pruned
+    assert {id(healthy_one), id(healthy_two)} <= remaining
+    # The timed-out socket is CLOSED (not just removed) so its handler exits and the
+    # client reconnects instead of becoming a zombie that misses every broadcast.
+    stalled.close.assert_awaited_once()
+    healthy_one.close.assert_not_awaited()
+    healthy_two.close.assert_not_awaited()
+
+
+async def test_prune_stale_bounds_hung_close_and_drops_empty_room(monkeypatch):
+    """A hung ws.close() must not stall pruning (which would wedge the heartbeat loop),
+    and an emptied room is dropped (#252)."""
+    monkeypatch.setattr("app.services.ws_manager._CLOSE_TIMEOUT", 0.05)
+
+    manager = ConnectionManager()
+    hung = AsyncMock()
+    hung.close = _never_returns
+    fresh = AsyncMock()
+    await manager.connect(hung, 1, user_id=1, role="participant", group_id="it_ops")
+    await manager.connect(fresh, 2, user_id=2, role="participant", group_id="it_ops")
+    manager._rooms[1][0].last_ping = datetime.now(UTC) - timedelta(seconds=200)
+
+    await asyncio.wait_for(manager.prune_stale(), timeout=2)
+
+    assert 1 not in manager._rooms  # stale socket's room removed despite the hung close
+    assert 2 in manager._rooms and manager._rooms[2][0].ws is fresh
+
+
+async def test_disconnect_drops_empty_room():
+    """disconnect must not leave an empty room entry behind (#252)."""
+    manager = ConnectionManager()
+    ws = AsyncMock()
+    await manager.connect(ws, 1, user_id=1, role="participant", group_id="it_ops")
+    assert 1 in manager._rooms
+    manager.disconnect(ws, 1)
+    assert 1 not in manager._rooms
+
+
 async def test_ws_connect_valid_token(
     client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
@@ -165,9 +231,13 @@ async def test_ws_heartbeat_rechecks_token_authorization(
             _ws_url(active_exercise.id, facilitator_token), client
         ) as ws:
             await ws.send_json({"type": "ping"})
-            with pytest.raises(WebSocketDisconnect):
+            with pytest.raises(WebSocketDisconnect) as exc_info:
                 await ws.receive_json()
     assert resolver.await_count == 2
+    # Token invalid/expired/revoked mid-session is a "who are you" failure, so it
+    # closes 4001 (matching connect-time), not 4003 — the client redirects 4001 to
+    # /login rather than showing an access-denied state (#264).
+    assert exc_info.value.code == 4001
 
 
 async def test_ws_broadcasts_canonical_exercise_state_change_after_commit(
@@ -232,6 +302,65 @@ async def test_ws_receives_inject_released(
     assert msg["payload"]["id"] == inject_id
     assert msg["payload"]["state"] == "released"
     assert "options" in msg["payload"]
+
+
+async def test_ws_inject_released_redacts_branch_topology(
+    client: AsyncClient,
+    session: AsyncSession,
+    facilitator_token: str,
+    participant_token: str,
+    active_exercise: Exercise,
+):
+    """The inject_released frame must not leak next_inject_id (branch topology) to
+    participants or observers — node-level or per-option — while facilitators still
+    receive it (#266). Exercises the broadcast facilitator_message role split."""
+    from app.services.exercise_service import enrol_member
+
+    # inject_01 is a scenario-backed it_ops inject whose opt_a maps to inject_02.
+    injects = (await client.get(
+        f"/api/exercises/{active_exercise.id}/injects",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )).json()
+    inject_id = next(i["id"] for i in injects if i["scenario_node_id"] == "inject_01")
+
+    observer = User(
+        email="ws-redact-observer@example.com",
+        display_name="Observer",
+        hashed_password=hash_password("pw"),
+        role=UserRole.observer,
+    )
+    session.add(observer)
+    await session.commit()
+    await session.refresh(observer)
+    await enrol_member(session, exercise=active_exercise, user_id=observer.id)
+    observer_token = create_access_token(subject=observer.email, role=observer.role.value)
+
+    async with (
+        aconnect_ws(_ws_url(active_exercise.id, participant_token), client) as participant_ws,
+        aconnect_ws(_ws_url(active_exercise.id, observer_token), client) as observer_ws,
+        aconnect_ws(_ws_url(active_exercise.id, facilitator_token), client) as facilitator_ws,
+    ):
+        await client.post(
+            f"/api/exercises/{active_exercise.id}/injects/{inject_id}/release",
+            headers={"Authorization": f"Bearer {facilitator_token}"},
+        )
+        participant_msg = await asyncio.wait_for(participant_ws.receive_json(), timeout=5)
+        observer_msg = await asyncio.wait_for(observer_ws.receive_json(), timeout=5)
+        facilitator_msg = await asyncio.wait_for(facilitator_ws.receive_json(), timeout=5)
+
+    # Participant + observer: redacted — no branch topology, node-level or per-option.
+    for msg in (participant_msg, observer_msg):
+        assert msg["type"] == "inject_released"
+        assert "next_inject_id" not in msg["payload"]
+        assert msg["payload"]["options"], "options still present for choosing"
+        for opt in msg["payload"]["options"]:
+            assert "next_inject_id" not in opt
+
+    # Facilitator: full frame retains the branch topology (console data).
+    assert facilitator_msg["type"] == "inject_released"
+    assert "next_inject_id" in facilitator_msg["payload"]
+    opt_a = next(o for o in facilitator_msg["payload"]["options"] if o["id"] == "opt_a")
+    assert opt_a["next_inject_id"] == "inject_02"
 
 
 async def test_ws_team_targeted_inject_reaches_team_member(

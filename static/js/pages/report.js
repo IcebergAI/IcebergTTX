@@ -125,7 +125,7 @@ document.addEventListener('alpine:init', () => {
 
     destroy() {
       this.destroyed = true;
-      if (this.ws) try { this.ws.close(); } catch (e) { /* noop */ }
+      if (this.ws) try { this.ws.close(); } catch { /* noop */ }
       if (this.pingInterval) clearInterval(this.pingInterval);
       if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
     },

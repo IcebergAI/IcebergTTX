@@ -1,0 +1,60 @@
+{
+  // Biome as a lint-only gate for hand-authored CSS/JS (#278). Formatting is left
+  // off so it never fights the existing hand-maintained style; it only flags real
+  // defects. The vendored Alpine CSP build and the generated Tailwind output are
+  // excluded — neither is hand-authored.
+  "$schema": "https://biomejs.dev/schemas/2.5.5/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "css": {
+    "parser": {
+      // input.css is hand-authored but uses Tailwind v4 at-rules (@source, @theme).
+      "tailwindDirectives": true
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      // Rules disabled because they fight this project's deliberate, documented
+      // idioms rather than catch defects. Everything else in the recommended set
+      // (correctness, the rest of suspicious, a11y) stays on.
+      "complexity": {
+        // Explicit `a && a.b` guards are the established style across the hand-written
+        // page scripts; a bulk rewrite to `?.` belongs in its own cleanup, not the
+        // gate that introduces linting.
+        "useOptionalChain": "off",
+        // The 40/44px touch-target floor deliberately uses !important so control
+        // classes beat the global floor (CLAUDE.md); a Playwright test enforces it.
+        "noImportantStyles": "off"
+      },
+      "style": {
+        // String concatenation is used throughout by choice; not a correctness issue.
+        "useTemplate": "off"
+      },
+      "suspicious": {
+        // `height: 100vh; height: 100dvh` is an intentional progressive-enhancement
+        // fallback for browsers without dynamic-viewport units, not a typo.
+        "noDuplicateProperties": "off",
+        // The theme cookie must be set synchronously before first paint (theme-boot),
+        // and logout clears auth/view cookies inline; the async CookieStore API can't
+        // serve either, so document.cookie is intentional here.
+        "noDocumentCookie": "off"
+      }
+    }
+  },
+  "files": {
+    "includes": [
+      "static/**/*.js",
+      "static/**/*.css",
+      "!static/js/vendor",
+      "!static/css/output.css"
+    ]
+  }
+}

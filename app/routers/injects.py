@@ -31,6 +31,7 @@ from app.services.exercise_service import validate_group_id, validate_team_ids
 from app.services.inject_service import (
     AttachmentMeta,
     create_inject,
+    delete_pending_inject,
     get_inject_or_404,
     inject_payload,
     release_inject,
@@ -201,13 +202,16 @@ async def list_injects(exercise_id: int, current_user: CurrentUserDep, session: 
             .order_by(cast(Any, Inject.sequence_order))
         )
     ).all()
-    if current_user.role == UserRole.facilitator:
+    is_facilitator = current_user.role == UserRole.facilitator
+    if is_facilitator:
         visible = list(injects)
     else:
         # One membership lookup for the whole list, not one per inject (#263).
         group_id = await exercise_group_for_user(session, exercise_id, current_user)
         visible = [i for i in injects if inject_visible_to(i, current_user, group_id)]
-    return [await inject_payload(session, i) for i in visible]
+    # Only facilitators get branch topology (next_inject_id); participants/observers
+    # get the redacted payload so they can't read the branch map ahead of choosing (#266).
+    return [await inject_payload(session, i, include_progression=is_facilitator) for i in visible]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=InjectPublic)
@@ -249,7 +253,7 @@ async def create(
         if attachment_meta:
             _delete_attachment_path(attachment_meta.path)
         raise
-    return await inject_payload(session, inject)
+    return await inject_payload(session, inject, include_progression=True)
 
 
 @router.get("/{inject_id}", response_model=InjectPublic)
@@ -259,7 +263,9 @@ async def get_inject(
     await require_exercise_access(session, exercise_id, current_user)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
     await require_inject_visible(session, inject, current_user)
-    return await inject_payload(session, inject)
+    return await inject_payload(
+        session, inject, include_progression=current_user.role == UserRole.facilitator
+    )
 
 
 @router.delete("/{inject_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -269,8 +275,12 @@ async def delete_inject(
     exercise = await require_exercise_owner(session, exercise_id, current_user)
     require_operational_mutability(exercise)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
-    await session.delete(inject)
-    await session.commit()
+    # A released inject carries after-action evidence (participant responses, comments, and
+    # per-group resolution progress all cascade off the inject row) and is on participant
+    # screens. Deleting it would silently destroy that record, so the delete is conditional on
+    # the inject still being pending — a compare-and-swap that also closes the race against a
+    # concurrent release (#265).
+    await delete_pending_inject(session, inject)
     _delete_attachment_file(inject)
     audit_service.emit(
         "inject.delete",
@@ -331,7 +341,7 @@ async def release(
         target_id=inject_id,
         reason=f"exercise={exercise_id}",
     )
-    return await inject_payload(session, released)
+    return await inject_payload(session, released, include_progression=True)
 
 
 class UpdateScheduleRequest(BaseModel):
@@ -383,4 +393,4 @@ async def update_schedule(
         reason=f"exercise={exercise_id} offset={body.release_offset_minutes}",
     )
     await dispatch(session)
-    return await inject_payload(session, inject)
+    return await inject_payload(session, inject, include_progression=True)

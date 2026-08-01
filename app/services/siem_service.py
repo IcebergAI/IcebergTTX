@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import socket
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -35,8 +36,10 @@ logger = logging.getLogger("iceberg_ttx.siem")
 
 # Inspectable by tests — every event that passes the enabled/severity gate is
 # appended here (regardless of method), so the pipeline is observable without a
-# live collector.
-OUTBOX: list[dict] = []
+# live collector. Bounded so a long-running process can't retain every forwarded
+# event forever (#260): a ring buffer that keeps only the most recent events,
+# which is all the tests (and any live introspection) ever look at.
+OUTBOX: deque[dict] = deque(maxlen=500)
 
 # Short ceilings so a slow/unreachable SIEM can't pile up background work.
 _HTTP_TIMEOUT = 5.0

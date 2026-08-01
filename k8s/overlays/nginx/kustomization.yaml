@@ -1,0 +1,14 @@
+# Generic ingress overlay: the cloud-agnostic base + a standard Kubernetes
+# Ingress (ingress-nginx by default; edit ingress.yaml for Traefik/other).
+#
+# This is the portable default — it works on any cluster that has an Ingress
+# controller and needs no cloud CRDs. Fill in the hostname / issuer /
+# ingressClassName placeholders in ingress.yaml before applying.
+#
+#   kubectl apply -k k8s/overlays/nginx
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base      # cloud-agnostic base (k8s/base/kustomization.yaml)
+  - ingress.yaml

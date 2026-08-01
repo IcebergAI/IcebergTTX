@@ -1,0 +1,51 @@
+# Pre-commit mirror of the CI static gate (#276): fast, local hooks so lint,
+# type, SAST and frontend-lint failures surface before a push instead of after.
+#
+# Every hook is `repo: local` / `language: system` and reuses the locked dev
+# toolchain (`uv sync --extra dev`) — nothing here downloads or pins its own copy
+# of a tool, so the hooks and CI always run the same versions. `pass_filenames:
+# false` runs each tool over its own configured scope, exactly as CI does.
+#
+# The slow suites (pytest, Playwright) deliberately stay in CI only. Enable with:
+#   uv tool install pre-commit   # or: pipx install pre-commit
+#   pre-commit install
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        entry: uv run ruff check app/ tests/
+        language: system
+        types_or: [python]
+        pass_filenames: false
+
+      - id: pyright
+        name: pyright (type check)
+        entry: uv run pyright app/
+        language: system
+        types_or: [python]
+        pass_filenames: false
+
+      - id: bandit
+        name: bandit (security scan)
+        entry: uv run bandit -c pyproject.toml -r app/
+        language: system
+        types_or: [python]
+        pass_filenames: false
+
+      - id: djlint
+        name: djlint (jinja templates)
+        entry: uvx djlint@1.42.1 app/templates --lint
+        language: system
+        files: \.html$
+        pass_filenames: false
+
+      - id: biome
+        name: biome (css/js — skipped if not installed)
+        # Biome is a standalone binary installed in CI, not part of the locked
+        # dev extra; no-op locally when it's absent so it never blocks a commit on
+        # a checkout that lacks it (CI still enforces it).
+        entry: bash -c 'if command -v biome >/dev/null 2>&1; then biome lint; else echo "biome not installed — skipping (CI enforces it)"; fi'
+        language: system
+        files: ^static/.*\.(js|css)$
+        pass_filenames: false

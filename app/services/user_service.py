@@ -10,7 +10,9 @@ quietly lower-casing here would change who can log in. Normalisation stays where
 with the caller who knows what the input is.
 """
 
-from sqlmodel import select
+from collections.abc import Collection
+
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.user import User
@@ -32,8 +34,19 @@ async def email_exists(session: AsyncSession, email: str) -> bool:
     return await get_by_email(session, email) is not None
 
 
+async def get_by_ids(session: AsyncSession, ids: Collection[int]) -> list[User]:
+    """The users with these ids, in no particular order. Empty ids → no query.
+
+    The name-map read for report/timeline/export projections
+    (`timeline_service.load_exercise_bundle`): only the users an exercise actually
+    references, not every account on the instance (#245)."""
+    if not ids:
+        return []
+    return list((await session.exec(select(User).where(col(User.id).in_(ids)))).all())
+
+
 async def list_all(session: AsyncSession) -> list[User]:
-    """Every user — the member-enrolment picker. Deliberately unfiltered; the one other
-    unfiltered read (`timeline_service.load_exercise_bundle`, which loads all users just
-    to build a name map) is a separate efficiency bug, not a layering one."""
+    """Every user — the member-enrolment picker. Deliberately unfiltered: the picker
+    genuinely needs the whole roster (unlike the report name map, which now scopes to the
+    referenced ids via `get_by_ids` — #245)."""
     return list((await session.exec(select(User))).all())

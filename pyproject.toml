@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Security",
 ]
 dependencies = [
-    "fastapi>=0.115",
+    "fastapi>=0.140.0",
     "uvicorn[standard]>=0.51.0",
     "sqlmodel>=0.0.21",
     "pydantic-settings>=2.14.2",
@@ -53,19 +53,19 @@ dependencies = [
 # your LLM_PROVIDER: llm-anthropic (direct Anthropic), llm-bedrock (Anthropic on
 # AWS — the anthropic SDK's Bedrock client, pulls boto3), or llm-openai (covers
 # LLM_PROVIDER=openai, ollama, and gemini via the OpenAI-compatible surface).
-llm-anthropic = ["anthropic>=0.40"]
-llm-bedrock = ["anthropic[bedrock]>=0.116.0"]
-llm-openai = ["openai>=1.40"]
+llm-anthropic = ["anthropic>=0.120.0"]
+llm-bedrock = ["anthropic[bedrock]>=0.120.0"]
+llm-openai = ["openai>=2.48.0"]
 # Install every provider SDK at once (used by the container image).
-llm-all = ["anthropic[bedrock]>=0.116.0", "openai>=1.40"]
+llm-all = ["anthropic[bedrock]>=0.120.0", "openai>=2.48.0"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-xdist>=3.6",
     "httpx>=0.27",
     "httpx-ws>=0.6",
-    "testcontainers[postgres]>=4.14.2",
-    "ruff>=0.4",
+    "testcontainers[postgres]>=4.15.0",
+    "ruff>=0.16.0",
     "bandit>=1.7",
     "pip-audit>=2.7",
     "vulture>=2.11",
@@ -75,8 +75,8 @@ dev = [
     "pytest-playwright>=0.7",
     # All provider SDKs so a dev env can run/smoke any LLM_PROVIDER (the test suite
     # itself mocks providers and needs none of these).
-    "anthropic[bedrock]>=0.116.0",
-    "openai>=1.40",
+    "anthropic[bedrock]>=0.120.0",
+    "openai>=2.48.0",
 ]
 
 [project.scripts]
@@ -154,3 +154,18 @@ ignore_names = [
     "schema_version",
     "debrief_notes",
 ]
+
+[tool.djlint]
+# Structural Jinja/HTML linting for the templates (#278). The ignored rules below
+# are opinions that fight this stack rather than catch defects, so they're
+# disabled while the structural checks (unclosed tags, malformed blocks) stay on:
+#   H021 — inline `style` attributes carry genuinely dynamic values (grid templates,
+#          status-dot colours) that aren't expressible as Tailwind utility classes.
+#   H023 — HTML entity references (&rarr; etc.) are used deliberately.
+#   H030 — meta-description guidance is irrelevant to an authenticated app shell.
+#   H037 — misfires on Alpine event modifiers (@keydown.enter.prevent reads as a
+#          duplicate "prevent" attribute).
+#   J004/J018 — url_for() static/link patterns are Flask idioms; this is FastAPI.
+#   T028 — spaceless-tag preference, cosmetic.
+profile = "jinja"
+ignore = "H021,H023,H030,H037,J004,J018,T028"

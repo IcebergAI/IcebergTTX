@@ -164,6 +164,44 @@ async def test_anthropic_adapter_parses_content_text(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_anthropic_adapter_omits_empty_context_block(monkeypatch):
+    # An empty cached_context must NOT become an empty text content block: the
+    # Anthropic API 400s on those, which is what broke the admin "test connection"
+    # button for a correctly configured provider (#261).
+    cfg = _settings(
+        llm_provider="anthropic", anthropic_api_key="sk-x"
+    ).active_llm_provider()
+    adapter = AnthropicFamilyAdapter(cfg)
+    client = MagicMock()
+    client.messages = MagicMock(create=AsyncMock(return_value=_anthropic_message("OK")))
+    monkeypatch.setattr(adapter, "_get_client", lambda: client)
+
+    out = await adapter.complete("sys", "", "Reply with OK.", 1)
+
+    assert out == "OK"
+    content = client.messages.create.call_args.kwargs["messages"][0]["content"]
+    assert content == [{"type": "text", "text": "Reply with OK."}]
+
+
+@pytest.mark.asyncio
+async def test_bedrock_adapter_omits_empty_context_block(monkeypatch):
+    # Same empty-block rejection reaches Bedrock via its branch (#261).
+    cfg = _settings(
+        llm_provider="bedrock", bedrock_aws_region="us-east-1"
+    ).active_llm_provider()
+    adapter = AnthropicFamilyAdapter(cfg)
+    client = MagicMock()
+    client.messages = MagicMock(create=AsyncMock(return_value=_anthropic_message("OK")))
+    monkeypatch.setattr(adapter, "_get_client", lambda: client)
+
+    out = await adapter.complete("sys", "", "Reply with OK.", 1)
+
+    assert out == "OK"
+    content = client.messages.create.call_args.kwargs["messages"][0]["content"]
+    assert content == [{"type": "text", "text": "Reply with OK."}]
+
+
+@pytest.mark.asyncio
 async def test_bedrock_adapter_omits_cache_control(monkeypatch):
     cfg = _settings(
         llm_provider="bedrock", bedrock_aws_region="us-east-1"

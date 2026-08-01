@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -69,7 +69,7 @@ from app.routers import (
     settings as settings_router,
 )
 from app.routers.ui import UIRedirect
-from app.services import audit_service
+from app.services import audit_service, background
 from app.services.ws_manager import heartbeat_task
 
 logger = logging.getLogger("iceberg_ttx")
@@ -191,8 +191,29 @@ async def lifespan(app: FastAPI):
     audit_service.emit("app.startup", severity="info")
     task = asyncio.create_task(heartbeat_task())
     yield
-    task.cancel()
+    # Graceful teardown (#250), strictly ordered:
+    # 1. Record app.shutdown FIRST, while the loop is still live, so its audit-persist and
+    #    SIEM-forward tasks are spawned in time to join the drain below instead of being
+    #    abandoned into a dying loop (which reliably lost the shutdown record to stdout).
     audit_service.emit("app.shutdown", severity="info")
+    # 2. Stop the heartbeat loop and await its cancellation.
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+    # 3. Drain in-flight background work (mail, audit persist, SIEM forward, LLM runs) and
+    #    armed timers in one bounded, converging pass. cancel_all_schedules, re-invoked each
+    #    round, cancels still-sleeping timers (rehydration re-arms them next boot) and hands
+    #    back any worker already mid-release so it finishes its commit and dispatch atomically
+    #    (#218); the drain re-collects the task sets after each wait so audit/SIEM writes and
+    #    triggered-comm timers spawned *by* those releases are drained too, not disposed out
+    #    from under (see background.drain).
+    from app.services.schedule_service import cancel_all_schedules
+
+    await background.drain(collect_extra=cancel_all_schedules)
+    # 4. Close the asyncpg pool cleanly so Postgres doesn't log unexpected EOFs on deploy.
+    from app.database import engine
+
+    await engine.dispose()
 
 
 app = FastAPI(title="IcebergTTX", lifespan=lifespan)

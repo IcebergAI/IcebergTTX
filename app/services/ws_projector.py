@@ -88,12 +88,21 @@ async def on_exercise_state_changed(session: AsyncSession, ev: ExerciseStateChan
 async def on_inject_released(session: AsyncSession, ev: InjectReleased) -> None:
     from app.services.inject_service import inject_payload, inject_target_groups
 
-    frame = _frame("inject_released", ev.exercise_id, await inject_payload(session, ev.inject))
+    # Participants/observers get the redacted payload; facilitators get the full one
+    # with branch topology (#266). The manager routes the two frames by role in one pass.
+    base = _frame("inject_released", ev.exercise_id, await inject_payload(session, ev.inject))
+    full = _frame(
+        "inject_released",
+        ev.exercise_id,
+        await inject_payload(session, ev.inject, include_progression=True),
+    )
     groups = inject_target_groups(ev.inject)
     if groups:
-        await manager.broadcast_to_groups(ev.exercise_id, groups, frame)
+        await manager.broadcast_to_groups(
+            ev.exercise_id, groups, base, facilitator_message=full
+        )
     else:
-        await manager.broadcast_to_exercise(ev.exercise_id, frame)
+        await manager.broadcast_to_exercise(ev.exercise_id, base, facilitator_message=full)
 
 
 @subscribe(InjectUpdated)
@@ -104,7 +113,11 @@ async def on_inject_updated(session: AsyncSession, ev: InjectUpdated) -> None:
 
     await manager.send_to_facilitators(
         ev.exercise_id,
-        _frame("inject_updated", ev.exercise_id, await inject_payload(session, ev.inject)),
+        _frame(
+            "inject_updated",
+            ev.exercise_id,
+            await inject_payload(session, ev.inject, include_progression=True),
+        ),
     )
 
 

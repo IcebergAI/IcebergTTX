@@ -2,10 +2,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.exercise import ExerciseState
 from app.models.inject import Inject, InjectState
 from app.models.scenario import Scenario
 from app.schemas.api import InjectPublic
@@ -70,6 +71,32 @@ async def get_inject_or_404(session: AsyncSession, exercise_id: int, inject_id: 
     return inject
 
 
+async def delete_pending_inject(session: AsyncSession, inject: Inject) -> None:
+    """Delete an inject only while it is still pending, else 409.
+
+    Conditional on ``state == pending`` so a release committing between the caller's read and
+    this delete cannot slip through: once released, the inject carries after-action evidence
+    (responses, comments, per-group resolution progress) and is on participant screens (#265).
+    A released inject matches zero rows here and is left fully intact; a genuinely-pending one
+    has no such dependents, so the ``ondelete="CASCADE"`` FKs never destroy evidence. Mirrors
+    the compare-and-swap in ``release_inject``."""
+    assert inject.id is not None
+    deleted = (
+        await session.exec(
+            delete(Inject)
+            .where(col(Inject.id) == inject.id, col(Inject.state) == InjectState.pending)
+            .returning(col(Inject.id))
+            .execution_options(synchronize_session=False)
+        )
+    ).scalar_one_or_none()
+    if deleted is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Released injects cannot be deleted; resolve them or let them stand",
+        )
+    await session.commit()
+
+
 async def release_inject(
     session: AsyncSession,
     inject: Inject,
@@ -83,7 +110,19 @@ async def release_inject(
         seed_inject_resolution_contexts,
     )
 
-    await lock_exercise_for_audience_snapshot(session, inject.exercise_id)
+    # Re-read state from the locked exercise row. Both callers (manual route and scheduled
+    # worker) check state == active *before* this lock, so a pause committing in that window
+    # would otherwise land a release — frame broadcast, triggered comms armed — into a paused
+    # exercise (#265). The lock is already held, so this costs nothing extra.
+    exercise = await lock_exercise_for_audience_snapshot(session, inject.exercise_id)
+    if exercise.state != ExerciseState.active:
+        # Nothing has been written yet (only the row lock is held), so raise without a
+        # rollback — matching the release_is_allowed guard just below. The caller's / worker's
+        # transaction releases the lock on exit.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only active exercises can release injects",
+        )
 
     if not await release_is_allowed(session, inject, scheduled=scheduled):
         raise HTTPException(
@@ -164,25 +203,40 @@ async def _inject_node(session: AsyncSession, inject: Inject):
     return get_inject_node(definition, inject.scenario_node_id)
 
 
-async def _inject_options(session: AsyncSession, inject: Inject) -> list[dict]:
+async def _inject_options(
+    session: AsyncSession, inject: Inject, *, include_progression: bool = False
+) -> list[dict]:
     node = await _inject_node(session, inject)
     if not node:
         return []
-    return [
-        {"id": option.id, "label": option.label, "next_inject_id": option.next_inject_id}
-        for option in node.options
-    ]
+    options: list[dict] = []
+    for option in node.options:
+        entry: dict[str, str | None] = {"id": option.id, "label": option.label}
+        # next_inject_id maps this option to an unreleased future node — the branch
+        # topology. Omit it unless the caller opts in (facilitator paths), so a
+        # participant can't read which option leads where before choosing (#266).
+        if include_progression:
+            entry["next_inject_id"] = option.next_inject_id
+        options.append(entry)
+    return options
 
 
-async def inject_payload(session: AsyncSession, inject: Inject) -> dict:
+async def inject_payload(
+    session: AsyncSession, inject: Inject, *, include_progression: bool = False
+) -> dict:
     """Canonical inject serialization shared by the API responses and WS broadcasts.
 
     Built via the ``InjectPublic`` schema so the HTTP and WebSocket payloads cannot
     drift (#21, #31).
+
+    ``next_inject_id`` (node-level and per-option) points at unreleased future nodes —
+    the exercise's branch topology. It is redacted by **default** (#266) and included
+    only when ``include_progression`` is set, which facilitator-facing paths opt into.
+    Redacting by default means a forgotten caller over-redacts (safe) rather than leaks.
     """
     assert inject.id is not None
     node = await _inject_node(session, inject)
-    return InjectPublic(
+    payload = InjectPublic(
         id=inject.id,
         exercise_id=inject.exercise_id,
         scenario_node_id=inject.scenario_node_id,
@@ -198,11 +252,17 @@ async def inject_payload(session: AsyncSession, inject: Inject) -> dict:
         resolved_by=inject.resolved_by,
         resolution_reason=inject.resolution_reason,
         release_offset_minutes=inject.release_offset_minutes,
-        options=await _inject_options(session, inject),
-        next_inject_id=node.next_inject_id if node else None,
+        options=await _inject_options(session, inject, include_progression=include_progression),
+        next_inject_id=(node.next_inject_id if node and include_progression else None),
         free_text_response=node.free_text_response if node else True,
         attachment=inject_attachment_payload(inject),
     ).model_dump(mode="json")
+    if not include_progression:
+        # Drop the node-level key entirely so the WS frame (no response_model) omits it.
+        # HTTP routes keep response_model=InjectPublic, which re-adds it as null — a
+        # participant sees no future node either way (#266).
+        payload.pop("next_inject_id", None)
+    return payload
 
 
 async def seed_injects_from_scenario(

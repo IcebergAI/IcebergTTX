@@ -101,7 +101,12 @@ async def exercise_ws(
                         view_team,
                     )
                     if current is None:
-                        await ws.close(code=4003)
+                        # Token now missing/expired/revoked mid-session: same "who are
+                        # you" failure as connect-time (4001), distinct from the "you
+                        # can't be here" access/membership denials below (4003). The
+                        # client redirects 4001 to /login and only shows access-denied
+                        # for 4003 (#264).
+                        await ws.close(code=4001)
                         break
                     try:
                         await require_exercise_access(heartbeat_session, exercise_id, current)

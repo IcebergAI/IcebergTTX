@@ -1,0 +1,19 @@
+# AWS EKS overlay: the cloud-agnostic base + a TargetGroupBinding that wires the
+# caddy Service to an ALB target group via the AWS Load Balancer Controller.
+#
+# It deliberately does NOT pull in overlays/nginx's Ingress — on EKS the ALB is
+# the edge, so a second ingress-nginx path would be redundant.
+#
+#   kubectl apply -k k8s/overlays/eks
+#
+# Because this references the TargetGroupBinding CRD (elbv2.k8s.aws), it only
+# applies on a cluster where the AWS Load Balancer Controller is installed. That
+# CRD dependency is confined to THIS overlay — the base and the nginx overlay
+# stay usable on any cluster. See README.md for prerequisites and the ALB-Ingress
+# alternative.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base                 # cloud-agnostic base (k8s/base/kustomization.yaml)
+  - targetgroupbinding.yaml

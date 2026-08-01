@@ -14,6 +14,7 @@ document.addEventListener('alpine:init', () => {
     showSend: false,
     ws: null,
     wsConnected: false,
+    wsAccessDenied: false,  // set on a terminal 4003 close (removed/denied) (#264)
     pingInterval: null,
     reconnectTimeout: null,
     destroyed: false,

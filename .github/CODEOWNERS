@@ -1,0 +1,40 @@
+# Code owners for IcebergTTX (#277).
+#
+# The last matching pattern wins. The default owner covers everything; the
+# security-sensitive paths below are called out explicitly so those changes
+# always route to a code owner (and so a future dedicated security team is a
+# one-line change per path rather than a re-audit). Only the @IcebergAI/maintainers
+# team is referenced — never a personal handle — so ownership survives any single
+# contributor leaving.
+
+# Default owner for the whole repository.
+*                                   @IcebergAI/maintainers
+
+# --- Authentication & identity -------------------------------------------------
+/app/routers/auth.py                @IcebergAI/maintainers
+/app/services/auth_service.py       @IcebergAI/maintainers
+/app/services/token_service.py      @IcebergAI/maintainers
+/app/services/oidc/                 @IcebergAI/maintainers
+/app/services/oidc_settings_service.py  @IcebergAI/maintainers
+
+# --- Audit / SIEM & secret-bearing sinks --------------------------------------
+/app/routers/audit.py               @IcebergAI/maintainers
+/app/services/audit_service.py      @IcebergAI/maintainers
+/app/services/audit_settings_service.py  @IcebergAI/maintainers
+/app/services/siem_service.py       @IcebergAI/maintainers
+/app/services/mail_service.py       @IcebergAI/maintainers
+/app/services/proxy.py              @IcebergAI/maintainers
+/app/services/proxy_settings_service.py  @IcebergAI/maintainers
+
+# --- App configuration (secrets, CSP, startup validation) ---------------------
+/app/config.py                      @IcebergAI/maintainers
+
+# --- CI/CD, supply chain & security policy ------------------------------------
+/.github/                           @IcebergAI/maintainers
+/SECURITY.md                        @IcebergAI/maintainers
+/Dockerfile                         @IcebergAI/maintainers
+
+# --- Deployment manifests ------------------------------------------------------
+/k8s/                               @IcebergAI/maintainers
+/docker/                            @IcebergAI/maintainers
+/docker-compose.yml                 @IcebergAI/maintainers

@@ -17,6 +17,16 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      # codeql-action/init and codeql-action/analyze are separate dependencies to
+      # Dependabot but one action to CodeQL: a run whose steps disagree on version
+      # aborts with "Loaded a configuration file for version 'X', but running
+      # version 'Y'". Ungrouped, each release lands as two PRs that both fail CI
+      # and can only be merged by hand-combining them (#293). Group them so the
+      # pins always move together.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
   # Base images referenced by the Dockerfile
   - package-ecosystem: "docker"

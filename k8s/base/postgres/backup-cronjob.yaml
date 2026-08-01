@@ -17,7 +17,8 @@
 # the app pod — hence the podAffinity below. On a ReadWriteMany StorageClass the
 # affinity is unnecessary and can be dropped.
 #
-# Apply:  kubectl apply -f k8s/postgres/backup-cronjob.yaml
+# Apply:  included in the base kustomization (kubectl apply -k k8s/overlays/<name>),
+# or standalone: kubectl apply -f k8s/base/postgres/backup-cronjob.yaml
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
