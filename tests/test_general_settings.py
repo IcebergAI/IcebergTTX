@@ -52,7 +52,9 @@ async def test_save_updates_runtime_policy_and_emits_warning_audit(
     cached = general_settings_service.get_config()
     assert cached.registration_enabled is False
     assert cached.access_token_expire_minutes == 90
-    assert events[-1][0] == "audit.settings_updated"
+    # Not "audit.settings_updated" — that is the audit router's action, and reusing it
+    # made general-settings changes indistinguishable in SIEM rules (#269).
+    assert events[-1][0] == "general.settings_updated"
     assert events[-1][1]["severity"] == "warning"
 
     blocked = await client.post(
