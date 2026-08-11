@@ -39,7 +39,7 @@ def upgrade() -> None:
         sa.Column("scenario_id", sa.Integer(), nullable=False),
         sa.Column("scenario_version", sa.String(), nullable=False),
         sa.Column("scenario_title", sa.String(), nullable=False),
-        sa.Column("schema_version", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column("schema_version", sa.Integer(), nullable=False),
         sa.Column("definition", sa.Text(), nullable=False),
         sa.Column("configuration_json", sa.Text(), nullable=False),
         sa.Column("content_sha256", sa.String(64), nullable=False),

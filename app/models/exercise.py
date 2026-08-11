@@ -124,13 +124,13 @@ class ExerciseRunSnapshot(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE", index=True)
     # Source identity is retained for provenance, but never dereferenced for a run.
-    scenario_id: int = Field(foreign_key="scenario.id", ondelete="RESTRICT", index=True)
+    scenario_id: int = Field(foreign_key="scenario.id", ondelete="RESTRICT")
     scenario_version: str
     scenario_title: str
     schema_version: int = Field(default=1)
     definition: str = Field(sa_column=Column(Text, nullable=False))
     configuration_json: str = Field(sa_column=Column(Text, nullable=False))
-    content_sha256: str = Field(index=True, min_length=64, max_length=64)
+    content_sha256: str = Field(min_length=64, max_length=64)
     captured_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )
