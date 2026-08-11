@@ -39,6 +39,7 @@ from app.services.access_control import (
 )
 from app.services.csv_export import spreadsheet_safe_row
 from app.services.exercise_service import (
+    clone_exercise_as_draft,
     create_exercise,
     enrol_member,
     remove_member,
@@ -55,7 +56,12 @@ from app.services.report_service import (
     executive_summary_for_exercise,
     render_markdown,
 )
-from app.services.scenario_service import get_scenario_definition, titles_for
+from app.services.scenario_service import (
+    definition_for_exercise,
+    material_definition_changes,
+    snapshot_for_exercise,
+    titles_for,
+)
 from app.services.schedule_service import (
     schedule_exercise_injects,
 )
@@ -100,6 +106,10 @@ class EnrolMemberRequest(BaseModel):
 
 class UpdateMemberRequest(BaseModel):
     group_id: str | None = None
+
+
+class CloneExerciseRequest(BaseModel):
+    title: str | None = None
 
 
 # ── Serialisation helpers ─────────────────────────────────────────────────────
@@ -186,8 +196,8 @@ async def get_exercise_progression(
 
 @router.get("/{exercise_id}/teams")
 async def list_exercise_teams(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
-    exercise = await require_exercise_access(session, exercise_id, current_user)
-    definition = await get_scenario_definition(session, exercise.scenario_id)
+    await require_exercise_access(session, exercise_id, current_user)
+    definition = await definition_for_exercise(session, exercise_id)
     if not definition:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found")
     return [team.model_dump() for team in definition.participant_teams]
@@ -238,6 +248,74 @@ async def delete_exercise(exercise_id: int, current_user: FacilitatorDep, sessio
         target_id=exercise_id,
         severity="warning",
     )
+
+
+@router.post(
+    "/{exercise_id}/clone", status_code=status.HTTP_201_CREATED, response_model=ExercisePublic
+)
+async def clone_exercise(
+    exercise_id: int,
+    body: CloneExerciseRequest,
+    current_user: FacilitatorDep,
+    session: SessionDep,
+):
+    """Clone a run into a separate editable draft while retaining source lineage."""
+    source = await require_exercise_owner(session, exercise_id, current_user)
+    assert current_user.id is not None
+    clone = await clone_exercise_as_draft(
+        session, source=source, created_by=current_user.id, title=body.title
+    )
+    audit_service.emit(
+        "exercise.clone",
+        actor=current_user,
+        target_type="exercise",
+        target_id=clone.id,
+        reason=f"source_exercise={exercise_id}",
+    )
+    return _exercise_out(clone)
+
+
+@router.get("/{exercise_id}/snapshot")
+async def run_snapshot(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
+    """Return provenance for the immutable interpretation record, never mutable source JSON."""
+    await require_exercise_owner(session, exercise_id, current_user)
+    snapshot = await snapshot_for_exercise(session, exercise_id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Exercise has not launched"
+        )
+    return {
+        "exercise_id": exercise_id,
+        "scenario_id": snapshot.scenario_id,
+        "scenario_version": snapshot.scenario_version,
+        "scenario_title": snapshot.scenario_title,
+        "schema_version": snapshot.schema_version,
+        "content_sha256": snapshot.content_sha256,
+        "captured_at": snapshot.captured_at.isoformat(),
+    }
+
+
+@router.get("/{exercise_id}/compare/{other_exercise_id}")
+async def compare_exercise_versions(
+    exercise_id: int,
+    other_exercise_id: int,
+    current_user: FacilitatorDep,
+    session: SessionDep,
+):
+    """Compare the exact source run/draft definitions by stable node and team IDs."""
+    await require_exercise_owner(session, exercise_id, current_user)
+    await require_exercise_owner(session, other_exercise_id, current_user)
+    earlier = await definition_for_exercise(session, exercise_id)
+    later = await definition_for_exercise(session, other_exercise_id)
+    if earlier is None or later is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exercise scenario was not found"
+        )
+    return {
+        "earlier_exercise_id": exercise_id,
+        "later_exercise_id": other_exercise_id,
+        "changes": material_definition_changes(earlier, later),
+    }
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -378,9 +456,7 @@ def _export_inject_row(i: Inject, bundle: ExerciseBundle) -> dict:
         "group_id": i.group_id,
         "released_at": i.released_at.isoformat() if i.released_at else None,
         "resolved_at": (
-            resolution["resolved_at"].isoformat()
-            if resolution["resolved_at"]
-            else None
+            resolution["resolved_at"].isoformat() if resolution["resolved_at"] else None
         ),
         "resolved_by": resolution["resolved_by"],
         "resolution_reason": resolution["resolution_reason"],
@@ -426,7 +502,27 @@ async def _build_export(session: AsyncSession, exercise_id: int, current_user: U
     assert bundle is not None
     definition = bundle.definition
     return {
+        "export_schema_version": 2,
         "exercise": _exercise_out(ex),
+        # The definition is included only through the immutable run record, so an
+        # export remains independently verifiable even if its source library row
+        # is later revised or removed by an administrator.
+        "run_snapshot": (
+            {
+                "schema_version": bundle.run_snapshot.schema_version,
+                "content_sha256": bundle.run_snapshot.content_sha256,
+                "captured_at": bundle.run_snapshot.captured_at.isoformat(),
+                "scenario": {
+                    "id": bundle.run_snapshot.scenario_id,
+                    "version": bundle.run_snapshot.scenario_version,
+                    "title": bundle.run_snapshot.scenario_title,
+                },
+                "definition": json.loads(bundle.run_snapshot.definition),
+                "configuration": json.loads(bundle.run_snapshot.configuration_json),
+            }
+            if bundle.run_snapshot
+            else None
+        ),
         # Debrief notes (#112) — owner-only export path, so safe to include here even
         # though they're kept out of the participant-visible ExercisePublic.
         "debrief": {
@@ -469,7 +565,7 @@ async def get_debrief(exercise_id: int, current_user: FacilitatorDep, session: S
     """Owner-only debrief notes (#112): the scenario author's read-only talking points
     plus the editable exercise-level notes. Never exposed to participants/observers."""
     ex = await require_exercise_owner(session, exercise_id, current_user)
-    definition = await get_scenario_definition(session, ex.scenario_id)
+    definition = await definition_for_exercise(session, exercise_id)
     return DebriefNotes(
         exercise_id=exercise_id,
         scenario_debrief_notes=definition.debrief_notes if definition else None,
@@ -482,9 +578,6 @@ async def get_debrief(exercise_id: int, current_user: FacilitatorDep, session: S
 
 def _summary_public(s: ExecutiveSummary) -> ExecutiveSummaryPublic:
     return ExecutiveSummaryPublic.from_model(s)
-
-
-
 
 
 @router.get("/{exercise_id}/report")

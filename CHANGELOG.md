@@ -7,6 +7,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (see the
 
 ## [Unreleased]
 
+### Added
+- **Immutable, content-addressed exercise-run snapshots** (#315) — the first launch now
+  records a canonical scenario/configuration snapshot atomically with the lifecycle
+  transition. Active and completed runs, reports, exports, scheduling, branching, and
+  LLM context resolve through that record rather than mutable library templates. Existing
+  launched exercises are backfilled on upgrade; facilitators can clone a run into a
+  distinct draft and compare stable scenario changes before the next exercise.
+
 ### Security
 - **Emailed links are rooted at `PUBLIC_BASE_URL`, never the request host** (#258) —
   password-reset and invite links previously fell back to the client-supplied `Host`

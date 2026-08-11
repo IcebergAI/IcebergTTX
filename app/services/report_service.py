@@ -175,6 +175,17 @@ async def build_report(
             "started_at": _fmt(exercise.started_at),
             "ended_at": _fmt(exercise.ended_at),
             "duration": _duration(exercise.started_at, exercise.ended_at),
+            "run_snapshot": (
+                {
+                    "content_sha256": bundle.run_snapshot.content_sha256,
+                    "schema_version": bundle.run_snapshot.schema_version,
+                    "captured_at": _fmt(bundle.run_snapshot.captured_at),
+                    "scenario_id": bundle.run_snapshot.scenario_id,
+                    "scenario_version": bundle.run_snapshot.scenario_version,
+                }
+                if bundle.run_snapshot
+                else None
+            ),
         },
         "scenario": {
             "title": definition.title if definition else (scenario.title if scenario else None),
@@ -227,6 +238,12 @@ def render_markdown(report: dict) -> str:
     lines.append(f"- **Ended:** {ex['ended_at'] or '—'}")
     if ex.get("duration"):
         lines.append(f"- **Duration:** {ex['duration']}")
+    if ex.get("run_snapshot"):
+        snapshot = ex["run_snapshot"]
+        lines.append(
+            "- **Run snapshot:** "
+            f"SHA-256 `{snapshot['content_sha256']}` (schema v{snapshot['schema_version']})"
+        )
     teams = ", ".join(f"{t['label']} ({t['participant_count']})" for t in report["teams"])
     if report["unassigned_participant_count"]:
         teams = ", ".join(

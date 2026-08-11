@@ -16,6 +16,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.exercise import (
     Exercise,
     ExerciseMember,
+    ExerciseRunSnapshot,
     ExerciseState,
     ExerciseStateTransition,
 )
@@ -25,6 +26,7 @@ from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services import domain_events
 from app.services.exercise_service import transition_state
 from app.services.progression_service import inject_audience_contexts
+from app.services.scenario_service import definition_for_exercise
 from app.services.ws_manager import manager
 
 
@@ -90,6 +92,82 @@ async def test_create_exercise_with_llm(
     )
     assert r.status_code == 201
     assert r.json()["llm_enabled"] is True
+
+
+async def test_launch_captures_content_addressed_snapshot_and_uses_it_after_template_change(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    sample_scenario,
+    draft_exercise: Exercise,
+):
+    """A launched run is interpreted from its own canonical evidence, not its template."""
+    assert draft_exercise.id is not None
+    started = await client.post(
+        f"/api/exercises/{draft_exercise.id}/start", headers=_bearer(facilitator_token)
+    )
+    assert started.status_code == 200
+    snapshot = (
+        await session.exec(
+            select(ExerciseRunSnapshot).where(ExerciseRunSnapshot.exercise_id == draft_exercise.id)
+        )
+    ).one()
+    assert len(snapshot.content_sha256) == 64
+    original = await definition_for_exercise(session, draft_exercise.id)
+    assert original is not None
+    assert original.title == sample_scenario.title
+
+    # Deliberately bypass the public revision guard: historical correctness must
+    # survive a legacy SQL/manual source edit as well as normal UI editing.
+    changed = json.loads(sample_scenario.definition)
+    changed["title"] = "Mutated source template"
+    sample_scenario.definition = json.dumps(changed)
+    session.add(sample_scenario)
+    await session.commit()
+
+    resolved = await definition_for_exercise(session, draft_exercise.id)
+    assert resolved is not None
+    assert resolved.title == original.title
+    meta = await client.get(
+        f"/api/exercises/{draft_exercise.id}/snapshot", headers=_bearer(facilitator_token)
+    )
+    assert meta.status_code == 200
+    assert meta.json()["content_sha256"] == snapshot.content_sha256
+    exported = await client.get(
+        f"/api/exercises/{draft_exercise.id}/export", headers=_bearer(facilitator_token)
+    )
+    assert exported.status_code == 200
+    assert exported.json()["run_snapshot"]["content_sha256"] == snapshot.content_sha256
+
+
+async def test_clone_creates_distinct_editable_draft_with_lineage(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    draft_exercise: Exercise,
+):
+    assert draft_exercise.id is not None
+    assert (
+        await client.post(
+            f"/api/exercises/{draft_exercise.id}/start", headers=_bearer(facilitator_token)
+        )
+    ).status_code == 200
+    cloned = await client.post(
+        f"/api/exercises/{draft_exercise.id}/clone",
+        json={"title": "Repeat exercise"},
+        headers=_bearer(facilitator_token),
+    )
+    assert cloned.status_code == 201
+    clone_id = cloned.json()["id"]
+    clone = await session.get(Exercise, clone_id)
+    assert clone is not None
+    assert clone.state == ExerciseState.draft
+    assert clone.cloned_from_exercise_id == draft_exercise.id
+    compared = await client.get(
+        f"/api/exercises/{draft_exercise.id}/compare/{clone_id}", headers=_bearer(facilitator_token)
+    )
+    assert compared.status_code == 200
+    assert compared.json()["changes"]["injects_added"] == []
 
 
 async def test_create_exercise_seeds_shared_and_group_injects(
@@ -468,14 +546,10 @@ async def test_completed_exercise_blocks_operations_but_keeps_after_action_workf
     completed = await client.post(f"/api/exercises/{active_exercise.id}/complete", headers=headers)
     assert completed.status_code == 200
 
-    members = await client.get(
-        f"/api/exercises/{active_exercise.id}/members", headers=headers
-    )
+    members = await client.get(f"/api/exercises/{active_exercise.id}/members", headers=headers)
     assert members.status_code == 200
     member_id = members.json()[0]["user_id"]
-    injects = await client.get(
-        f"/api/exercises/{active_exercise.id}/injects", headers=headers
-    )
+    injects = await client.get(f"/api/exercises/{active_exercise.id}/injects", headers=headers)
     assert injects.status_code == 200
     inject_id = injects.json()[0]["id"]
 
@@ -730,14 +804,10 @@ async def test_release_serializes_against_concurrent_roster_change():
                 created_by=facilitator.id,
             )
             exercise_id = exercise.id
-            await enrol_member(
-                setup, exercise=exercise, user_id=initial.id, group_id="it_ops"
-            )
+            await enrol_member(setup, exercise=exercise, user_id=initial.id, group_id="it_ops")
             exercise = await transition_state(setup, exercise, ExerciseState.active)
             inject = (
-                await setup.exec(
-                    select(Inject).where(Inject.exercise_id == exercise.id)
-                )
+                await setup.exec(select(Inject).where(Inject.exercise_id == exercise.id))
             ).one()
             inject_id = inject.id
             owner_id = facilitator.id
@@ -755,9 +825,7 @@ async def test_release_serializes_against_concurrent_roster_change():
                 # competing service call starts. Re-acquiring it in the release
                 # path is safe within this transaction and keeps the interleaving
                 # deterministic without pausing a background transaction.
-                await lock_exercise_for_audience_snapshot(
-                    release_session, exercise_id
-                )
+                await lock_exercise_for_audience_snapshot(release_session, exercise_id)
                 roster_task = asyncio.create_task(
                     enrol_member(
                         roster_session,
@@ -769,9 +837,7 @@ async def test_release_serializes_against_concurrent_roster_change():
                 await asyncio.sleep(0.05)
                 assert not roster_task.done()
                 released = await asyncio.wait_for(
-                    release_inject(
-                        release_session, release_view, released_by=owner_id
-                    ),
+                    release_inject(release_session, release_view, released_by=owner_id),
                     timeout=5,
                 )
                 assert released.state.value == "released"
@@ -788,9 +854,7 @@ async def test_release_serializes_against_concurrent_roster_change():
         async with AsyncSession(engine, expire_on_commit=False) as verify:
             members = (
                 await verify.exec(
-                    select(ExerciseMember).where(
-                        ExerciseMember.exercise_id == exercise_id
-                    )
+                    select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id)
                 )
             ).all()
             assert {member.group_id for member in members} == {"it_ops"}
@@ -1076,9 +1140,7 @@ async def test_concurrent_enrolment_collapses_to_one_membership(session: AsyncSe
         async with AsyncSession(engine, expire_on_commit=False) as verify:
             members = (
                 await verify.exec(
-                    select(ExerciseMember).where(
-                        ExerciseMember.exercise_id == exercise_id
-                    )
+                    select(ExerciseMember).where(ExerciseMember.exercise_id == exercise_id)
                 )
             ).all()
             assert len(members) == 1
@@ -1378,25 +1440,17 @@ async def test_all_projections_share_authoritative_inject_resolution(
         created_by=facilitator.id,
     )
     assert (
-        unassigned.id
-        and legal.id
-        and observer.id
-        and late_participant.id
-        and second_facilitator.id
+        unassigned.id and legal.id and observer.id and late_participant.id and second_facilitator.id
     )
     await enrol_member(session, exercise=exercise, user_id=unassigned.id)
     await enrol_member(session, exercise=exercise, user_id=legal.id, group_id="legal")
     # These contexts can never submit participant responses and must not count.
     await enrol_member(session, exercise=exercise, user_id=observer.id)
-    await enrol_member(
-        session, exercise=exercise, user_id=second_facilitator.id, group_id="legal"
-    )
+    await enrol_member(session, exercise=exercise, user_id=second_facilitator.id, group_id="legal")
     await transition_state(session, exercise, ExerciseState.active)
 
     owner = _bearer(facilitator_token)
-    injects = (
-        await client.get(f"/api/exercises/{exercise.id}/injects", headers=owner)
-    ).json()
+    injects = (await client.get(f"/api/exercises/{exercise.id}/injects", headers=owner)).json()
     inject_id = injects[0]["id"]
     assert injects[0]["group_id"] is None
     assert (
@@ -1415,18 +1469,12 @@ async def test_all_projections_share_authoritative_inject_resolution(
         assert response.status_code == 201, response.text
 
     async def projections() -> tuple[dict, dict, list[dict], dict]:
-        exported = (
-            await client.get(f"/api/exercises/{exercise.id}/export", headers=owner)
-        ).json()
-        report = (
-            await client.get(f"/api/exercises/{exercise.id}/report", headers=owner)
-        ).json()
+        exported = (await client.get(f"/api/exercises/{exercise.id}/export", headers=owner)).json()
+        report = (await client.get(f"/api/exercises/{exercise.id}/report", headers=owner)).json()
         timeline = (
             await client.get(f"/api/exercises/{exercise.id}/timeline", headers=owner)
         ).json()
-        csv_response = await client.get(
-            f"/api/exercises/{exercise.id}/export.csv", headers=owner
-        )
+        csv_response = await client.get(f"/api/exercises/{exercise.id}/export.csv", headers=owner)
         csv_rows = list(csv.DictReader(io.StringIO(csv_response.text)))
         assert csv_rows
         assert len({row["inject_state"] for row in csv_rows}) == 1
@@ -1442,20 +1490,11 @@ async def test_all_projections_share_authoritative_inject_resolution(
     assert export_row["state"] == "released"
     assert csv_row["inject_state"] == "released"
     expected_partial = {None: "resolved", "legal": "released"}
+    assert {row["group_id"]: row["state"] for row in export_row["resolutions"]} == expected_partial
+    assert {row["group_id"]: row["state"] for row in report_row["resolutions"]} == expected_partial
+    assert {event["group_id"] for event in timeline if event["kind"] == "inject_resolved"} == {None}
     assert {
-        row["group_id"]: row["state"] for row in export_row["resolutions"]
-    } == expected_partial
-    assert {
-        row["group_id"]: row["state"] for row in report_row["resolutions"]
-    } == expected_partial
-    assert {
-        event["group_id"]
-        for event in timeline
-        if event["kind"] == "inject_resolved"
-    } == {None}
-    assert {
-        row["group_id"]: row["state"]
-        for row in json.loads(csv_row["inject_resolutions"])
+        row["group_id"]: row["state"] for row in json.loads(csv_row["inject_resolutions"])
     } == expected_partial
     late_enrolment = await client.post(
         f"/api/exercises/{exercise.id}/members",
@@ -1475,9 +1514,7 @@ async def test_all_projections_share_authoritative_inject_resolution(
     assert {row["group_id"] for row in export_row["resolutions"]} == expected
     assert {row["group_id"] for row in report_row["resolutions"]} == expected
     assert {
-        event["group_id"]
-        for event in timeline
-        if event["kind"] == "inject_resolved"
+        event["group_id"] for event in timeline if event["kind"] == "inject_resolved"
     } == expected
     group_change = await client.patch(
         f"/api/exercises/{exercise.id}/members/{legal.id}",

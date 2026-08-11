@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import CheckConstraint, Column, DateTime, Index, Text, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.user import UserRole
@@ -69,13 +69,17 @@ class Exercise(SQLModel, table=True):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )
+    # A draft deliberately has no immutable evidence yet. The first draft -> active
+    # transition creates the one-to-one RunSnapshot in the *same* transaction as
+    # the lifecycle event; every active/completed definition resolver then uses it.
+    cloned_from_exercise_id: int | None = Field(
+        default=None, foreign_key="exercise.id", ondelete="SET NULL", index=True
+    )
 
     scenario: Optional["Scenario"] = Relationship(back_populates="exercises")
     injects: list["Inject"] = Relationship(back_populates="exercise", cascade_delete=True)
     responses: list["Response"] = Relationship(back_populates="exercise", cascade_delete=True)
-    members: list["ExerciseMember"] = Relationship(
-        back_populates="exercise", cascade_delete=True
-    )
+    members: list["ExerciseMember"] = Relationship(back_populates="exercise", cascade_delete=True)
     communications: list["Communication"] = Relationship(
         back_populates="exercise", cascade_delete=True
     )
@@ -96,6 +100,42 @@ class Exercise(SQLModel, table=True):
     progression: list["ExerciseProgress"] = Relationship(
         back_populates="exercise", cascade_delete=True
     )
+    run_snapshot: Optional["ExerciseRunSnapshot"] = Relationship(
+        back_populates="exercise",
+        cascade_delete=True,
+        sa_relationship_kwargs={"uselist": False},
+    )
+
+
+class ExerciseRunSnapshot(SQLModel, table=True):
+    """Immutable, content-addressed scenario/configuration record for a launched run.
+
+    The source Scenario remains a reusable library asset. This row is the evidence
+    record used to interpret a live or historical Exercise, so it stores canonical
+    JSON text rather than a foreign-key-only reference to mutable source content.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("exercise_id", name="uq_exerciserunsnapshot_exercise"),
+        Index("ix_exerciserunsnapshot_content_sha256", "content_sha256"),
+        Index("ix_exerciserunsnapshot_scenario_captured", "scenario_id", "captured_at"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE", index=True)
+    # Source identity is retained for provenance, but never dereferenced for a run.
+    scenario_id: int = Field(foreign_key="scenario.id", ondelete="RESTRICT", index=True)
+    scenario_version: str
+    scenario_title: str
+    schema_version: int = Field(default=1)
+    definition: str = Field(sa_column=Column(Text, nullable=False))
+    configuration_json: str = Field(sa_column=Column(Text, nullable=False))
+    content_sha256: str = Field(index=True, min_length=64, max_length=64)
+    captured_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
+    )
+
+    exercise: Optional["Exercise"] = Relationship(back_populates="run_snapshot")
 
 
 class ExerciseMember(SQLModel, table=True):

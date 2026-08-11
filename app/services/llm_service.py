@@ -69,9 +69,7 @@ _SUMMARY_SYSTEM = (
 def _scenario_summary(definition) -> str:
     teams = ", ".join(t.label for t in definition.participant_teams) or "All participants"
     return (
-        f"Scenario: {definition.title}\n"
-        f"{definition.description or ''}\n"
-        f"Participant teams: {teams}"
+        f"Scenario: {definition.title}\n{definition.description or ''}\nParticipant teams: {teams}"
     )
 
 
@@ -147,17 +145,20 @@ async def _assess_response_result(session, response, inject, definition):
     user_prompt = (
         f"Participant response:\n{response.content}{selected_line}\n\n"
         "Assess this response. Reply as JSON with keys: "
-        "\"assessment_text\" (2-3 sentence narrative), "
-        "\"decision_quality\" (\"good\", \"adequate\", or \"poor\"), "
-        "\"recommended_branch_option_id\" (option id string or null)."
+        '"assessment_text" (2-3 sentence narrative), '
+        '"decision_quality" ("good", "adequate", or "poor"), '
+        '"recommended_branch_option_id" (option id string or null).'
     )
 
     text = await _call(provider, _ASSESSMENT_SYSTEM, cached, user_prompt)
-    data = _parse_json(text, {
-        "assessment_text": text,
-        "decision_quality": None,
-        "recommended_branch_option_id": None,
-    })
+    data = _parse_json(
+        text,
+        {
+            "assessment_text": text,
+            "decision_quality": None,
+            "recommended_branch_option_id": None,
+        },
+    )
 
     try:
         output = AssessmentOutput.model_validate(data)
@@ -165,9 +166,15 @@ async def _assess_response_result(session, response, inject, definition):
         output = AssessmentOutput(
             assessment_text=(text.strip() or "Provider returned invalid assessment")[:_MAX_LLM_TEXT]
         )
-    option_ids = {option.id for option in node.options} if (node := next(
-        (item for item in definition.injects if item.id == inject.scenario_node_id), None
-    )) else set()
+    option_ids = (
+        {option.id for option in node.options}
+        if (
+            node := next(
+                (item for item in definition.injects if item.id == inject.scenario_node_id), None
+            )
+        )
+        else set()
+    )
     if output.recommended_branch_option_id not in option_ids:
         output = output.model_copy(update={"recommended_branch_option_id": None})
 
@@ -201,9 +208,7 @@ async def _assess_response_result(session, response, inject, definition):
         await session.rollback()
         existing = (
             await session.exec(
-                select(ResponseAssessment).where(
-                    ResponseAssessment.response_id == response_id
-                )
+                select(ResponseAssessment).where(ResponseAssessment.response_id == response_id)
             )
         ).one_or_none()
         if existing is not None:
@@ -234,9 +239,7 @@ async def _suggest_inject_result(session, response, inject, exercise, definition
     assert response_id is not None
     existing = (
         await session.exec(
-            select(SuggestedInject).where(
-                SuggestedInject.triggered_by_response_id == response_id
-            )
+            select(SuggestedInject).where(SuggestedInject.triggered_by_response_id == response_id)
         )
     ).first()
     if existing is not None:
@@ -250,9 +253,9 @@ async def _suggest_inject_result(session, response, inject, exercise, definition
     user_prompt = (
         f"Participant response:\n{response.content}{selected_line}\n\n"
         "Suggest a follow-up inject. Reply as JSON with keys: "
-        "\"title\" (short string), "
-        "\"content\" (inject body text), "
-        "\"target_teams\" (list of team id strings from the scenario, or null for all teams)."
+        '"title" (short string), '
+        '"content" (inject body text), '
+        '"target_teams" (list of team id strings from the scenario, or null for all teams).'
     )
 
     text = await _call(provider, _SUGGESTION_SYSTEM, cached, user_prompt)
@@ -304,9 +307,7 @@ async def _suggest_inject_result(session, response, inject, exercise, definition
 
 
 async def suggest_inject(session, response, inject, exercise, definition):
-    suggested, _ = await _suggest_inject_result(
-        session, response, inject, exercise, definition
-    )
+    suggested, _ = await _suggest_inject_result(session, response, inject, exercise, definition)
     return suggested
 
 
@@ -349,20 +350,13 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
     from app.models.exercise import Exercise
     from app.models.inject import Inject
     from app.models.response import Response
-    from app.models.scenario import Scenario
-    from app.services.scenario_service import export_definition
+    from app.services.scenario_service import definition_for_exercise
 
     async with AsyncSession(engine, expire_on_commit=False) as session:
         response = await session.get(Response, response_id)
         inject = await session.get(Inject, inject_id)
         exercise = await session.get(Exercise, exercise_id)
-        if not (
-            response
-            and inject
-            and exercise
-            and exercise.scenario_id
-            and exercise.llm_enabled
-        ):
+        if not (response and inject and exercise and exercise.scenario_id and exercise.llm_enabled):
             return
         if (
             response.exercise_id != exercise_id
@@ -390,16 +384,13 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
             logger.info("LLM pipeline skipped: no AI provider configured (LLM_PROVIDER)")
             return
 
-        scenario = await session.get(Scenario, exercise.scenario_id)
-        if not scenario:
+        definition = await definition_for_exercise(session, exercise_id)
+        if definition is None:
             return
-
-        definition = export_definition(scenario)
 
         assessment, assessment_created = await _assess_response_result(
             session, response, inject, definition
         )
-
 
         node = next((n for n in definition.injects if n.id == inject.scenario_node_id), None)
         if node and node.free_text_response:
@@ -484,9 +475,7 @@ async def generate_executive_summary(session, exercise_id: int):
         await session.rollback()
         winner = (
             await session.exec(
-                select(ExecutiveSummary).where(
-                    ExecutiveSummary.exercise_id == exercise_id
-                )
+                select(ExecutiveSummary).where(ExecutiveSummary.exercise_id == exercise_id)
             )
         ).one_or_none()
         if winner is not None:

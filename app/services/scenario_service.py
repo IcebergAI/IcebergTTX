@@ -1,9 +1,11 @@
+import hashlib
+import json
 from datetime import UTC, datetime
 
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.exercise import Exercise
+from app.models.exercise import Exercise, ExerciseRunSnapshot
 from app.models.scenario import Scenario
 from app.schemas.scenario_json import ScenarioDefinition
 
@@ -66,6 +68,71 @@ async def update_scenario(
 _PARSED_DEFINITION_ATTR = "_parsed_definition"
 
 
+RUN_SNAPSHOT_SCHEMA_VERSION = 1
+
+
+def canonical_definition_json(definition: ScenarioDefinition) -> str:
+    """Serialize a validated definition as stable bytes for a run evidence record."""
+    return json.dumps(
+        definition.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def snapshot_content_sha256(
+    *, definition_json: str, configuration: dict[str, object], schema_version: int
+) -> str:
+    """Hash exactly the canonical payload a launched run is interpreted from."""
+    payload = json.dumps(
+        {
+            "configuration": configuration,
+            "definition": json.loads(definition_json),
+            "schema_version": schema_version,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def material_definition_changes(
+    earlier: ScenarioDefinition, later: ScenarioDefinition
+) -> dict[str, object]:
+    """Return an explainable, bounded summary of material scenario changes.
+
+    This intentionally reports stable node/team identities and changed node payloads,
+    not an opaque JSON patch. It is used when cloning a historical run into a new
+    draft so facilitators can review what changed before launching again.
+    """
+    old_nodes = {node.id: node.model_dump(mode="json") for node in earlier.injects}
+    new_nodes = {node.id: node.model_dump(mode="json") for node in later.injects}
+    old_teams = {team.id: team.model_dump(mode="json") for team in earlier.participant_teams}
+    new_teams = {team.id: team.model_dump(mode="json") for team in later.participant_teams}
+    return {
+        "injects_added": sorted(new_nodes.keys() - old_nodes.keys()),
+        "injects_removed": sorted(old_nodes.keys() - new_nodes.keys()),
+        "injects_changed": sorted(
+            node_id
+            for node_id in old_nodes.keys() & new_nodes.keys()
+            if old_nodes[node_id] != new_nodes[node_id]
+        ),
+        "teams_added": sorted(new_teams.keys() - old_teams.keys()),
+        "teams_removed": sorted(old_teams.keys() - new_teams.keys()),
+        "teams_changed": sorted(
+            team_id
+            for team_id in old_teams.keys() & new_teams.keys()
+            if old_teams[team_id] != new_teams[team_id]
+        ),
+        "metadata_changed": (
+            earlier.model_dump(mode="json", exclude={"injects", "participant_teams"})
+            != later.model_dump(mode="json", exclude={"injects", "participant_teams"})
+        ),
+    }
+
+
 def export_definition(scenario: Scenario) -> ScenarioDefinition:
     """Parse a scenario's stored definition JSON, memoised on the instance (#22).
 
@@ -99,11 +166,33 @@ async def get_scenario_definition(
 async def definition_for_exercise(
     session: AsyncSession, exercise_id: int
 ) -> ScenarioDefinition | None:
-    """Load the scenario definition for an exercise, or None if either is missing."""
+    """Resolve an exercise from its immutable run record once launched.
+
+    Drafts intentionally retain the reusable Scenario editing experience. A snapshot
+    exists from the first successful launch onwards, so active/completed exercise
+    services never reinterpret historical behavior through a source template.
+    """
     exercise = await session.get(Exercise, exercise_id)
     if not exercise:
         return None
+    snapshot = (
+        await session.exec(
+            select(ExerciseRunSnapshot).where(ExerciseRunSnapshot.exercise_id == exercise.id)
+        )
+    ).first()
+    if snapshot is not None:
+        return ScenarioDefinition.model_validate_json(snapshot.definition)
     return await get_scenario_definition(session, exercise.scenario_id)
+
+
+async def snapshot_for_exercise(
+    session: AsyncSession, exercise_id: int
+) -> ExerciseRunSnapshot | None:
+    return (
+        await session.exec(
+            select(ExerciseRunSnapshot).where(ExerciseRunSnapshot.exercise_id == exercise_id)
+        )
+    ).first()
 
 
 def get_inject_node(definition: ScenarioDefinition, inject_id: str):

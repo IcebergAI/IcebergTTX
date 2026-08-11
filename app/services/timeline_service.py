@@ -20,6 +20,7 @@ from app.models.communication import Communication
 from app.models.exercise import (
     Exercise,
     ExerciseMember,
+    ExerciseRunSnapshot,
     ExerciseStateTransition,
     transition_action,
 )
@@ -31,7 +32,7 @@ from app.models.scenario import Scenario
 from app.models.user import User
 from app.schemas.scenario_json import ScenarioDefinition
 from app.services import user_service
-from app.services.scenario_service import export_definition
+from app.services.scenario_service import definition_for_exercise, snapshot_for_exercise
 
 # Stable secondary sort so events sharing a timestamp never swap between calls.
 _KIND_ORDER = {
@@ -50,6 +51,7 @@ class ExerciseBundle:
 
     exercise: Exercise
     scenario: Scenario | None
+    run_snapshot: ExerciseRunSnapshot | None
     definition: ScenarioDefinition | None
     users: tuple[User, ...]
     members: tuple[ExerciseMember, ...]
@@ -63,15 +65,14 @@ class ExerciseBundle:
     summary: ExecutiveSummary | None
 
 
-async def load_exercise_bundle(
-    session: AsyncSession, exercise_id: int
-) -> ExerciseBundle | None:
+async def load_exercise_bundle(session: AsyncSession, exercise_id: int) -> ExerciseBundle | None:
     """Load each exercise-domain table once for report/timeline/export projections."""
     exercise = await session.get(Exercise, exercise_id)
     if exercise is None:
         return None
     scenario = await session.get(Scenario, exercise.scenario_id)
-    definition = export_definition(scenario) if scenario else None
+    definition = await definition_for_exercise(session, exercise_id)
+    run_snapshot = await snapshot_for_exercise(session, exercise_id)
     members = tuple(
         (
             await session.exec(
@@ -149,13 +150,12 @@ async def load_exercise_bundle(
         *(transition.actor_id for transition in transitions),
     }
     users = tuple(
-        await user_service.get_by_ids(
-            session, {uid for uid in referenced_ids if uid is not None}
-        )
+        await user_service.get_by_ids(session, {uid for uid in referenced_ids if uid is not None})
     )
     return ExerciseBundle(
         exercise=exercise,
         scenario=scenario,
+        run_snapshot=run_snapshot,
         definition=definition,
         users=users,
         members=members,
@@ -248,9 +248,7 @@ async def build_timeline(
 
     inject_titles = {inject.id: inject.title for inject in injects}
     resolutions = [
-        resolution
-        for resolution in bundle.resolutions
-        if resolution.resolved_at is not None
+        resolution for resolution in bundle.resolutions if resolution.resolved_at is not None
     ]
     for resolution in resolutions:
         assert resolution.resolved_at is not None
@@ -269,8 +267,7 @@ async def build_timeline(
 
     # ── Responses (+ LLM decision quality where assessed) ─────────────────────
     quality_by_response = {
-        assessment.response_id: assessment.decision_quality
-        for assessment in bundle.assessments
+        assessment.response_id: assessment.decision_quality for assessment in bundle.assessments
     }
     for r in bundle.responses:
         assert r.id is not None

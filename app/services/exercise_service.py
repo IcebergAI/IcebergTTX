@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -11,6 +12,7 @@ from app.models.exercise import (
     VALID_TRANSITIONS,
     Exercise,
     ExerciseMember,
+    ExerciseRunSnapshot,
     ExerciseState,
     ExerciseStateTransition,
     transition_action,
@@ -20,7 +22,13 @@ from app.models.user import User
 from app.services.domain_events import ExerciseStateChanged, dispatch, record
 from app.services.inject_service import seed_injects_from_scenario
 from app.services.progression_service import seed_progression
-from app.services.scenario_service import export_definition
+from app.services.scenario_service import (
+    RUN_SNAPSHOT_SCHEMA_VERSION,
+    canonical_definition_json,
+    definition_for_exercise,
+    export_definition,
+    snapshot_content_sha256,
+)
 from app.services.team_service import scenario_team_ids as definition_team_ids
 from app.services.team_service import validate_team_ids as validate_definition_team_ids
 
@@ -30,6 +38,70 @@ class ExerciseTransitionResult:
     exercise: Exercise
     transition: ExerciseStateTransition
     action: str
+
+
+async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> ExerciseRunSnapshot:
+    """Capture the one immutable interpretation record for a draft being launched.
+
+    The Scenario row is locked while its validated definition is canonicalized. This
+    is deliberately in the lifecycle transaction: callers observe either both the
+    active state and snapshot or neither, including under concurrent start/edit
+    requests and across replicas.
+    """
+    assert exercise.id is not None
+    existing = (
+        await session.exec(
+            select(ExerciseRunSnapshot).where(ExerciseRunSnapshot.exercise_id == exercise.id)
+        )
+    ).first()
+    if existing is not None:
+        return existing
+    # Re-read after the state CAS while holding the same row lock. A concurrent
+    # draft-settings update either committed before this point (and is captured)
+    # or waits until launch completes; no mixed configuration can be recorded.
+    locked_exercise = (
+        await session.exec(
+            select(Exercise)
+            .where(Exercise.id == exercise.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).first()
+    assert locked_exercise is not None
+    scenario = (
+        await session.exec(
+            select(Scenario).where(Scenario.id == exercise.scenario_id).with_for_update()
+        )
+    ).first()
+    if scenario is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Exercise scenario was not found",
+        )
+    assert scenario.id is not None
+    definition = export_definition(scenario)
+    definition_json = canonical_definition_json(definition)
+    configuration: dict[str, object] = {
+        "llm_enabled": locked_exercise.llm_enabled,
+        "scenario_id": scenario.id,
+        "scenario_version": scenario.version,
+    }
+    snapshot = ExerciseRunSnapshot(
+        exercise_id=exercise.id,
+        scenario_id=scenario.id,
+        scenario_version=scenario.version,
+        scenario_title=scenario.title,
+        schema_version=RUN_SNAPSHOT_SCHEMA_VERSION,
+        definition=definition_json,
+        configuration_json=json.dumps(configuration, sort_keys=True, separators=(",", ":")),
+        content_sha256=snapshot_content_sha256(
+            definition_json=definition_json,
+            configuration=configuration,
+            schema_version=RUN_SNAPSHOT_SCHEMA_VERSION,
+        ),
+    )
+    session.add(snapshot)
+    return snapshot
 
 
 async def create_exercise(
@@ -70,6 +142,62 @@ async def create_exercise(
         raise
     await session.refresh(exercise)
     return exercise
+
+
+async def clone_exercise_as_draft(
+    session: AsyncSession,
+    *,
+    source: Exercise,
+    created_by: int,
+    title: str | None = None,
+) -> Exercise:
+    """Create a distinct draft from a run's frozen definition and preserve lineage."""
+    assert source.id is not None
+    definition = await definition_for_exercise(session, source.id)
+    if definition is None:
+        raise HTTPException(status_code=422, detail="Exercise scenario was not found")
+    source_scenario = await session.get(Scenario, source.scenario_id)
+    if source_scenario is None:
+        raise HTTPException(status_code=422, detail="Exercise scenario was not found")
+    # A clone receives a new reusable Scenario row rather than attaching a draft
+    # directly to historical source content. It can be tailored for the next run
+    # while the source's captured evidence remains intact.
+    clone_scenario = Scenario(
+        title=f"{definition.title} (copy)",
+        description=definition.description,
+        version=source_scenario.version,
+        tags=definition.tags or None,
+        definition=canonical_definition_json(definition),
+        created_by=created_by,
+    )
+    session.add(clone_scenario)
+    await session.flush()
+    assert clone_scenario.id is not None
+    clone = Exercise(
+        scenario_id=clone_scenario.id,
+        title=title or f"{source.title} (copy)",
+        created_by=created_by,
+        llm_enabled=source.llm_enabled,
+        current_node_id=definition.start_inject_id,
+        cloned_from_exercise_id=source.id,
+    )
+    session.add(clone)
+    await session.flush()
+    assert clone.id is not None
+    try:
+        await seed_injects_from_scenario(session, clone.id, clone_scenario)
+        await seed_progression(
+            session,
+            exercise_id=clone.id,
+            start_node_id=definition.start_inject_id,
+            group_ids=[team.id for team in definition.participant_teams],
+        )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    await session.refresh(clone)
+    return clone
 
 
 async def transition_state(
@@ -159,6 +287,8 @@ async def transition_state_with_history(
     )
     session.add(transition)
     try:
+        if previous_state == ExerciseState.draft and new_state == ExerciseState.active:
+            await _freeze_run_snapshot(session, exercise)
         # Flush first: the frame names the transition, so it needs its id — and the event
         # must be recorded inside this transaction so a failed commit discards it.
         await session.flush()
@@ -189,10 +319,10 @@ async def transition_state_with_history(
 
 
 async def scenario_group_ids(session: AsyncSession, exercise: Exercise) -> set[str]:
-    scenario = await session.get(Scenario, exercise.scenario_id)
-    if not scenario:
+    assert exercise.id is not None
+    definition = await definition_for_exercise(session, exercise.id)
+    if definition is None:
         return set()
-    definition = export_definition(scenario)
     return definition_team_ids(definition)
 
 
@@ -218,13 +348,12 @@ async def validate_team_ids(
     """Normalize and validate a non-empty, duplicate-free scenario team audience."""
     if team_ids is None:
         return None
-    scenario = await session.get(Scenario, exercise.scenario_id)
-    if not scenario:
+    assert exercise.id is not None
+    definition = await definition_for_exercise(session, exercise.id)
+    if definition is None:
         raise HTTPException(status_code=422, detail="exercise scenario was not found")
     try:
-        return validate_definition_team_ids(
-            team_ids, export_definition(scenario), field=field
-        )
+        return validate_definition_team_ids(team_ids, definition, field=field)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

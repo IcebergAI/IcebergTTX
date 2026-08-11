@@ -88,6 +88,7 @@ async def test_the_chain_applies_to_an_empty_database(empty_database):
     # A domain table, the queue's, and the limiter's: one from each of the three
     # sources that now contribute schema.
     assert "exercise" in tables
+    assert "exerciserunsnapshot" in tables
     assert "procrastinate_jobs" in tables
     assert "rate_limit_hits" in tables
 
