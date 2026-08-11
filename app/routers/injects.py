@@ -36,6 +36,7 @@ from app.services.inject_service import (
     inject_payload,
     release_inject,
 )
+from app.services.scenario_service import definition_for_exercise
 from app.services.schedule_service import arm_inject_schedule
 
 router = APIRouter(prefix="/exercises/{exercise_id}/injects", tags=["injects"])
@@ -48,28 +49,31 @@ ATTACHMENT_CHUNK_BYTES = 1024 * 1024
 # this set is stored/served as the safe default so the download response can
 # never carry an attacker-chosen renderable type (e.g. text/html, image/svg+xml).
 DEFAULT_ATTACHMENT_TYPE = "application/octet-stream"
-ALLOWED_ATTACHMENT_TYPES = frozenset({
-    "application/pdf",
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "text/plain",
-    "text/csv",
-    "application/json",
-    "application/zip",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-powerpoint",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-})
+ALLOWED_ATTACHMENT_TYPES = frozenset(
+    {
+        "application/pdf",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "text/plain",
+        "text/csv",
+        "application/json",
+        "application/zip",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+)
 
 
 def _normalize_content_type(content_type: str | None) -> str:
     """Confine a stored attachment type to the allowlist (#16)."""
     base = content_type.split(";", 1)[0].strip().lower() if content_type else ""
     return base if base in ALLOWED_ATTACHMENT_TYPES else DEFAULT_ATTACHMENT_TYPE
+
 
 FacilitatorDep = Annotated[User, Depends(require_role(UserRole.facilitator))]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
@@ -115,9 +119,7 @@ async def _request_body_and_attachment(
         return CreateInjectRequest.model_validate(await request.json()), None
 
     form = await request.form()
-    target_teams = [
-        str(team).strip() for team in form.getlist("target_teams") if str(team).strip()
-    ]
+    target_teams = [str(team).strip() for team in form.getlist("target_teams") if str(team).strip()]
     if not target_teams:
         target_teams = _parse_target_teams(form.get("target_teams"))
     body = CreateInjectRequest(
@@ -184,7 +186,7 @@ def _delete_attachment_path(attachment_path: str | None) -> None:
         # Keep the hierarchy tidy after successful post-commit deletion; failure is
         # harmless and reconciliation can retry later.
         resolved.parent.rmdir()
-    except (OSError, ValueError):
+    except OSError, ValueError:
         pass
 
 
@@ -211,7 +213,16 @@ async def list_injects(exercise_id: int, current_user: CurrentUserDep, session: 
         visible = [i for i in injects if inject_visible_to(i, current_user, group_id)]
     # Only facilitators get branch topology (next_inject_id); participants/observers
     # get the redacted payload so they can't read the branch map ahead of choosing (#266).
-    return [await inject_payload(session, i, include_progression=is_facilitator) for i in visible]
+    definition = await definition_for_exercise(session, exercise_id)
+    return [
+        await inject_payload(
+            session,
+            inject,
+            include_progression=is_facilitator,
+            definition=definition,
+        )
+        for inject in visible
+    ]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=InjectPublic)
