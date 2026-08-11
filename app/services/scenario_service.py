@@ -66,6 +66,8 @@ async def update_scenario(
 
 
 _PARSED_DEFINITION_ATTR = "_parsed_definition"
+_RUN_SNAPSHOT_ATTR = "_run_snapshot"
+_PARSED_RUN_SNAPSHOT_ATTR = "_parsed_run_snapshot"
 
 
 RUN_SNAPSHOT_SCHEMA_VERSION = 1
@@ -175,24 +177,34 @@ async def definition_for_exercise(
     exercise = await session.get(Exercise, exercise_id)
     if not exercise:
         return None
-    snapshot = (
-        await session.exec(
-            select(ExerciseRunSnapshot).where(ExerciseRunSnapshot.exercise_id == exercise.id)
-        )
-    ).first()
+    snapshot = await snapshot_for_exercise(session, exercise_id)
     if snapshot is not None:
-        return ScenarioDefinition.model_validate_json(snapshot.definition)
+        cached = getattr(exercise, _PARSED_RUN_SNAPSHOT_ATTR, None)
+        if cached is not None and cached[0] is snapshot.definition:
+            return cached[1]
+        definition = ScenarioDefinition.model_validate_json(snapshot.definition)
+        object.__setattr__(exercise, _PARSED_RUN_SNAPSHOT_ATTR, (snapshot.definition, definition))
+        return definition
     return await get_scenario_definition(session, exercise.scenario_id)
 
 
 async def snapshot_for_exercise(
     session: AsyncSession, exercise_id: int
 ) -> ExerciseRunSnapshot | None:
-    return (
+    exercise = await session.get(Exercise, exercise_id)
+    if exercise is None:
+        return None
+    cached = getattr(exercise, _RUN_SNAPSHOT_ATTR, None)
+    if cached is not None:
+        return cached
+    snapshot = (
         await session.exec(
             select(ExerciseRunSnapshot).where(ExerciseRunSnapshot.exercise_id == exercise_id)
         )
     ).first()
+    if snapshot is not None:
+        object.__setattr__(exercise, _RUN_SNAPSHOT_ATTR, snapshot)
+    return snapshot
 
 
 def get_inject_node(definition: ScenarioDefinition, inject_id: str):
