@@ -18,6 +18,7 @@ from app.services.domain_events import InjectReleased, dispatch, record
 from app.services.scenario_service import export_definition
 
 ATTACHMENT_ROOT = Path("uploads/inject_attachments")
+MAX_SNAPSHOT_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,78 @@ def copy_attachment_for_exercise(attachment: AttachmentMeta, exercise_id: int) -
         path=str(destination),
         size=destination.stat().st_size,
     )
+
+
+def restore_snapshot_attachment(
+    *,
+    filename: str,
+    content_type: str,
+    encoded_bytes: str,
+    expected_sha256: str,
+    expected_size: int,
+    exercise_id: int,
+) -> AttachmentMeta:
+    """Restore immutable attachment bytes captured in a run snapshot.
+
+    Snapshot bytes are used when the live source path was deliberately removed
+    after launch.  Decode and verify before creating the clone-owned file so a
+    corrupt historical record cannot become runnable content.
+    """
+    import base64
+    import hashlib
+
+    raw = base64.b64decode(encoded_bytes, validate=True)
+    if len(raw) != expected_size or len(raw) > MAX_SNAPSHOT_ATTACHMENT_BYTES:
+        raise ValueError("snapshot attachment size does not match its metadata")
+    if hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise ValueError("snapshot attachment digest does not match its metadata")
+    destination_dir = ATTACHMENT_ROOT / str(exercise_id)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(filename).name or "attachment"
+    destination = destination_dir / f"{uuid4().hex}_{safe_name}"
+    destination.write_bytes(raw)
+    return AttachmentMeta(
+        filename=filename,
+        content_type=content_type,
+        path=str(destination),
+        size=len(raw),
+    )
+
+
+async def promote_legacy_inject_provenance(
+    session: AsyncSession, exercise_id: int, scenario: Scenario
+) -> None:
+    """Resolve NULL provenance conservatively before editing a legacy clone.
+
+    The first historical row for each scenario node/group is treated as the
+    materialized scenario row; additional colliding rows remain facilitator-owned.
+    This preserves custom injects that reused a node id while allowing normal
+    scenario edits to update the runnable baseline.
+    """
+    definition = export_definition(scenario)
+    unknown = (
+        await session.exec(
+            select(Inject)
+            .where(col(Inject.exercise_id) == exercise_id)
+            .where(col(Inject.scenario_seeded).is_(None))
+            .order_by(col(Inject.id))
+        )
+    ).all()
+    by_key: dict[tuple[str | None, str | None], list[Inject]] = {}
+    for inject in unknown:
+        by_key.setdefault((inject.scenario_node_id, inject.group_id), []).append(inject)
+    scenario_keys = {
+        (node.id, group_id)
+        for node in definition.injects
+        for group_id in (node.target_teams or [None])
+    }
+    for key, rows in by_key.items():
+        seeded = rows[0] if key in scenario_keys and rows else None
+        for inject in rows:
+            inject.scenario_seeded = inject is seeded
+            if inject.scenario_seeded and inject.release_offset_explicit is not True:
+                inject.release_offset_explicit = False
+            session.add(inject)
 
 
 async def create_inject(

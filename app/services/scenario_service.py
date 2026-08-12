@@ -139,7 +139,10 @@ async def update_scenario(
         from app.models.communication import Communication
         from app.models.exercise import ExerciseMember, ExerciseProgress
         from app.models.inject import Inject
-        from app.services.inject_service import sync_seeded_injects_from_scenario
+        from app.services.inject_service import (
+            promote_legacy_inject_provenance,
+            sync_seeded_injects_from_scenario,
+        )
         from app.services.progression_service import seed_progression
 
         clone = in_use[0]
@@ -168,11 +171,12 @@ async def update_scenario(
                     f"members first: {', '.join(invalid_member_groups)}"
                 ),
             )
+        await promote_legacy_inject_provenance(session, clone.id, scenario)
         custom_injects = (
             await session.exec(
                 select(Inject)
                 .where(col(Inject.exercise_id) == clone.id)
-                .where(col(Inject.scenario_seeded).is_(False))
+                .where(col(Inject.scenario_seeded).is_not(True))
             )
         ).all()
         invalid_custom_groups = sorted(

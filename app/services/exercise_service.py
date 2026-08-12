@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,7 +24,12 @@ from app.models.inject import Inject
 from app.models.scenario import Scenario
 from app.models.user import User
 from app.services.domain_events import ExerciseStateChanged, dispatch, record
-from app.services.inject_service import copy_attachment_for_exercise, seed_injects_from_scenario
+from app.services.inject_service import (
+    copy_attachment_for_exercise,
+    promote_legacy_inject_provenance,
+    restore_snapshot_attachment,
+    seed_injects_from_scenario,
+)
 from app.services.progression_service import seed_progression
 from app.services.scenario_service import (
     RUN_SNAPSHOT_SCHEMA_VERSION,
@@ -98,15 +105,26 @@ async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> Exe
             .order_by(col(Inject.id))
         )
     ).all()
-    configuration: dict[str, object] = {
-        "llm_enabled": locked_exercise.llm_enabled,
-        "scenario_id": scenario.id,
-        "scenario_version": scenario.version,
-        # The reusable scenario definition does not contain facilitator-authored
-        # draft injects. Capture every materialized row (including custom content,
-        # audience, ordering, attachment metadata, and lifecycle state) so the
-        # launch record is independently reproducible and content-addressed.
-        "injects": [
+    materialized_injects: list[dict[str, object]] = []
+    for inject in schedules:
+        attachment_bytes_b64 = None
+        attachment_sha256 = None
+        if inject.attachment_path:
+            attachment_path = Path(inject.attachment_path)
+            if not attachment_path.is_file():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="An inject attachment is missing; repair it before launch",
+                )
+            if attachment_path.stat().st_size > 25 * 1024 * 1024:
+                raise HTTPException(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    detail="An inject attachment is too large to capture in the run snapshot",
+                )
+            raw = attachment_path.read_bytes()
+            attachment_bytes_b64 = base64.b64encode(raw).decode("ascii")
+            attachment_sha256 = hashlib.sha256(raw).hexdigest()
+        materialized_injects.append(
             {
                 "id": inject.id,
                 "scenario_node_id": inject.scenario_node_id,
@@ -128,9 +146,19 @@ async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> Exe
                 "attachment_content_type": inject.attachment_content_type,
                 "attachment_path": inject.attachment_path,
                 "attachment_size": inject.attachment_size,
+                "attachment_bytes_b64": attachment_bytes_b64,
+                "attachment_sha256": attachment_sha256,
             }
-            for inject in schedules
-        ],
+        )
+    configuration: dict[str, object] = {
+        "llm_enabled": locked_exercise.llm_enabled,
+        "scenario_id": scenario.id,
+        "scenario_version": scenario.version,
+        # The reusable scenario definition does not contain facilitator-authored
+        # draft injects. Capture every materialized row (including custom content,
+        # audience, ordering, attachment metadata, and lifecycle state) so the
+        # launch record is independently reproducible and content-addressed.
+        "injects": materialized_injects,
         "inject_schedules": [
             {
                 "inject_id": inject.id,
@@ -280,6 +308,8 @@ async def clone_exercise_as_draft(
                     "attachment_content_type": inject.attachment_content_type,
                     "attachment_path": inject.attachment_path,
                     "attachment_size": inject.attachment_size,
+                    "attachment_bytes_b64": None,
+                    "attachment_sha256": None,
                 }
                 for inject in source_injects
             ]
@@ -304,6 +334,7 @@ async def clone_exercise_as_draft(
             for inject in clone_injects
             if inject.scenario_seeded
         }
+        snapshot_seeded_keys: set[tuple[str | None, str | None]] = set()
         from app.services.inject_service import AttachmentMeta, create_inject
 
         for spec in snapshot_injects:
@@ -311,6 +342,7 @@ async def clone_exercise_as_draft(
                 continue
             identity = (spec.get("scenario_node_id"), spec.get("group_id"))
             if spec.get("scenario_seeded") is True:
+                snapshot_seeded_keys.add(identity)
                 inject = seeded_by_identity.get(identity)
                 if inject is None:
                     continue
@@ -332,7 +364,32 @@ async def clone_exercise_as_draft(
                     path=str(spec["attachment_path"]),
                     size=int(spec.get("attachment_size") or 0),
                 )
-                attachment = copy_attachment_for_exercise(source_attachment, clone.id)
+                if spec.get("attachment_bytes_b64") and spec.get("attachment_sha256"):
+                    try:
+                        attachment = restore_snapshot_attachment(
+                            filename=source_attachment.filename,
+                            content_type=source_attachment.content_type,
+                            encoded_bytes=str(spec["attachment_bytes_b64"]),
+                            expected_sha256=str(spec["attachment_sha256"]),
+                            expected_size=source_attachment.size,
+                            exercise_id=clone.id,
+                        )
+                    except ValueError as exc:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="The immutable snapshot attachment failed integrity validation",
+                        ) from exc
+                else:
+                    try:
+                        attachment = copy_attachment_for_exercise(source_attachment, clone.id)
+                    except FileNotFoundError as exc:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=(
+                                "The historical attachment is unavailable and has no "
+                                "embedded snapshot bytes"
+                            ),
+                        ) from exc
                 copied_attachment_paths.append(attachment.path)
             await create_inject(
                 session,
@@ -348,6 +405,26 @@ async def clone_exercise_as_draft(
                 scenario_seeded=spec.get("scenario_seeded", False),
                 commit=False,
             )
+        # A known-provenance source may have deliberately removed a seeded row
+        # before launch. Do not recreate that row merely because the reusable
+        # scenario definition still contains the node.
+        stale_seeded = [
+            inject
+            for identity, inject in seeded_by_identity.items()
+            if identity not in snapshot_seeded_keys
+        ]
+        if stale_seeded:
+            from sqlalchemy import delete
+
+            from app.models.inject import InjectProgress
+
+            stale_ids = [inject.id for inject in stale_seeded if inject.id is not None]
+            await session.exec(
+                delete(InjectProgress).where(col(InjectProgress.inject_id).in_(stale_ids))
+            )
+            await session.exec(delete(Inject).where(col(Inject.id).in_(stale_ids)))
+        if has_unknown_provenance:
+            await promote_legacy_inject_provenance(session, clone.id, clone_scenario)
         await seed_progression(
             session,
             exercise_id=clone.id,
@@ -401,6 +478,40 @@ async def transition_state_with_history(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot transition from '{previous_state}' to '{new_state}'",
         )
+
+    # Scenario editing acquires Scenario -> Exercise locks.  A draft launch must
+    # use that same order and refresh the exercise after both locks are held;
+    # otherwise a concurrent clone fork can win the state CAS while the snapshot
+    # still resolves through the pre-fork scenario object.
+    if previous_state == ExerciseState.draft and new_state == ExerciseState.active:
+        scenario_lock = (
+            await session.exec(
+                select(Scenario).where(Scenario.id == exercise.scenario_id).with_for_update()
+            )
+        ).first()
+        if scenario_lock is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Exercise scenario was not found"
+            )
+        locked = (
+            await session.exec(
+                select(Exercise)
+                .where(Exercise.id == exercise.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).first()
+        if locked is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+        if locked.state != previous_state:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Exercise state changed from '{previous_state}' to '{locked.state}' "
+                    "while this request was in flight; reload and try again"
+                ),
+            )
+        exercise = locked
 
     now = datetime.now(UTC)
     values: dict = {"state": new_state}
