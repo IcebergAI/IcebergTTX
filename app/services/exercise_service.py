@@ -91,7 +91,7 @@ async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> Exe
             select(Inject)
             .where(Inject.exercise_id == exercise.id)
             .with_for_update()
-            .order_by(Inject.id)
+            .order_by(col(Inject.id))
         )
     ).all()
     configuration: dict[str, object] = {

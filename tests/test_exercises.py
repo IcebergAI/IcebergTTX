@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import (
@@ -123,7 +123,7 @@ async def test_launch_captures_content_addressed_snapshot_and_uses_it_after_temp
     assert draft_exercise.id is not None
     injects = (
         await session.exec(
-            select(Inject).where(Inject.exercise_id == draft_exercise.id).order_by(Inject.id)
+            select(Inject).where(Inject.exercise_id == draft_exercise.id).order_by(col(Inject.id))
         )
     ).all()
     assert injects
