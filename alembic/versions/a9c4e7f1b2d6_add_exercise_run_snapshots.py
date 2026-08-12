@@ -4,11 +4,9 @@ Revision ID: a9c4e7f1b2d6
 Revises: d8e9f0a1b2c3
 """
 
-import base64
 import hashlib
 import json
 from collections.abc import Sequence
-from pathlib import Path
 
 import sqlalchemy as sa
 
@@ -18,44 +16,6 @@ revision: str = "a9c4e7f1b2d6"
 down_revision: str | None = "d8e9f0a1b2c3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
-
-MAX_SNAPSHOT_ATTACHMENT_BYTES = 25 * 1024 * 1024
-
-
-def _capture_attachment(
-    path_value: str | None, expected_size: int | None
-) -> tuple[str | None, str | None, str]:
-    """Capture legacy attachment bytes when the old file is still available.
-
-    A migration cannot reconstruct a file already deleted or outside the managed
-    attachment root.  Record that uncertainty explicitly instead of presenting a
-    path-only reference as immutable evidence.
-    """
-    if not path_value:
-        return None, None, "not_present"
-    root = Path("uploads/inject_attachments").resolve()
-    candidate = Path(path_value).resolve()
-    try:
-        candidate.relative_to(root)
-    except ValueError:
-        return None, None, "unavailable"
-    try:
-        if not candidate.is_file():
-            return None, None, "unavailable"
-        size = candidate.stat().st_size
-        if size > MAX_SNAPSHOT_ATTACHMENT_BYTES:
-            return None, None, "oversized"
-        raw = candidate.read_bytes()
-    except OSError:
-        return None, None, "unavailable"
-    if expected_size is not None and len(raw) != expected_size:
-        return None, None, "invalid"
-    return (
-        base64.b64encode(raw).decode("ascii"),
-        hashlib.sha256(raw).hexdigest(),
-        "captured",
-    )
-
 
 def upgrade() -> None:
     op.add_column(
@@ -147,9 +107,6 @@ def upgrade() -> None:
         ).mappings()
         materialized_injects = []
         for inject in inject_rows:
-            attachment_bytes_b64, attachment_sha256, attachment_status = _capture_attachment(
-                inject["attachment_path"], inject["attachment_size"]
-            )
             materialized_injects.append(
                 {
                     "id": inject["id"],
@@ -179,9 +136,6 @@ def upgrade() -> None:
                     "attachment_content_type": inject["attachment_content_type"],
                     "attachment_path": inject["attachment_path"],
                     "attachment_size": inject["attachment_size"],
-                    "attachment_bytes_b64": attachment_bytes_b64,
-                    "attachment_sha256": attachment_sha256,
-                    "attachment_snapshot_status": attachment_status,
                 }
             )
         configuration["injects"] = materialized_injects

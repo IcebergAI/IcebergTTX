@@ -26,7 +26,7 @@ def test_snapshot_migration_captures_available_legacy_attachment(tmp_path, monke
     import base64
     import importlib.util
 
-    migration_path = ROOT / "alembic/versions/a9c4e7f1b2d6_add_exercise_run_snapshots.py"
+    migration_path = ROOT / "alembic/versions/d3e4f5a6b7c8_backfill_snapshot_attachments.py"
     module_spec = importlib.util.spec_from_file_location("snapshot_migration", migration_path)
     assert module_spec is not None and module_spec.loader is not None
     migration = importlib.util.module_from_spec(module_spec)
