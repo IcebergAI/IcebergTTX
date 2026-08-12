@@ -210,7 +210,20 @@ async def update_exercise(
     current_user: FacilitatorDep,
     session: SessionDep,
 ):
-    ex = await require_exercise_owner(session, exercise_id, current_user)
+    await require_exercise_owner(session, exercise_id, current_user)
+    # Serialize settings updates with draft -> active snapshot capture. A plain
+    # preflight read can pass while a concurrent start commits, then overwrite the
+    # frozen LLM setting after launch.
+    ex = (
+        await session.exec(
+            select(Exercise)
+            .where(Exercise.id == exercise_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if ex is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
     # Debrief notes are the deliberate post-exercise workflow; other operational
     # settings remain frozen once an exercise is completed.
     updates = body.model_dump(exclude_unset=True)

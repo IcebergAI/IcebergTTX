@@ -81,7 +81,12 @@ def upgrade() -> None:
             ensure_ascii=False,
         )
         configuration = {
-            "llm_enabled": bool(row["llm_enabled"]),
+            # There was no launch-time configuration history before this
+            # revision. The current mutable value cannot prove what governed a
+            # historical run, so preserve that uncertainty instead of fabricating
+            # provenance from the post-launch row.
+            "llm_enabled": None,
+            "llm_enabled_source": "unknown_legacy",
             "scenario_id": row["scenario_id"],
             "scenario_version": row["scenario_version"],
         }

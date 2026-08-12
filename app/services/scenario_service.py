@@ -67,6 +67,32 @@ async def update_scenario(
     scenario.definition = definition.model_dump_json()
     scenario.updated_at = datetime.now(UTC)
     session.add(scenario)
+    if private_clone_draft:
+        # Clone creation materializes Inject and ExerciseProgress rows for the
+        # original definition. Replacing only the Scenario would leave the draft
+        # runnable against stale inject content/cursors, so rebuild that derived
+        # state in the same transaction as the edit.
+        from sqlalchemy import delete
+
+        from app.models.exercise import ExerciseProgress
+        from app.models.inject import Inject, InjectProgress
+        from app.services.inject_service import seed_injects_from_scenario
+        from app.services.progression_service import seed_progression
+
+        clone = in_use[0]
+        await session.exec(delete(InjectProgress).where(InjectProgress.exercise_id == clone.id))
+        await session.exec(delete(Inject).where(Inject.exercise_id == clone.id))
+        await session.exec(delete(ExerciseProgress).where(ExerciseProgress.exercise_id == clone.id))
+        clone.current_node_id = definition.start_inject_id
+        session.add(clone)
+        await session.flush()
+        await seed_injects_from_scenario(session, clone.id, scenario)
+        await seed_progression(
+            session,
+            exercise_id=clone.id,
+            start_node_id=definition.start_inject_id,
+            group_ids=[team.id for team in definition.participant_teams],
+        )
     await session.commit()
     await session.refresh(scenario)
     return scenario
