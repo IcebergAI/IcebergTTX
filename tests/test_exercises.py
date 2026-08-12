@@ -13,6 +13,7 @@ from httpx import AsyncClient
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.communication import Communication
 from app.models.exercise import (
     Exercise,
     ExerciseMember,
@@ -559,7 +560,9 @@ async def test_captured_launch_list_preserves_unknown_legacy_rows_on_clone(
     ).all()
     by_title = {row.title: row for row in cloned_rows}
     assert "Pre-launch legacy custom" in by_title
+    await session.refresh(by_title["Pre-launch legacy custom"])
     assert by_title["Pre-launch legacy custom"].scenario_seeded is None
+    assert by_title["Pre-launch legacy custom"].release_offset_explicit is None
 
 
 async def test_legacy_clone_does_not_guess_provenance_or_duplicate_on_sync(
@@ -610,6 +613,11 @@ async def test_run_snapshot_clones_prepared_communications(
         headers=_bearer(facilitator_token),
     )
     assert prepared.status_code == 201
+    prepared_row = await session.get(Communication, prepared.json()["id"])
+    assert prepared_row is not None
+    prepared_row.audience_explicit = None
+    session.add(prepared_row)
+    await session.commit()
     started = await client.post(
         f"/api/exercises/{draft_exercise.id}/start", headers=_bearer(facilitator_token)
     )
@@ -620,9 +628,9 @@ async def test_run_snapshot_clones_prepared_communications(
             select(ExerciseRunSnapshot).where(ExerciseRunSnapshot.exercise_id == draft_exercise.id)
         )
     ).one()
-    assert json.loads(snapshot.configuration_json)["communications"][0]["body"].startswith(
-        "This message"
-    )
+    snapshot_communication = json.loads(snapshot.configuration_json)["communications"][0]
+    assert snapshot_communication["body"].startswith("This message")
+    assert snapshot_communication["audience_explicit"] is None
 
     cloned = await client.post(
         f"/api/exercises/{draft_exercise.id}/clone",
@@ -637,6 +645,11 @@ async def test_run_snapshot_clones_prepared_communications(
     assert communications.status_code == 200
     assert [row["subject"] for row in communications.json()] == ["Clone me"]
     assert communications.json()[0]["visible_to_teams"] == ["it_ops"]
+    cloned_communication = (
+        await session.exec(select(Communication).where(Communication.exercise_id == clone_id))
+    ).one()
+    await session.refresh(cloned_communication)
+    assert cloned_communication.audience_explicit is None
 
 
 async def test_reused_private_clone_scenario_cannot_be_edited_in_place(

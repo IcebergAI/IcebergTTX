@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -29,7 +29,9 @@ class Inject(SQLModel, table=True):
     # draft injects may also supply a node id, so identity alone is not provenance.
     # NULL is legacy-unknown provenance; new API rows are false and materialized
     # scenario rows are true.
-    scenario_seeded: bool | None = Field(default=False, nullable=True)
+    scenario_seeded: bool | None = Field(
+        default=False, nullable=True, sa_type=Boolean().evaluates_none()
+    )
     title: str
     content: str
     target_teams: list[str] | None = Field(  # team IDs; None = all teams
@@ -43,7 +45,9 @@ class Inject(SQLModel, table=True):
     release_offset_minutes: int | None = Field(default=None)
     # False follows the scenario definition; True records an explicit facilitator
     # override (including clearing back to manual release). None is legacy unknown.
-    release_offset_explicit: bool | None = Field(default=False, nullable=True)
+    release_offset_explicit: bool | None = Field(
+        default=False, nullable=True, sa_type=Boolean().evaluates_none()
+    )
     state: InjectState = Field(default=InjectState.pending)
     released_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     released_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")

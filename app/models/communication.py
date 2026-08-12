@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -52,7 +52,9 @@ class Communication(SQLModel, table=True):
     # all-current-teams expansion so draft scenario edits can reconcile safely.
     # NULL is legacy unknown provenance. Only exact False may be expanded as the
     # known implicit all-team audience created by current application code.
-    audience_explicit: bool | None = Field(default=False, nullable=True)
+    audience_explicit: bool | None = Field(
+        default=False, nullable=True, sa_type=Boolean().evaluates_none()
+    )
     sent_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )
