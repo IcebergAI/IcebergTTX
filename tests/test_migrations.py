@@ -21,6 +21,34 @@ from app.database import make_async_url, make_asyncpg_dsn
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_snapshot_migration_captures_available_legacy_attachment(tmp_path, monkeypatch):
+    """Backfilled snapshots embed bytes while explicitly reporting old-file gaps."""
+    import base64
+    import importlib.util
+
+    migration_path = ROOT / "alembic/versions/a9c4e7f1b2d6_add_exercise_run_snapshots.py"
+    module_spec = importlib.util.spec_from_file_location("snapshot_migration", migration_path)
+    assert module_spec is not None and module_spec.loader is not None
+    migration = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(migration)
+    capture_attachment = migration._capture_attachment
+
+    monkeypatch.chdir(tmp_path)
+    attachment = tmp_path / "uploads" / "inject_attachments" / "7" / "brief.txt"
+    attachment.parent.mkdir(parents=True)
+    raw = b"legacy evidence"
+    attachment.write_bytes(raw)
+
+    encoded, digest, state = capture_attachment(str(attachment), len(raw))
+
+    assert base64.b64decode(encoded or "", validate=True) == raw
+    assert digest is not None
+    assert state == "captured"
+    assert capture_attachment(str(attachment.with_name("missing.txt")), len(raw))[2] == (
+        "unavailable"
+    )
+
+
 def _dsn(database: str | None = None) -> str:
     dsn = make_asyncpg_dsn(os.environ["DATABASE_URL"])
     if database is None:

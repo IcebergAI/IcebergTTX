@@ -176,6 +176,51 @@ async def test_launch_captures_content_addressed_snapshot_and_uses_it_after_temp
     assert exported.json()["run_snapshot"]["content_sha256"] == snapshot.content_sha256
 
 
+async def test_clone_does_not_resurrect_post_launch_injects_from_empty_snapshot(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    draft_exercise: Exercise,
+):
+    """An immutable empty inject list must not fall back to mutable source rows."""
+    from sqlalchemy import delete
+
+    from app.models.inject import InjectProgress
+
+    assert draft_exercise.id is not None
+    exercise_id = draft_exercise.id
+    await session.exec(delete(InjectProgress).where(col(InjectProgress.exercise_id) == exercise_id))
+    await session.exec(delete(Inject).where(col(Inject.exercise_id) == exercise_id))
+    await session.commit()
+    assert (
+        await client.post(
+            f"/api/exercises/{draft_exercise.id}/start", headers=_bearer(facilitator_token)
+        )
+    ).status_code == 200
+
+    # This row is deliberately outside the launch snapshot.
+    session.add(
+        Inject(
+            exercise_id=draft_exercise.id,
+            title="Post-launch row",
+            content="Must not be copied",
+            sequence_order=99,
+            scenario_seeded=False,
+        )
+    )
+    await session.commit()
+
+    cloned = await client.post(
+        f"/api/exercises/{draft_exercise.id}/clone",
+        json={"title": "Empty snapshot clone"},
+        headers=_bearer(facilitator_token),
+    )
+    assert cloned.status_code == 201
+    clone_id = cloned.json()["id"]
+    copied = (await session.exec(select(Inject).where(Inject.exercise_id == clone_id))).all()
+    assert copied == []
+
+
 async def test_clone_creates_distinct_editable_draft_with_lineage(
     client: AsyncClient,
     facilitator_token: str,
@@ -262,6 +307,64 @@ async def test_clone_creates_distinct_editable_draft_with_lineage(
     assert edited_seed["release_offset_minutes"] == 42
     edited_default = next(row for row in injects.json() if row["scenario_node_id"] == "inject_02")
     assert edited_default["release_offset_minutes"] == 17
+
+
+async def test_legacy_clone_provenance_never_promotes_custom_collision(
+    session: AsyncSession,
+    draft_exercise: Exercise,
+    sample_scenario,
+):
+    """A custom row reusing a scenario identity stays facilitator-owned."""
+    from app.services.inject_service import promote_legacy_inject_provenance
+
+    inject = (
+        await session.exec(
+            select(Inject).where(Inject.exercise_id == draft_exercise.id).order_by(col(Inject.id))
+        )
+    ).first()
+    assert inject is not None
+    inject.title = "Facilitator-authored replacement"
+    inject.content = "Different authored content"
+    inject.scenario_seeded = None
+    inject.release_offset_explicit = None
+    inject.release_offset_minutes = 42
+    session.add(inject)
+    await session.flush()
+
+    assert draft_exercise.id is not None
+    await promote_legacy_inject_provenance(session, draft_exercise.id, sample_scenario)
+
+    assert inject.scenario_seeded is False
+    assert inject.release_offset_explicit is None
+    assert inject.release_offset_minutes == 42
+
+
+async def test_legacy_clone_preserves_matching_schedule_override(
+    session: AsyncSession,
+    draft_exercise: Exercise,
+    sample_scenario,
+):
+    """A matching legacy row retains a frozen schedule as an explicit override."""
+    from app.services.inject_service import promote_legacy_inject_provenance
+
+    inject = (
+        await session.exec(
+            select(Inject).where(Inject.exercise_id == draft_exercise.id).order_by(col(Inject.id))
+        )
+    ).first()
+    assert inject is not None
+    inject.scenario_seeded = None
+    inject.release_offset_explicit = None
+    inject.release_offset_minutes = 42
+    session.add(inject)
+    await session.flush()
+
+    assert draft_exercise.id is not None
+    await promote_legacy_inject_provenance(session, draft_exercise.id, sample_scenario)
+
+    assert inject.scenario_seeded is True
+    assert inject.release_offset_explicit is True
+    assert inject.release_offset_minutes == 42
 
 
 async def test_reused_private_clone_scenario_cannot_be_edited_in_place(

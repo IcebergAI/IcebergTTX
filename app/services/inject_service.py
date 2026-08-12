@@ -13,7 +13,7 @@ from app.models.exercise import ExerciseState
 from app.models.inject import Inject, InjectProgress, InjectState
 from app.models.scenario import Scenario
 from app.schemas.api import InjectPublic
-from app.schemas.scenario_json import ScenarioDefinition
+from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.domain_events import InjectReleased, dispatch, record
 from app.services.scenario_service import export_definition
 
@@ -66,7 +66,7 @@ def restore_snapshot_attachment(
     content_type: str,
     encoded_bytes: str,
     expected_sha256: str,
-    expected_size: int,
+    expected_size: int | None,
     exercise_id: int,
 ) -> AttachmentMeta:
     """Restore immutable attachment bytes captured in a run snapshot.
@@ -79,7 +79,9 @@ def restore_snapshot_attachment(
     import hashlib
 
     raw = base64.b64decode(encoded_bytes, validate=True)
-    if len(raw) != expected_size or len(raw) > MAX_SNAPSHOT_ATTACHMENT_BYTES:
+    if (expected_size is not None and len(raw) != expected_size) or len(
+        raw
+    ) > MAX_SNAPSHOT_ATTACHMENT_BYTES:
         raise ValueError("snapshot attachment size does not match its metadata")
     if hashlib.sha256(raw).hexdigest() != expected_sha256:
         raise ValueError("snapshot attachment digest does not match its metadata")
@@ -99,14 +101,21 @@ def restore_snapshot_attachment(
 async def promote_legacy_inject_provenance(
     session: AsyncSession, exercise_id: int, scenario: Scenario
 ) -> None:
-    """Resolve NULL provenance conservatively before editing a legacy clone.
+    """Recover only strongly evidenced legacy provenance.
 
-    The first historical row for each scenario node/group is treated as the
-    materialized scenario row; additional colliding rows remain facilitator-owned.
-    This preserves custom injects that reused a node id while allowing normal
-    scenario edits to update the runnable baseline.
+    Legacy rows have no bit that can distinguish a scenario-derived row from a
+    facilitator row that reused the same node/group identity.  Identity-based
+    promotion is unsafe: it can turn the sole custom row into scenario-owned data
+    and overwrite it on the next edit.  Require the complete materialized content
+    to match the cloned Scenario; otherwise retain facilitator ownership.  A
+    schedule mismatch is preserved as an explicit override when the rest matches.
     """
     definition = export_definition(scenario)
+    expected: dict[tuple[str | None, str | None], tuple[InjectNode, int]] = {}
+    for index, node in enumerate(definition.injects):
+        groups = node.target_teams or [None]
+        for group_id in groups:
+            expected[(node.id, group_id)] = (node, node.sequence_order or index)
     unknown = (
         await session.exec(
             select(Inject)
@@ -115,21 +124,32 @@ async def promote_legacy_inject_provenance(
             .order_by(col(Inject.id))
         )
     ).all()
-    by_key: dict[tuple[str | None, str | None], list[Inject]] = {}
     for inject in unknown:
-        by_key.setdefault((inject.scenario_node_id, inject.group_id), []).append(inject)
-    scenario_keys = {
-        (node.id, group_id)
-        for node in definition.injects
-        for group_id in (node.target_teams or [None])
-    }
-    for key, rows in by_key.items():
-        seeded = rows[0] if key in scenario_keys and rows else None
-        for inject in rows:
-            inject.scenario_seeded = inject is seeded
-            if inject.scenario_seeded and inject.release_offset_explicit is not True:
-                inject.release_offset_explicit = False
-            session.add(inject)
+        candidate = expected.get((inject.scenario_node_id, inject.group_id))
+        node, sequence_order = candidate if candidate is not None else (None, None)
+        matches_materialized_content = bool(
+            node is not None
+            and inject.title == node.title
+            and inject.content == node.content
+            and inject.target_teams == (node.target_teams or None)
+            and inject.sequence_order == sequence_order
+            and inject.attachment_path is None
+            and inject.attachment_filename is None
+            and inject.attachment_size is None
+        )
+        inject.scenario_seeded = matches_materialized_content
+        if (
+            matches_materialized_content
+            and node is not None
+            and inject.release_offset_explicit is None
+        ):
+            # The frozen legacy value is authoritative for the clone.  It follows
+            # future scenario edits only when it matches the cloned default;
+            # otherwise preserve it as a facilitator override.
+            inject.release_offset_explicit = (
+                inject.release_offset_minutes != node.release_at_minutes
+            )
+        session.add(inject)
 
 
 async def create_inject(
@@ -143,6 +163,7 @@ async def create_inject(
     group_id: str | None = None,
     sequence_order: int = 0,
     release_offset_minutes: int | None = None,
+    release_offset_explicit: bool | None = False,
     attachment: AttachmentMeta | None = None,
     scenario_seeded: bool | None = False,
     commit: bool = True,
@@ -161,6 +182,7 @@ async def create_inject(
         group_id=normalized_group_id,
         sequence_order=sequence_order,
         release_offset_minutes=release_offset_minutes,
+        release_offset_explicit=release_offset_explicit,
         attachment_filename=attachment.filename if attachment else None,
         attachment_content_type=attachment.content_type if attachment else None,
         attachment_path=attachment.path if attachment else None,
@@ -434,8 +456,9 @@ async def sync_seeded_injects_from_scenario(
     """Reconcile scenario-derived rows while preserving draft-owned inject state.
 
     Existing seeded rows retain explicit facilitator schedule overrides; legacy
-    unknown rows adopt the edited scenario default, removed scenario nodes are
-    deleted, and new nodes are inserted with their declared defaults.
+    unknown rows remain untouched because their ownership cannot be proven,
+    removed scenario nodes are deleted, and new nodes are inserted with their
+    declared defaults.
     Rows created through the inject API are never touched, even when they carry a
     scenario_node_id for UI lineage.
     """
@@ -471,14 +494,12 @@ async def sync_seeded_injects_from_scenario(
                 existing.scenario_node_id = node.id
                 # New materialized rows follow the scenario until a facilitator
                 # explicitly changes their schedule. Legacy NULL provenance is
-                # intentionally resolved to the edited scenario default because
-                # its historical intent cannot be recovered safely.
-                if existing.release_offset_explicit is not True:
+                # intentionally left untouched because its historical intent
+                # cannot be recovered safely.
+                if existing.release_offset_explicit is False:
                     existing.release_offset_minutes = node.release_at_minutes
-                    # Legacy NULL means "unknown", not an override.  Once this
-                    # draft is reconciled, the new scenario value is the explicit
-                    # baseline for future edits.
-                    existing.release_offset_explicit = False
+                    # NULL is an unknown legacy value.  Preserve it rather than
+                    # fabricating provenance and erasing a frozen schedule.
                 session.add(existing)
                 continue
             await create_inject(

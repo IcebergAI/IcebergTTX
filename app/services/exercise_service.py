@@ -50,7 +50,60 @@ class ExerciseTransitionResult:
     action: str
 
 
-async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> ExerciseRunSnapshot:
+async def _lock_current_exercise_context(
+    session: AsyncSession, exercise_id: int
+) -> tuple[Exercise, Scenario]:
+    """Lock a run's current Scenario then Exercise without stale-rebind deadlocks.
+
+    Scenario editing uses this same order.  A clone rebind can commit between an
+    initial read and the Scenario lock, so verify the relationship after both rows
+    are locked and retry from a clean transaction when it changed.
+    """
+    for _attempt in range(3):
+        observed = (
+            await session.exec(
+                select(Exercise)
+                .where(Exercise.id == exercise_id)
+                .execution_options(populate_existing=True)
+            )
+        ).first()
+        if observed is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+        scenario = (
+            await session.exec(
+                select(Scenario).where(Scenario.id == observed.scenario_id).with_for_update()
+            )
+        ).first()
+        if scenario is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Exercise scenario was not found",
+            )
+        locked = (
+            await session.exec(
+                select(Exercise)
+                .where(Exercise.id == exercise_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).first()
+        if locked is not None and locked.scenario_id == scenario.id:
+            return locked, scenario
+        # No domain writes happen before this helper is called.  Reset the read
+        # transaction so the next attempt can lock the rebound Scenario first.
+        await session.rollback()
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Exercise scenario changed while the operation was starting; retry",
+    )
+
+
+async def _freeze_run_snapshot(
+    session: AsyncSession,
+    exercise: Exercise,
+    *,
+    locked_scenario: Scenario | None = None,
+) -> ExerciseRunSnapshot:
     """Capture the one immutable interpretation record for a draft being launched.
 
     The Scenario row is locked while its validated definition is canonicalized. This
@@ -66,29 +119,21 @@ async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> Exe
     ).first()
     if existing is not None:
         return existing
-    # Lock in the same Scenario -> Exercise order used by scenario editing and
-    # creation. A launch/edit race therefore serializes instead of deadlocking.
-    scenario = (
-        await session.exec(
-            select(Scenario).where(Scenario.id == exercise.scenario_id).with_for_update()
-        )
-    ).first()
+    # Callers that already acquired the pair pass the Scenario through.  Avoiding
+    # a second Scenario lock after the Exercise lock is what prevents an E->F
+    # launch/rebind cycle from deadlocking.
+    scenario = locked_scenario
+    if scenario is None:
+        exercise, scenario = await _lock_current_exercise_context(session, exercise.id)
     if scenario is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Exercise scenario was not found",
         )
-    # Re-read after the state CAS while holding the same row lock. A concurrent
-    # draft-settings update either committed before this point (and is captured)
-    # or waits until launch completes; no mixed configuration can be recorded.
-    locked_exercise = (
-        await session.exec(
-            select(Exercise)
-            .where(Exercise.id == exercise.id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-    ).first()
+    assert exercise.id is not None
+    # The caller's locked Exercise is authoritative when a context was supplied.
+    # Otherwise the helper above returned the current locked row.
+    locked_exercise = exercise
     assert locked_exercise is not None
     assert scenario.id is not None
     definition = export_definition(scenario)
@@ -109,6 +154,7 @@ async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> Exe
     for inject in schedules:
         attachment_bytes_b64 = None
         attachment_sha256 = None
+        attachment_snapshot_status = "not_present"
         if inject.attachment_path:
             attachment_path = Path(inject.attachment_path)
             if not attachment_path.is_file():
@@ -124,6 +170,7 @@ async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> Exe
             raw = attachment_path.read_bytes()
             attachment_bytes_b64 = base64.b64encode(raw).decode("ascii")
             attachment_sha256 = hashlib.sha256(raw).hexdigest()
+            attachment_snapshot_status = "captured"
         materialized_injects.append(
             {
                 "id": inject.id,
@@ -148,6 +195,7 @@ async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> Exe
                 "attachment_size": inject.attachment_size,
                 "attachment_bytes_b64": attachment_bytes_b64,
                 "attachment_sha256": attachment_sha256,
+                "attachment_snapshot_status": attachment_snapshot_status,
             }
         )
     configuration: dict[str, object] = {
@@ -244,11 +292,13 @@ async def clone_exercise_as_draft(
 ) -> Exercise:
     """Create a distinct draft from a run's frozen definition and preserve lineage."""
     assert source.id is not None
+    # A draft clone must read its Scenario definition and materialized Inject rows
+    # from one locked source revision.  Otherwise a concurrent private-clone edit
+    # can commit between those reads and produce a mixed, unrunnable draft.
+    source, source_scenario = await _lock_current_exercise_context(session, source.id)
+    assert source.id is not None
     definition = await definition_for_exercise(session, source.id)
     if definition is None:
-        raise HTTPException(status_code=422, detail="Exercise scenario was not found")
-    source_scenario = await session.get(Scenario, source.scenario_id)
-    if source_scenario is None:
         raise HTTPException(status_code=422, detail="Exercise scenario was not found")
     # A clone receives a new reusable Scenario row rather than attaching a draft
     # directly to historical source content. It can be tailored for the next run
@@ -281,18 +331,28 @@ async def clone_exercise_as_draft(
         # the reusable scenario definition. Restore authored injects and explicit
         # schedule overrides so cloning a run is a faithful, editable draft.
         snapshot = await snapshot_for_exercise(session, source.id)
-        snapshot_configuration = (
+        loaded_configuration = (
             json.loads(snapshot.configuration_json) if snapshot is not None else {}
+        )
+        snapshot_configuration = (
+            loaded_configuration if isinstance(loaded_configuration, dict) else {}
         )
         snapshot_injects = snapshot_configuration.get("injects", [])
         if not isinstance(snapshot_injects, list):
             snapshot_injects = []
+        snapshot_has_injects = (
+            snapshot is not None
+            and isinstance(snapshot_configuration, dict)
+            and isinstance(snapshot_configuration.get("injects"), list)
+        )
         source_injects = (
             await session.exec(
                 select(Inject).where(Inject.exercise_id == source.id).order_by(col(Inject.id))
             )
         ).all()
-        if not snapshot_injects:
+        # A captured empty list is a valid immutable run configuration.  Only a
+        # missing/invalid legacy configuration may fall back to current rows.
+        if not snapshot_has_injects:
             snapshot_injects = [
                 {
                     "scenario_node_id": inject.scenario_node_id,
@@ -355,13 +415,31 @@ async def clone_exercise_as_draft(
                 session.add(inject)
                 continue
             attachment = None
-            if spec.get("attachment_path"):
+            attachment_snapshot_status = spec.get("attachment_snapshot_status")
+            if attachment_snapshot_status not in (None, "captured", "not_present"):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "The historical attachment is unavailable and has no "
+                        "embedded snapshot bytes"
+                    ),
+                )
+            if attachment_snapshot_status == "captured" and not (
+                spec.get("attachment_bytes_b64") and spec.get("attachment_sha256")
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="The immutable snapshot attachment is incomplete",
+                )
+            if spec.get("attachment_path") or (
+                spec.get("attachment_bytes_b64") and spec.get("attachment_sha256")
+            ):
                 source_attachment = AttachmentMeta(
                     filename=str(spec.get("attachment_filename") or "attachment"),
                     content_type=str(
                         spec.get("attachment_content_type") or "application/octet-stream"
                     ),
-                    path=str(spec["attachment_path"]),
+                    path=str(spec.get("attachment_path") or ""),
                     size=int(spec.get("attachment_size") or 0),
                 )
                 if spec.get("attachment_bytes_b64") and spec.get("attachment_sha256"):
@@ -371,7 +449,11 @@ async def clone_exercise_as_draft(
                             content_type=source_attachment.content_type,
                             encoded_bytes=str(spec["attachment_bytes_b64"]),
                             expected_sha256=str(spec["attachment_sha256"]),
-                            expected_size=source_attachment.size,
+                            expected_size=(
+                                int(spec["attachment_size"])
+                                if spec.get("attachment_size") is not None
+                                else None
+                            ),
                             exercise_id=clone.id,
                         )
                     except ValueError as exc:
@@ -391,6 +473,18 @@ async def clone_exercise_as_draft(
                             ),
                         ) from exc
                 copied_attachment_paths.append(attachment.path)
+            elif spec.get("attachment_filename") or spec.get("attachment_size"):
+                # A legacy path-only snapshot may have lost its source file before
+                # the upgrade.  Do not silently turn that historical attachment
+                # into an unannotated clone; make the irrecoverable uncertainty
+                # explicit to the facilitator.
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "The historical attachment is unavailable and has no "
+                        "embedded snapshot bytes"
+                    ),
+                )
             await create_inject(
                 session,
                 exercise_id=clone.id,
@@ -401,6 +495,7 @@ async def clone_exercise_as_draft(
                 group_id=spec.get("group_id"),
                 sequence_order=int(spec.get("sequence_order", 0)),
                 release_offset_minutes=spec.get("release_offset_minutes"),
+                release_offset_explicit=spec.get("release_offset_explicit"),
                 attachment=attachment,
                 scenario_seeded=spec.get("scenario_seeded", False),
                 commit=False,
@@ -479,30 +574,14 @@ async def transition_state_with_history(
             detail=f"Cannot transition from '{previous_state}' to '{new_state}'",
         )
 
+    locked_scenario: Scenario | None = None
     # Scenario editing acquires Scenario -> Exercise locks.  A draft launch must
     # use that same order and refresh the exercise after both locks are held;
     # otherwise a concurrent clone fork can win the state CAS while the snapshot
     # still resolves through the pre-fork scenario object.
     if previous_state == ExerciseState.draft and new_state == ExerciseState.active:
-        scenario_lock = (
-            await session.exec(
-                select(Scenario).where(Scenario.id == exercise.scenario_id).with_for_update()
-            )
-        ).first()
-        if scenario_lock is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Exercise scenario was not found"
-            )
-        locked = (
-            await session.exec(
-                select(Exercise)
-                .where(Exercise.id == exercise.id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).first()
-        if locked is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+        assert exercise.id is not None
+        locked, locked_scenario = await _lock_current_exercise_context(session, exercise.id)
         if locked.state != previous_state:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -563,7 +642,7 @@ async def transition_state_with_history(
     session.add(transition)
     try:
         if previous_state == ExerciseState.draft and new_state == ExerciseState.active:
-            await _freeze_run_snapshot(session, exercise)
+            await _freeze_run_snapshot(session, exercise, locked_scenario=locked_scenario)
         # Flush first: the frame names the transition, so it needs its id — and the event
         # must be recorded inside this transaction so a failed commit discards it.
         await session.flush()
