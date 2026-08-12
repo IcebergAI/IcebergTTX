@@ -98,6 +98,35 @@ async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> Exe
         "llm_enabled": locked_exercise.llm_enabled,
         "scenario_id": scenario.id,
         "scenario_version": scenario.version,
+        # The reusable scenario definition does not contain facilitator-authored
+        # draft injects. Capture every materialized row (including custom content,
+        # audience, ordering, attachment metadata, and lifecycle state) so the
+        # launch record is independently reproducible and content-addressed.
+        "injects": [
+            {
+                "id": inject.id,
+                "scenario_node_id": inject.scenario_node_id,
+                "scenario_seeded": inject.scenario_seeded,
+                "title": inject.title,
+                "content": inject.content,
+                "target_teams": inject.target_teams,
+                "group_id": inject.group_id,
+                "sequence_order": inject.sequence_order,
+                "release_offset_minutes": inject.release_offset_minutes,
+                "release_offset_explicit": inject.release_offset_explicit,
+                "state": str(inject.state),
+                "released_at": inject.released_at.isoformat() if inject.released_at else None,
+                "released_by": inject.released_by,
+                "resolved_at": inject.resolved_at.isoformat() if inject.resolved_at else None,
+                "resolved_by": inject.resolved_by,
+                "resolution_reason": inject.resolution_reason,
+                "attachment_filename": inject.attachment_filename,
+                "attachment_content_type": inject.attachment_content_type,
+                "attachment_path": inject.attachment_path,
+                "attachment_size": inject.attachment_size,
+            }
+            for inject in schedules
+        ],
         "inject_schedules": [
             {
                 "inject_id": inject.id,

@@ -144,6 +144,9 @@ async def test_launch_captures_content_addressed_snapshot_and_uses_it_after_temp
     ).one()
     assert len(snapshot.content_sha256) == 64
     configuration = json.loads(snapshot.configuration_json)
+    assert configuration["injects"][0]["content"]
+    assert configuration["injects"][0]["title"]
+    assert configuration["injects"][0]["sequence_order"] == injects[0].sequence_order
     assert configuration["inject_schedules"][0]["release_offset_minutes"] == 42
     assert configuration["inject_schedules"][0]["release_offset_explicit"] is True
     original = await definition_for_exercise(session, draft_exercise.id)
