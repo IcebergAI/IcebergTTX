@@ -341,14 +341,19 @@ async def sync_seeded_injects_from_scenario(
             .where(col(Inject.scenario_seeded).is_(True))
         )
     ).all()
-    by_key = {(inject.scenario_node_id, inject.group_id): inject for inject in seeded}
+    by_key: dict[tuple[str | None, str | None], list[Inject]] = {}
+    for inject in seeded:
+        by_key.setdefault((inject.scenario_node_id, inject.group_id), []).append(inject)
+    duplicate_ids: list[int] = []
     for index, node in enumerate(definition.injects):
         sequence_order = node.sequence_order or index
         target_teams = node.target_teams or None
         groups = node.target_teams or [None]
         for group_id in groups:
             key = (node.id, group_id)
-            existing = by_key.pop(key, None)
+            candidates = by_key.pop(key, [])
+            existing = candidates.pop(0) if candidates else None
+            duplicate_ids.extend(inject.id for inject in candidates if inject.id is not None)
             if existing is not None:
                 existing.title = node.title
                 existing.content = node.content
@@ -374,7 +379,12 @@ async def sync_seeded_injects_from_scenario(
                 commit=False,
             )
 
-    stale_ids = [inject.id for inject in by_key.values() if inject.id is not None]
+    stale_ids = duplicate_ids + [
+        inject.id
+        for candidates in by_key.values()
+        for inject in candidates
+        if inject.id is not None
+    ]
     if stale_ids:
         await session.exec(
             delete(InjectProgress).where(col(InjectProgress.inject_id).in_(stale_ids))
