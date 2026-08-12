@@ -95,7 +95,11 @@ async def update_scenario(
             )
         ).all()
         invalid_member_groups = sorted(
-            {member.group_id for member in members if member.group_id not in team_ids}
+            {
+                member.group_id
+                for member in members
+                if member.group_id is not None and member.group_id not in team_ids
+            }
         )
         if invalid_member_groups:
             raise HTTPException(
