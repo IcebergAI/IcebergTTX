@@ -83,9 +83,11 @@ _MATERIAL_COMMUNICATION_FIELDS = (
 def _canonical_material_rows(rows: object, fields: tuple[str, ...]) -> list[dict[str, object]]:
     if not isinstance(rows, list):
         return []
-    normalized = [
-        {field: row.get(field) for field in fields} for row in rows if isinstance(row, dict)
-    ]
+    normalized: list[dict[str, object]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        normalized.append({field: row.get(field) for field in fields})
     return sorted(
         normalized,
         key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":")),
