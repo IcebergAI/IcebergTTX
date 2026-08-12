@@ -66,6 +66,7 @@ async def update_scenario(
             definition=definition,
             created_by=updated_by or scenario.created_by,
         )
+    previous_definition = export_definition(scenario)
     scenario.title = definition.title
     scenario.description = definition.description
     scenario.tags = definition.tags or None
@@ -79,13 +80,18 @@ async def update_scenario(
         # state in the same transaction as the edit.
         from sqlalchemy import delete
 
+        from app.models.communication import Communication
         from app.models.exercise import ExerciseMember, ExerciseProgress
-        from app.models.inject import Inject, InjectProgress
-        from app.services.inject_service import seed_injects_from_scenario
+        from app.models.inject import Inject
+        from app.services.inject_service import (
+            seed_injects_from_scenario,
+            sync_seeded_injects_from_scenario,
+        )
         from app.services.progression_service import seed_progression
 
         clone = in_use[0]
         assert clone.id is not None
+        old_team_ids = {team.id for team in previous_definition.participant_teams}
         team_ids = {team.id for team in definition.participant_teams}
         members = (
             await session.exec(
@@ -113,7 +119,7 @@ async def update_scenario(
             await session.exec(
                 select(Inject)
                 .where(col(Inject.exercise_id) == clone.id)
-                .where(col(Inject.scenario_node_id).is_(None))
+                .where(col(Inject.scenario_seeded).is_(False))
             )
         ).all()
         invalid_custom_groups = sorted(
@@ -132,18 +138,29 @@ async def update_scenario(
                     f"edit those injects first: {', '.join(invalid_custom_groups)}"
                 ),
             )
-        seeded_inject_ids = select(Inject.id).where(
-            col(Inject.exercise_id) == clone.id,
-            col(Inject.scenario_node_id).is_not(None),
-        )
-        await session.exec(
-            delete(InjectProgress).where(col(InjectProgress.inject_id).in_(seeded_inject_ids))
-        )
-        await session.exec(
-            delete(Inject)
-            .where(col(Inject.exercise_id) == clone.id)
-            .where(col(Inject.scenario_node_id).is_not(None))
-        )
+        communications = (
+            await session.exec(
+                select(Communication).where(col(Communication.exercise_id) == clone.id)
+            )
+        ).all()
+        for communication in communications:
+            visible = set(communication.visible_to_teams or [])
+            if not visible:
+                continue
+            if not communication.audience_explicit and visible == old_team_ids:
+                # Inbound injects with no explicit audience are expanded to all
+                # teams at creation; keep that semantic as the definition changes.
+                communication.visible_to_teams = sorted(team_ids) or None
+                session.add(communication)
+            elif not visible.issubset(team_ids):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Scenario teams cannot remove communication audiences; "
+                        "edit or remove explicitly targeted communications first"
+                    ),
+                )
+        await sync_seeded_injects_from_scenario(session, clone.id, scenario)
         await session.exec(
             delete(ExerciseProgress).where(col(ExerciseProgress.exercise_id) == clone.id)
         )

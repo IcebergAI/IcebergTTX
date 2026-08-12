@@ -36,7 +36,7 @@ class Communication(SQLModel, table=True):
     sender_id: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
     sender_team: str | None = None
     direction: CommDirection
-    external_entity: str | None = None      # e.g. "ICO", "NCSC", "CEO"
+    external_entity: str | None = None  # e.g. "ICO", "NCSC", "CEO"
     subject: str
     body: str
     # Indexed for the SET NULL fan-out when an inject is deleted, not for a query.
@@ -48,6 +48,9 @@ class Communication(SQLModel, table=True):
     visible_to_teams: list[str] | None = Field(  # None = all teams
         default=None, sa_column=Column(JSONB)
     )
+    # Distinguish an explicit audience from the facilitator inject route's
+    # all-current-teams expansion so draft scenario edits can reconcile safely.
+    audience_explicit: bool = Field(default=False, nullable=False)
     sent_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )

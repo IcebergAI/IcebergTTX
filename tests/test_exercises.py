@@ -176,9 +176,25 @@ async def test_clone_creates_distinct_editable_draft_with_lineage(
     edited_definition = scenario_response.json()["definition"]
     edited_definition["title"] = "Repeat exercise edited"
     edited_definition["injects"][0]["title"] = "Edited first inject"
+    before_injects = await client.get(
+        f"/api/exercises/{clone_id}/injects", headers=_bearer(facilitator_token)
+    )
+    assert before_injects.status_code == 200
+    seeded_id = before_injects.json()[0]["id"]
+    scheduled = await client.patch(
+        f"/api/exercises/{clone_id}/injects/{seeded_id}/schedule",
+        json={"release_offset_minutes": 42},
+        headers=_bearer(facilitator_token),
+    )
+    assert scheduled.status_code == 200
     custom = await client.post(
         f"/api/exercises/{clone_id}/injects",
-        json={"title": "Facilitator custom", "content": "Keep me", "sequence_order": 99},
+        json={
+            "title": "Facilitator custom",
+            "content": "Keep me",
+            "scenario_node_id": "custom-lineage-id",
+            "sequence_order": 99,
+        },
         headers=_bearer(facilitator_token),
     )
     assert custom.status_code == 201
@@ -205,6 +221,8 @@ async def test_clone_creates_distinct_editable_draft_with_lineage(
         "Edited first inject",
         "Facilitator custom",
     }
+    edited_seed = next(row for row in injects.json() if row["id"] == seeded_id)
+    assert edited_seed["release_offset_minutes"] == 42
 
 
 async def test_active_exercise_llm_configuration_is_immutable(

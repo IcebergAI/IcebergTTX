@@ -30,6 +30,7 @@ async def create_communication(
     external_entity: str | None = None,
     triggered_by_inject_id: int | None = None,
     visible_to_teams: list[str] | None = None,
+    audience_explicit: bool = False,
 ) -> Communication:
     comm = Communication(
         exercise_id=exercise_id,
@@ -41,6 +42,7 @@ async def create_communication(
         body=body,
         triggered_by_inject_id=triggered_by_inject_id,
         visible_to_teams=visible_to_teams or None,
+        audience_explicit=audience_explicit,
     )
     session.add(comm)
     # Flush for the id: the event names the row rather than carrying it, because the
@@ -149,16 +151,12 @@ async def sender_teams_for_comms(
     }
     user_teams: dict[int, str | None] = {}
     if fallback_ids:
-        users = (
-            await session.exec(select(User).where(col(User.id).in_(fallback_ids)))
-        ).all()
+        users = (await session.exec(select(User).where(col(User.id).in_(fallback_ids)))).all()
         user_teams = {u.id: u.team for u in users if u.id is not None}
 
     for c in unresolved:
         assert c.id is not None and c.sender_id is not None
-        resolved[c.id] = group_ids.get((c.exercise_id, c.sender_id)) or user_teams.get(
-            c.sender_id
-        )
+        resolved[c.id] = group_ids.get((c.exercise_id, c.sender_id)) or user_teams.get(c.sender_id)
     return resolved
 
 
@@ -295,8 +293,6 @@ async def comm_payload(
         is_read=read_at is not None,
         read_at=read_at.isoformat() if read_at else None,
     ).model_dump(mode="json")
-
-
 
 
 async def deliver_triggered_communication(

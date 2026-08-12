@@ -7,7 +7,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.exercise import ExerciseState
-from app.models.inject import Inject, InjectState
+from app.models.inject import Inject, InjectProgress, InjectState
 from app.models.scenario import Scenario
 from app.schemas.api import InjectPublic
 from app.schemas.scenario_json import ScenarioDefinition
@@ -37,6 +37,7 @@ async def create_inject(
     sequence_order: int = 0,
     release_offset_minutes: int | None = None,
     attachment: AttachmentMeta | None = None,
+    scenario_seeded: bool = False,
     commit: bool = True,
 ) -> Inject:
     normalized_group_id = group_id.strip() if group_id and group_id.strip() else None
@@ -46,6 +47,7 @@ async def create_inject(
     inject = Inject(
         exercise_id=exercise_id,
         scenario_node_id=scenario_node_id,
+        scenario_seeded=scenario_seeded,
         title=title,
         content=content,
         target_teams=normalized_targets or None,
@@ -301,6 +303,7 @@ async def seed_injects_from_scenario(
                     sequence_order=sequence_order,
                     release_offset_minutes=node.release_at_minutes,
                     commit=False,
+                    scenario_seeded=True,
                 )
         else:
             await create_inject(
@@ -314,7 +317,69 @@ async def seed_injects_from_scenario(
                 sequence_order=sequence_order,
                 release_offset_minutes=node.release_at_minutes,
                 commit=False,
+                scenario_seeded=True,
             )
+
+
+async def sync_seeded_injects_from_scenario(
+    session: AsyncSession, exercise_id: int, scenario: Scenario
+) -> None:
+    """Reconcile scenario-derived rows while preserving draft-owned inject state.
+
+    Existing seeded rows retain facilitator schedule overrides; removed scenario
+    nodes are deleted, and new nodes are inserted with their declared defaults.
+    Rows created through the inject API are never touched, even when they carry a
+    scenario_node_id for UI lineage.
+    """
+    from sqlalchemy import delete
+
+    definition = export_definition(scenario)
+    seeded = (
+        await session.exec(
+            select(Inject)
+            .where(col(Inject.exercise_id) == exercise_id)
+            .where(col(Inject.scenario_seeded).is_(True))
+        )
+    ).all()
+    by_key = {(inject.scenario_node_id, inject.group_id): inject for inject in seeded}
+    for index, node in enumerate(definition.injects):
+        sequence_order = node.sequence_order or index
+        target_teams = node.target_teams or None
+        groups = node.target_teams or [None]
+        for group_id in groups:
+            key = (node.id, group_id)
+            existing = by_key.pop(key, None)
+            if existing is not None:
+                existing.title = node.title
+                existing.content = node.content
+                existing.target_teams = target_teams
+                existing.group_id = group_id
+                existing.sequence_order = sequence_order
+                existing.scenario_node_id = node.id
+                # Keep release_offset_minutes: a draft facilitator may have
+                # deliberately overridden the scenario default.
+                session.add(existing)
+                continue
+            await create_inject(
+                session,
+                exercise_id=exercise_id,
+                title=node.title,
+                content=node.content,
+                scenario_node_id=node.id,
+                target_teams=target_teams,
+                group_id=group_id,
+                sequence_order=sequence_order,
+                release_offset_minutes=node.release_at_minutes,
+                scenario_seeded=True,
+                commit=False,
+            )
+
+    stale_ids = [inject.id for inject in by_key.values() if inject.id is not None]
+    if stale_ids:
+        await session.exec(
+            delete(InjectProgress).where(col(InjectProgress.inject_id).in_(stale_ids))
+        )
+        await session.exec(delete(Inject).where(col(Inject.id).in_(stale_ids)))
 
 
 async def attachment_paths_for_exercise(session: AsyncSession, exercise_id: int) -> list[str]:

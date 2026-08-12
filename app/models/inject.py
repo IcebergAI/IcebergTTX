@@ -24,13 +24,16 @@ class InjectState(StrEnum):
 class Inject(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE", index=True)
-    scenario_node_id: str | None = None   # links back to the ScenarioDefinition inject id
+    scenario_node_id: str | None = None  # links back to the ScenarioDefinition inject id
+    # True only for rows materialized from Scenario.definition. Facilitator-created
+    # draft injects may also supply a node id, so identity alone is not provenance.
+    scenario_seeded: bool = Field(default=False, nullable=False)
     title: str
     content: str
     target_teams: list[str] | None = Field(  # team IDs; None = all teams
         default=None, sa_column=Column(JSONB)
     )
-    group_id: str | None = None           # exercise-scoped group; None = shared/all groups
+    group_id: str | None = None  # exercise-scoped group; None = shared/all groups
     sequence_order: int = Field(default=0)
     # Scheduled release (#116): minutes after exercise start at which this inject
     # auto-releases. None = manual-only ("pull not push" default). Seeded from the

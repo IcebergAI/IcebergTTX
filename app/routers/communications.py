@@ -46,15 +46,14 @@ class SendCommRequest(BaseModel):
 
 class InjectCommRequest(BaseModel):
     """Facilitator injects a simulated inbound communication."""
+
     external_entity: str
     subject: str
     body: str
     visible_to_teams: list[str] | None = None
 
 
-async def _get_comm_or_404(
-    session: AsyncSession, exercise_id: int, comm_id: int
-) -> Communication:
+async def _get_comm_or_404(session: AsyncSession, exercise_id: int, comm_id: int) -> Communication:
     c = await session.get(Communication, comm_id)
     if not c or c.exercise_id != exercise_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Communication not found")
@@ -159,6 +158,7 @@ async def send_comm(
         sender_team=sender_team,
         external_entity=None if visible_to_teams else body.external_entity,
         visible_to_teams=visible_to_teams,
+        audience_explicit=body.visible_to_teams is not None,
     )
     return await comm_payload(comm, session)
 
@@ -190,6 +190,7 @@ async def inject_comm(
         body=body.body,
         external_entity=body.external_entity,
         visible_to_teams=visible_to_teams,
+        audience_explicit=body.visible_to_teams is not None,
     )
     return await comm_payload(comm, session)
 
