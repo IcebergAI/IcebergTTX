@@ -232,6 +232,7 @@ async def _freeze_run_snapshot(
     ]
     configuration: dict[str, object] = {
         "llm_enabled": locked_exercise.llm_enabled,
+        "llm_enabled_source": "captured_at_launch",
         "scenario_id": scenario.id,
         "scenario_version": scenario.version,
         # The reusable scenario definition does not contain facilitator-authored
@@ -239,6 +240,7 @@ async def _freeze_run_snapshot(
         # audience, ordering, attachment metadata, and lifecycle state) so the
         # launch record is independently reproducible and content-addressed.
         "injects": materialized_injects,
+        "injects_source": "captured_at_launch",
         "inject_schedules": [
             {
                 "inject_id": inject.id,
@@ -253,6 +255,7 @@ async def _freeze_run_snapshot(
         # receipts are intentionally excluded: they are runtime viewer state, not
         # scenario content.
         "communications": materialized_communications,
+        "communications_source": "captured_at_launch",
     }
     snapshot = ExerciseRunSnapshot(
         exercise_id=exercise.id,
@@ -373,22 +376,42 @@ async def clone_exercise_as_draft(
         snapshot_configuration = (
             loaded_configuration if isinstance(loaded_configuration, dict) else {}
         )
-        snapshot_injects = snapshot_configuration.get("injects", [])
-        if not isinstance(snapshot_injects, list):
-            snapshot_injects = []
-        snapshot_has_injects = (
-            snapshot is not None
-            and isinstance(snapshot_configuration, dict)
-            and isinstance(snapshot_configuration.get("injects"), list)
+        raw_snapshot_injects = snapshot_configuration.get("injects")
+        snapshot_injects = raw_snapshot_injects if isinstance(raw_snapshot_injects, list) else []
+        authoritative_snapshot_injects = snapshot is not None and isinstance(
+            raw_snapshot_injects, list
         )
-        source_injects = (
-            await session.exec(
-                select(Inject).where(Inject.exercise_id == source.id).order_by(col(Inject.id))
+        injects_source = snapshot_configuration.get("injects_source")
+        # List-level provenance is authoritative. A run captured after upgrade
+        # may legitimately contain old rows whose individual origin is unknown;
+        # that does not make the launch-time list itself uncertain. Markerless
+        # snapshots with NULL row provenance came from the legacy backfill and
+        # retain the conservative compatibility interpretation.
+        legacy_unknown_injects = snapshot is not None and (
+            injects_source == "unknown_legacy"
+            or not isinstance(raw_snapshot_injects, list)
+            or (
+                injects_source is None
+                and snapshot_configuration.get("llm_enabled_source") == "unknown_legacy"
             )
-        ).all()
-        # A captured empty list is a valid immutable run configuration.  Only a
-        # missing/invalid legacy configuration may fall back to current rows.
-        if not snapshot_has_injects:
+            or (
+                injects_source != "captured_at_launch"
+                and any(
+                    isinstance(spec, dict) and spec.get("scenario_seeded") is None
+                    for spec in snapshot_injects
+                )
+            )
+        )
+        # A draft has no run snapshot yet, so its current rows are the actual
+        # editable configuration. A launched legacy run is different: current
+        # rows may include runtime additions/deletions and must never be replayed
+        # as launch input. Rebuild those clones from the frozen definition only.
+        if snapshot is None:
+            source_injects = (
+                await session.exec(
+                    select(Inject).where(Inject.exercise_id == source.id).order_by(col(Inject.id))
+                )
+            ).all()
             snapshot_injects = [
                 {
                     "scenario_node_id": inject.scenario_node_id,
@@ -409,16 +432,16 @@ async def clone_exercise_as_draft(
                 }
                 for inject in source_injects
             ]
-        # Snapshots created before provenance columns were introduced contain
-        # unknown (NULL) provenance.  Do not pre-seed those clones: identity
-        # alone cannot distinguish a facilitator-authored inject that reused a
-        # scenario node id from a scenario-derived row.  Recreate every frozen
-        # row as unknown instead of silently duplicating or dropping one.
-        has_unknown_provenance = any(
+            authoritative_snapshot_injects = True
+            legacy_unknown_injects = False
+        if legacy_unknown_injects:
+            snapshot_injects = []
+            authoritative_snapshot_injects = False
+        has_unknown_row_provenance = any(
             isinstance(spec, dict) and spec.get("scenario_seeded") is None
             for spec in snapshot_injects
         )
-        if not has_unknown_provenance:
+        if legacy_unknown_injects or not has_unknown_row_provenance:
             await seed_injects_from_scenario(session, clone.id, clone_scenario)
         clone_injects = (
             await session.exec(
@@ -442,19 +465,18 @@ async def clone_exercise_as_draft(
             if spec.get("scenario_seeded") is True:
                 snapshot_seeded_keys.add(identity)
                 inject = seeded_by_identity.get(identity)
-                if inject is None:
+                if inject is not None:
+                    inject.title = str(spec.get("title", inject.title))
+                    inject.content = str(spec.get("content", inject.content))
+                    inject.target_teams = spec.get("target_teams")
+                    inject.sequence_order = int(spec.get("sequence_order", inject.sequence_order))
+                    inject.release_offset_minutes = spec.get("release_offset_minutes")
+                    inject.release_offset_explicit = spec.get("release_offset_explicit", False)
+                    session.add(inject)
+                    source_id = spec.get("id")
+                    if isinstance(source_id, int) and inject.id is not None:
+                        clone_inject_ids[source_id] = inject.id
                     continue
-                inject.title = str(spec.get("title", inject.title))
-                inject.content = str(spec.get("content", inject.content))
-                inject.target_teams = spec.get("target_teams")
-                inject.sequence_order = int(spec.get("sequence_order", inject.sequence_order))
-                inject.release_offset_minutes = spec.get("release_offset_minutes")
-                inject.release_offset_explicit = spec.get("release_offset_explicit", False)
-                session.add(inject)
-                source_id = spec.get("id")
-                if isinstance(source_id, int) and inject.id is not None:
-                    clone_inject_ids[source_id] = inject.id
-                continue
             attachment = None
             attachment_snapshot_status = spec.get("attachment_snapshot_status")
             if attachment_snapshot_status not in (None, "captured", "not_present"):
@@ -552,7 +574,7 @@ async def clone_exercise_as_draft(
             for identity, inject in seeded_by_identity.items()
             if identity not in snapshot_seeded_keys
         ]
-        if stale_seeded:
+        if authoritative_snapshot_injects and stale_seeded:
             from sqlalchemy import delete
 
             from app.models.inject import InjectProgress
@@ -562,12 +584,17 @@ async def clone_exercise_as_draft(
                 delete(InjectProgress).where(col(InjectProgress.inject_id).in_(stale_ids))
             )
             await session.exec(delete(Inject).where(col(Inject.id).in_(stale_ids)))
-        # Keep NULL provenance as an explicit unresolved state.  Guessing that a
-        # legacy row was scenario-derived can overwrite facilitator-authored data;
-        # scenario editing rejects unresolved rows until an operator resolves them.
-        snapshot_communications = snapshot_configuration.get("communications", [])
-        if not isinstance(snapshot_communications, list):
-            snapshot_communications = []
+        raw_snapshot_communications = snapshot_configuration.get("communications")
+        communications_source = snapshot_configuration.get("communications_source")
+        legacy_unknown_communications = communications_source == "unknown_legacy" or (
+            communications_source is None
+            and snapshot_configuration.get("llm_enabled_source") == "unknown_legacy"
+        )
+        snapshot_communications = (
+            raw_snapshot_communications
+            if isinstance(raw_snapshot_communications, list) and not legacy_unknown_communications
+            else []
+        )
         for spec in snapshot_communications:
             if not isinstance(spec, dict):
                 continue
@@ -579,6 +606,12 @@ async def clone_exercise_as_draft(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="The immutable snapshot communication is malformed",
                 ) from exc
+            audience_explicit = spec.get("audience_explicit")
+            if audience_explicit is not None and not isinstance(audience_explicit, bool):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="The immutable snapshot communication audience is malformed",
+                )
             source_trigger_id = spec.get("triggered_by_inject_id")
             triggered_by_inject_id = (
                 clone_inject_ids.get(source_trigger_id)
@@ -611,7 +644,7 @@ async def clone_exercise_as_draft(
                         if isinstance(spec.get("visible_to_teams"), list)
                         else None
                     ),
-                    audience_explicit=bool(spec.get("audience_explicit", False)),
+                    audience_explicit=audience_explicit,
                     sent_at=sent_at,
                 )
             )

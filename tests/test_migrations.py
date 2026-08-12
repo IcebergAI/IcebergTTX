@@ -49,6 +49,32 @@ def test_snapshot_migration_captures_available_legacy_attachment(tmp_path, monke
     )
 
 
+def test_snapshot_migrations_do_not_serialize_runtime_rows_as_launch_input():
+    """Migration source must preserve unknown provenance rather than query live rows."""
+    snapshot_source = (
+        ROOT / "alembic/versions/a9c4e7f1b2d6_add_exercise_run_snapshots.py"
+    ).read_text()
+    attachment_source = (
+        ROOT / "alembic/versions/d3e4f5a6b7c8_backfill_snapshot_attachments.py"
+    ).read_text()
+
+    assert 'configuration["injects"] = None' in snapshot_source
+    assert 'configuration["injects_source"] = "unknown_legacy"' in snapshot_source
+    assert 'configuration["communications"] = None' in snapshot_source
+    assert "FROM inject" not in snapshot_source
+    assert "FROM communication" not in attachment_source
+    assert 'configuration["communications_source"] = "unknown_legacy"' in attachment_source
+
+
+def test_legacy_communication_audience_migration_preserves_uncertainty():
+    provenance_source = (
+        ROOT / "alembic/versions/b1c2d3e4f5a6_add_inject_seed_provenance.py"
+    ).read_text()
+
+    assert "UPDATE communication SET audience_explicit = NULL" in provenance_source
+    assert 'sa.Column("audience_explicit", sa.Boolean(), nullable=True' in provenance_source
+
+
 def _dsn(database: str | None = None) -> str:
     dsn = make_asyncpg_dsn(os.environ["DATABASE_URL"])
     if database is None:

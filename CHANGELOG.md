@@ -15,6 +15,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (see the
   launched exercises are backfilled on upgrade; facilitators can clone a run into a
   distinct draft and compare stable scenario changes before the next exercise.
 
+### Changed
+- Legacy upgrades now mark unreconstructable launch-time inject, communication,
+  audience, schedule, and LLM provenance as unknown. Legacy clones rebuild from
+  the frozen scenario definition instead of replaying ambiguous runtime rows.
+
 ### Security
 - **Emailed links are rooted at `PUBLIC_BASE_URL`, never the request host** (#258) —
   password-reset and invite links previously fell back to the client-supplied `Host`

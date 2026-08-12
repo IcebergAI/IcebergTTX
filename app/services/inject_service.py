@@ -98,32 +98,6 @@ def restore_snapshot_attachment(
     )
 
 
-async def promote_legacy_inject_provenance(
-    session: AsyncSession, exercise_id: int, scenario: Scenario
-) -> None:
-    """Mark legacy-unknown rows as facilitator-owned, without guessing.
-
-    Older databases do not record whether an Inject was scenario materialization
-    or facilitator-authored.  Even a byte-for-byte content match cannot prove
-    provenance: a facilitator may intentionally replace a node with identical
-    content.  Treating every unknown row as facilitator-owned is conservative and
-    prevents a later scenario edit from silently overwriting historical content.
-    """
-    unknown = (
-        await session.exec(
-            select(Inject)
-            .where(col(Inject.exercise_id) == exercise_id)
-            .where(col(Inject.scenario_seeded).is_(None))
-            .order_by(col(Inject.id))
-        )
-    ).all()
-    for inject in unknown:
-        inject.scenario_seeded = False
-        # Preserve the legacy schedule value and its unknown provenance.  A
-        # scheduler must not infer that it follows the mutable Scenario template.
-        session.add(inject)
-
-
 async def create_inject(
     session: AsyncSession,
     *,

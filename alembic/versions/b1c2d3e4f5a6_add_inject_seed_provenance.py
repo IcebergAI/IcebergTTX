@@ -19,13 +19,18 @@ def upgrade() -> None:
     )
     op.add_column(
         "communication",
-        sa.Column("audience_explicit", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("audience_explicit", sa.Boolean(), nullable=True, server_default=sa.false()),
     )
     # Existing rows predate an explicit provenance bit.  Identity alone is not
     # evidence: the API has always allowed facilitator-authored injects to reuse a
     # scenario node id.  Preserve that uncertainty instead of classifying custom
     # content as seeded and deleting it on the next clone edit.
     op.execute(sa.text("UPDATE inject SET scenario_seeded = NULL"))
+    # Existing rows predate this bit too.  An audience equal to every historical
+    # team may still have been an explicit restriction, so false would permit a
+    # later clone edit to expand it to newly added teams.  NULL means unknown and
+    # is handled conservatively by reconciliation.
+    op.execute(sa.text("UPDATE communication SET audience_explicit = NULL"))
 
 
 def downgrade() -> None:

@@ -24,7 +24,7 @@ from app.models.inject import Inject
 from app.models.user import User, UserRole
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services import domain_events
-from app.services.exercise_service import transition_state
+from app.services.exercise_service import snapshot_content_sha256, transition_state
 from app.services.progression_service import inject_audience_contexts
 from app.services.scenario_service import definition_for_exercise, material_definition_changes
 from app.services.ws_manager import manager
@@ -232,6 +232,130 @@ async def test_clone_does_not_resurrect_post_launch_injects_from_empty_snapshot(
     assert copied == []
 
 
+async def test_legacy_snapshot_marks_runtime_configuration_unknown_and_clones_definition_only(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    draft_exercise: Exercise,
+):
+    """Upgrade-time rows are runtime state, never reconstructed launch evidence."""
+    assert draft_exercise.id is not None
+    assert (
+        await client.post(
+            f"/api/exercises/{draft_exercise.id}/start",
+            headers=_bearer(facilitator_token),
+        )
+    ).status_code == 200
+    runtime_inject = await client.post(
+        f"/api/exercises/{draft_exercise.id}/injects",
+        json={
+            "title": "Created after launch",
+            "content": "Runtime-only content",
+            "sequence_order": 999,
+        },
+        headers=_bearer(facilitator_token),
+    )
+    assert runtime_inject.status_code == 201
+    runtime_comm = await client.post(
+        f"/api/exercises/{draft_exercise.id}/communications/inject",
+        json={
+            "external_entity": "Runtime facilitator",
+            "subject": "Created after launch",
+            "body": "Runtime-only message",
+        },
+        headers=_bearer(facilitator_token),
+    )
+    assert runtime_comm.status_code == 201
+
+    snapshot = (
+        await session.exec(
+            select(ExerciseRunSnapshot).where(ExerciseRunSnapshot.exercise_id == draft_exercise.id)
+        )
+    ).one()
+    configuration = json.loads(snapshot.configuration_json)
+    configuration.update(
+        {
+            "llm_enabled": None,
+            "llm_enabled_source": "unknown_legacy",
+            "injects": None,
+            "inject_schedules": None,
+            "injects_source": "unknown_legacy",
+            "communications": None,
+            "communications_source": "unknown_legacy",
+        }
+    )
+    snapshot.configuration_json = json.dumps(configuration, sort_keys=True, separators=(",", ":"))
+    snapshot.content_sha256 = snapshot_content_sha256(
+        definition_json=snapshot.definition,
+        configuration=configuration,
+        schema_version=snapshot.schema_version,
+    )
+    session.add(snapshot)
+    await session.commit()
+
+    exported = await client.get(
+        f"/api/exercises/{draft_exercise.id}/export",
+        headers=_bearer(facilitator_token),
+    )
+    assert exported.status_code == 200
+    exported_configuration = exported.json()["run_snapshot"]["configuration"]
+    assert exported_configuration["injects"] is None
+    assert exported_configuration["injects_source"] == "unknown_legacy"
+    assert exported_configuration["communications"] is None
+    assert exported_configuration["communications_source"] == "unknown_legacy"
+
+    # A partially upgraded database may still carry an old runtime-row list.
+    # The source marker, not the residual value, is authoritative for cloning.
+    configuration["injects"] = []
+    configuration.pop("injects_source")
+    configuration["communications"] = [
+        {"subject": "Created after launch", "body": "Runtime-only message"}
+    ]
+    configuration.pop("communications_source")
+    snapshot.configuration_json = json.dumps(configuration, sort_keys=True, separators=(",", ":"))
+    snapshot.content_sha256 = snapshot_content_sha256(
+        definition_json=snapshot.definition,
+        configuration=configuration,
+        schema_version=snapshot.schema_version,
+    )
+    session.add(snapshot)
+    await session.commit()
+
+    cloned = await client.post(
+        f"/api/exercises/{draft_exercise.id}/clone",
+        json={"title": "Safe legacy clone"},
+        headers=_bearer(facilitator_token),
+    )
+    assert cloned.status_code == 201
+    clone_id = cloned.json()["id"]
+    cloned_injects = await client.get(
+        f"/api/exercises/{clone_id}/injects", headers=_bearer(facilitator_token)
+    )
+    assert cloned_injects.status_code == 200
+    assert "Created after launch" not in {row["title"] for row in cloned_injects.json()}
+    assert cloned_injects.json()
+    cloned_communications = await client.get(
+        f"/api/exercises/{clone_id}/communications",
+        headers=_bearer(facilitator_token),
+    )
+    assert cloned_communications.status_code == 200
+    assert cloned_communications.json() == []
+
+    clone = await session.get(Exercise, clone_id)
+    assert clone is not None
+    clone_scenario = await client.get(
+        f"/api/scenarios/{clone.scenario_id}", headers=_bearer(facilitator_token)
+    )
+    revised = clone_scenario.json()["definition"]
+    revised["injects"][0]["content"] = "A safe next-run edit"
+    edited = await client.put(
+        f"/api/scenarios/{clone.scenario_id}",
+        json=revised,
+        headers=_bearer(facilitator_token),
+    )
+    assert edited.status_code == 200
+
+
 async def test_clone_creates_distinct_editable_draft_with_lineage(
     client: AsyncClient,
     facilitator_token: str,
@@ -320,47 +444,32 @@ async def test_clone_creates_distinct_editable_draft_with_lineage(
     assert edited_default["release_offset_minutes"] == 17
 
 
-async def test_legacy_clone_provenance_never_promotes_custom_collision(
+async def test_metadata_edit_keeps_legacy_clone_provenance_unresolved(
+    client: AsyncClient,
+    facilitator_token: str,
     session: AsyncSession,
     draft_exercise: Exercise,
-    sample_scenario,
 ):
-    """A custom row reusing a scenario identity stays facilitator-owned."""
-    from app.services.inject_service import promote_legacy_inject_provenance
-
-    inject = (
-        await session.exec(
-            select(Inject).where(Inject.exercise_id == draft_exercise.id).order_by(col(Inject.id))
-        )
-    ).first()
-    assert inject is not None
-    inject.title = "Facilitator-authored replacement"
-    inject.content = "Different authored content"
-    inject.scenario_seeded = None
-    inject.release_offset_explicit = None
-    inject.release_offset_minutes = 42
-    session.add(inject)
-    await session.flush()
-
+    """A harmless edit must not make a later runnable edit bypass the legacy guard."""
     assert draft_exercise.id is not None
-    await promote_legacy_inject_provenance(session, draft_exercise.id, sample_scenario)
-
-    assert inject.scenario_seeded is False
-    assert inject.release_offset_explicit is None
-    assert inject.release_offset_minutes == 42
-
-
-async def test_legacy_clone_preserves_matching_schedule_override(
-    session: AsyncSession,
-    draft_exercise: Exercise,
-    sample_scenario,
-):
-    """Unknown legacy rows never gain scenario ownership from content matching."""
-    from app.services.inject_service import promote_legacy_inject_provenance
-
+    assert (
+        await client.post(
+            f"/api/exercises/{draft_exercise.id}/start",
+            headers=_bearer(facilitator_token),
+        )
+    ).status_code == 200
+    cloned = await client.post(
+        f"/api/exercises/{draft_exercise.id}/clone",
+        json={"title": "Legacy guard clone"},
+        headers=_bearer(facilitator_token),
+    )
+    assert cloned.status_code == 201
+    clone_id = cloned.json()["id"]
+    clone = await session.get(Exercise, clone_id)
+    assert clone is not None
     inject = (
         await session.exec(
-            select(Inject).where(Inject.exercise_id == draft_exercise.id).order_by(col(Inject.id))
+            select(Inject).where(Inject.exercise_id == clone_id).order_by(col(Inject.id))
         )
     ).first()
     assert inject is not None
@@ -368,14 +477,89 @@ async def test_legacy_clone_preserves_matching_schedule_override(
     inject.release_offset_explicit = None
     inject.release_offset_minutes = 42
     session.add(inject)
-    await session.flush()
+    await session.commit()
 
-    assert draft_exercise.id is not None
-    await promote_legacy_inject_provenance(session, draft_exercise.id, sample_scenario)
-
-    assert inject.scenario_seeded is False
+    scenario = await client.get(
+        f"/api/scenarios/{clone.scenario_id}", headers=_bearer(facilitator_token)
+    )
+    assert scenario.status_code == 200
+    metadata_only = scenario.json()["definition"]
+    metadata_only["title"] = "Metadata only"
+    edited = await client.put(
+        f"/api/scenarios/{clone.scenario_id}",
+        json=metadata_only,
+        headers=_bearer(facilitator_token),
+    )
+    assert edited.status_code == 200
+    await session.refresh(inject)
+    assert inject.scenario_seeded is None
     assert inject.release_offset_explicit is None
     assert inject.release_offset_minutes == 42
+
+    runnable_edit = dict(metadata_only)
+    runnable_edit["injects"] = [dict(row) for row in metadata_only["injects"]]
+    runnable_edit["injects"][0]["content"] = "Changed runnable content"
+    rejected = await client.put(
+        f"/api/scenarios/{clone.scenario_id}",
+        json=runnable_edit,
+        headers=_bearer(facilitator_token),
+    )
+    assert rejected.status_code == 409
+
+
+async def test_captured_launch_list_preserves_unknown_legacy_rows_on_clone(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    draft_exercise: Exercise,
+):
+    """Unknown row origin must not erase a list known to be captured at launch."""
+    assert draft_exercise.id is not None
+    custom = await client.post(
+        f"/api/exercises/{draft_exercise.id}/injects",
+        json={
+            "title": "Pre-launch legacy custom",
+            "content": "Retain exact launch input",
+            "scenario_node_id": "legacy-custom",
+            "sequence_order": 99,
+        },
+        headers=_bearer(facilitator_token),
+    )
+    assert custom.status_code == 201
+    rows = (await session.exec(select(Inject).where(Inject.exercise_id == draft_exercise.id))).all()
+    for row in rows:
+        row.scenario_seeded = None
+        row.release_offset_explicit = None
+        session.add(row)
+    await session.commit()
+
+    assert (
+        await client.post(
+            f"/api/exercises/{draft_exercise.id}/start",
+            headers=_bearer(facilitator_token),
+        )
+    ).status_code == 200
+    snapshot = (
+        await session.exec(
+            select(ExerciseRunSnapshot).where(ExerciseRunSnapshot.exercise_id == draft_exercise.id)
+        )
+    ).one()
+    configuration = json.loads(snapshot.configuration_json)
+    assert configuration["injects_source"] == "captured_at_launch"
+    assert any(spec["scenario_seeded"] is None for spec in configuration["injects"])
+
+    cloned = await client.post(
+        f"/api/exercises/{draft_exercise.id}/clone",
+        json={"title": "Captured legacy clone"},
+        headers=_bearer(facilitator_token),
+    )
+    assert cloned.status_code == 201
+    cloned_rows = (
+        await session.exec(select(Inject).where(Inject.exercise_id == cloned.json()["id"]))
+    ).all()
+    by_title = {row.title: row for row in cloned_rows}
+    assert "Pre-launch legacy custom" in by_title
+    assert by_title["Pre-launch legacy custom"].scenario_seeded is None
 
 
 async def test_legacy_clone_does_not_guess_provenance_or_duplicate_on_sync(

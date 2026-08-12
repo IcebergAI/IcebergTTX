@@ -50,7 +50,9 @@ class Communication(SQLModel, table=True):
     )
     # Distinguish an explicit audience from the facilitator inject route's
     # all-current-teams expansion so draft scenario edits can reconcile safely.
-    audience_explicit: bool = Field(default=False, nullable=False)
+    # NULL is legacy unknown provenance. Only exact False may be expanded as the
+    # known implicit all-team audience created by current application code.
+    audience_explicit: bool | None = Field(default=False, nullable=True)
     sent_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )

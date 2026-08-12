@@ -68,29 +68,6 @@ def _snapshot_digest(
     return hashlib.sha256(payload).hexdigest()
 
 
-def _communication_snapshot(row: object) -> dict[str, object]:
-    """Serialize one legacy Communication row without carrying read receipts."""
-    mapping = row
-    return {
-        "id": mapping["id"],
-        "sender_id": mapping["sender_id"],
-        "sender_team": mapping["sender_team"],
-        "direction": str(mapping["direction"]),
-        "external_entity": mapping["external_entity"],
-        "subject": mapping["subject"],
-        "body": mapping["body"],
-        "triggered_by_inject_id": mapping["triggered_by_inject_id"],
-        "trigger_key": mapping["trigger_key"],
-        "visible_to_teams": mapping["visible_to_teams"],
-        "audience_explicit": mapping["audience_explicit"],
-        "sent_at": (
-            mapping["sent_at"].isoformat()
-            if hasattr(mapping["sent_at"], "isoformat")
-            else str(mapping["sent_at"])
-        ),
-    }
-
-
 def upgrade() -> None:
     bind = op.get_bind()
     rows = bind.execute(
@@ -111,40 +88,28 @@ def upgrade() -> None:
         if not isinstance(configuration, dict):
             continue
         injects = configuration.get("injects")
-        if not isinstance(injects, list):
-            continue
         changed = False
-        for spec in injects:
-            if not isinstance(spec, dict):
-                continue
-            status = spec.get("attachment_snapshot_status")
-            if status in {"captured", "not_present", "unavailable", "oversized", "invalid"}:
-                continue
-            encoded, digest, capture_status = _capture_attachment(
-                spec.get("attachment_path"), spec.get("attachment_size")
-            )
-            spec["attachment_bytes_b64"] = encoded
-            spec["attachment_sha256"] = digest
-            spec["attachment_snapshot_status"] = capture_status
-            changed = True
+        if isinstance(injects, list):
+            for spec in injects:
+                if not isinstance(spec, dict):
+                    continue
+                status = spec.get("attachment_snapshot_status")
+                if status in {"captured", "not_present", "unavailable", "oversized", "invalid"}:
+                    continue
+                encoded, digest, capture_status = _capture_attachment(
+                    spec.get("attachment_path"), spec.get("attachment_size")
+                )
+                spec["attachment_bytes_b64"] = encoded
+                spec["attachment_sha256"] = digest
+                spec["attachment_snapshot_status"] = capture_status
+                changed = True
         if "communications" not in configuration:
-            communication_rows = bind.execute(
-                sa.text(
-                    "SELECT id, sender_id, sender_team, direction, external_entity, "
-                    "subject, body, triggered_by_inject_id, trigger_key, "
-                    "visible_to_teams, audience_explicit, sent_at "
-                    "FROM communication "
-                    "WHERE exercise_id=:exercise_id "
-                    "AND direction='inbound' "
-                    "AND sender_id IS NULL "
-                    "AND triggered_by_inject_id IS NULL "
-                    "ORDER BY id"
-                ),
-                {"exercise_id": row["exercise_id"]},
-            ).mappings()
-            configuration["communications"] = [
-                _communication_snapshot(communication) for communication in communication_rows
-            ]
+            # A legacy row has no trustworthy launch/runtime discriminator.  Even
+            # facilitator-created inbound messages may have been injected after
+            # launch, so copying current rows would fabricate launch evidence and
+            # could disclose runtime content in a new clone.
+            configuration["communications"] = None
+            configuration["communications_source"] = "unknown_legacy"
             changed = True
         if not changed:
             continue

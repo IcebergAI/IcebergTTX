@@ -89,66 +89,17 @@ def upgrade() -> None:
             "scenario_id": row["scenario_id"],
             "scenario_version": row["scenario_version"],
         }
-        inject_rows = bind.execute(
-            sa.text(
-                """
-                SELECT id, scenario_node_id, title, content,
-                       target_teams, group_id, sequence_order,
-                       release_offset_minutes, state,
-                       released_at, released_by, resolved_at, resolved_by,
-                       resolution_reason, attachment_filename,
-                       attachment_content_type, attachment_path, attachment_size
-                FROM inject
-                WHERE exercise_id = :exercise_id
-                ORDER BY id
-                """
-            ),
-            {"exercise_id": row["exercise_id"]},
-        ).mappings()
-        materialized_injects = []
-        for inject in inject_rows:
-            materialized_injects.append(
-                {
-                    "id": inject["id"],
-                    "scenario_node_id": inject["scenario_node_id"],
-                    # Seed provenance and explicit schedule provenance are added
-                    # by later migrations.  NULL records that this historical
-                    # value was not available at snapshot time.
-                    "scenario_seeded": None,
-                    "title": inject["title"],
-                    "content": inject["content"],
-                    "target_teams": inject["target_teams"],
-                    "group_id": inject["group_id"],
-                    "sequence_order": inject["sequence_order"],
-                    "release_offset_minutes": inject["release_offset_minutes"],
-                    "release_offset_explicit": None,
-                    "state": str(inject["state"]) if inject["state"] is not None else None,
-                    "released_at": inject["released_at"].isoformat()
-                    if inject["released_at"]
-                    else None,
-                    "released_by": inject["released_by"],
-                    "resolved_at": inject["resolved_at"].isoformat()
-                    if inject["resolved_at"]
-                    else None,
-                    "resolved_by": inject["resolved_by"],
-                    "resolution_reason": inject["resolution_reason"],
-                    "attachment_filename": inject["attachment_filename"],
-                    "attachment_content_type": inject["attachment_content_type"],
-                    "attachment_path": inject["attachment_path"],
-                    "attachment_size": inject["attachment_size"],
-                }
-            )
-        configuration["injects"] = materialized_injects
-        configuration["inject_schedules"] = [
-            {
-                "inject_id": inject["id"],
-                "scenario_node_id": inject["scenario_node_id"],
-                "group_id": inject["group_id"],
-                "release_offset_minutes": inject["release_offset_minutes"],
-                "release_offset_explicit": inject["release_offset_explicit"],
-            }
-            for inject in materialized_injects
-        ]
+        # The pre-snapshot schema allowed injects to be created and pending
+        # injects to be deleted after launch.  It retained no launch-time history,
+        # so the rows visible during upgrade are runtime state, not evidence of
+        # what was configured at launch.  Preserve that uncertainty explicitly;
+        # exports remain honest and a future clone can rebuild a safe draft from
+        # the frozen Scenario definition without replaying runtime data.
+        configuration["injects"] = None
+        configuration["inject_schedules"] = None
+        configuration["injects_source"] = "unknown_legacy"
+        configuration["communications"] = None
+        configuration["communications_source"] = "unknown_legacy"
         payload = json.dumps(
             {
                 "configuration": configuration,

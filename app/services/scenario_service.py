@@ -173,7 +173,6 @@ async def update_scenario(
         from app.models.exercise import ExerciseMember, ExerciseProgress
         from app.models.inject import Inject
         from app.services.inject_service import (
-            promote_legacy_inject_provenance,
             sync_seeded_injects_from_scenario,
         )
         from app.services.progression_service import seed_progression
@@ -204,7 +203,6 @@ async def update_scenario(
                     f"members first: {', '.join(invalid_member_groups)}"
                 ),
             )
-        await promote_legacy_inject_provenance(session, clone.id, scenario)
         custom_injects = (
             await session.exec(
                 select(Inject)
@@ -237,7 +235,7 @@ async def update_scenario(
             visible = set(communication.visible_to_teams or [])
             if not visible:
                 continue
-            if not communication.audience_explicit and visible == old_team_ids:
+            if communication.audience_explicit is False and visible == old_team_ids:
                 # Inbound injects with no explicit audience are expanded to all
                 # teams at creation; keep that semantic as the definition changes.
                 communication.visible_to_teams = sorted(team_ids) or None
