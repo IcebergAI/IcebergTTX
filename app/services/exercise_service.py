@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.communication import CommDirection, Communication
 from app.models.exercise import (
     VALID_TRANSITIONS,
     Exercise,
@@ -198,6 +199,35 @@ async def _freeze_run_snapshot(
                 "attachment_snapshot_status": attachment_snapshot_status,
             }
         )
+    communications = (
+        await session.exec(
+            select(Communication)
+            .where(Communication.exercise_id == exercise.id)
+            .with_for_update()
+            .order_by(col(Communication.id))
+        )
+    ).all()
+    materialized_communications = [
+        {
+            "id": communication.id,
+            "sender_id": communication.sender_id,
+            "sender_team": communication.sender_team,
+            "direction": communication.direction.value,
+            "external_entity": communication.external_entity,
+            "subject": communication.subject,
+            "body": communication.body,
+            "triggered_by_inject_id": communication.triggered_by_inject_id,
+            "trigger_key": communication.trigger_key,
+            "visible_to_teams": (
+                list(communication.visible_to_teams)
+                if communication.visible_to_teams is not None
+                else None
+            ),
+            "audience_explicit": communication.audience_explicit,
+            "sent_at": communication.sent_at.isoformat(),
+        }
+        for communication in communications
+    ]
     configuration: dict[str, object] = {
         "llm_enabled": locked_exercise.llm_enabled,
         "scenario_id": scenario.id,
@@ -217,6 +247,10 @@ async def _freeze_run_snapshot(
             }
             for inject in schedules
         ],
+        # Facilitator-prepared communications are part of the launch input. Read
+        # receipts are intentionally excluded: they are runtime viewer state, not
+        # scenario content.
+        "communications": materialized_communications,
     }
     snapshot = ExerciseRunSnapshot(
         exercise_id=exercise.id,
@@ -397,6 +431,8 @@ async def clone_exercise_as_draft(
         snapshot_seeded_keys: set[tuple[str | None, str | None]] = set()
         from app.services.inject_service import AttachmentMeta, create_inject
 
+        clone_inject_ids: dict[int, int] = {}
+
         for spec in snapshot_injects:
             if not isinstance(spec, dict):
                 continue
@@ -413,6 +449,9 @@ async def clone_exercise_as_draft(
                 inject.release_offset_minutes = spec.get("release_offset_minutes")
                 inject.release_offset_explicit = spec.get("release_offset_explicit", False)
                 session.add(inject)
+                source_id = spec.get("id")
+                if isinstance(source_id, int) and inject.id is not None:
+                    clone_inject_ids[source_id] = inject.id
                 continue
             attachment = None
             attachment_snapshot_status = spec.get("attachment_snapshot_status")
@@ -485,7 +524,7 @@ async def clone_exercise_as_draft(
                         "embedded snapshot bytes"
                     ),
                 )
-            await create_inject(
+            created_inject = await create_inject(
                 session,
                 exercise_id=clone.id,
                 title=str(spec.get("title", "Untitled inject")),
@@ -500,6 +539,9 @@ async def clone_exercise_as_draft(
                 scenario_seeded=spec.get("scenario_seeded", False),
                 commit=False,
             )
+            source_id = spec.get("id")
+            if isinstance(source_id, int) and created_inject.id is not None:
+                clone_inject_ids[source_id] = created_inject.id
         # A known-provenance source may have deliberately removed a seeded row
         # before launch. Do not recreate that row merely because the reusable
         # scenario definition still contains the node.
@@ -520,6 +562,56 @@ async def clone_exercise_as_draft(
             await session.exec(delete(Inject).where(col(Inject.id).in_(stale_ids)))
         if has_unknown_provenance:
             await promote_legacy_inject_provenance(session, clone.id, clone_scenario)
+        snapshot_communications = snapshot_configuration.get("communications", [])
+        if not isinstance(snapshot_communications, list):
+            snapshot_communications = []
+        for spec in snapshot_communications:
+            if not isinstance(spec, dict):
+                continue
+            try:
+                direction = CommDirection(str(spec.get("direction", CommDirection.inbound)))
+                sent_at = datetime.fromisoformat(str(spec["sent_at"]))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="The immutable snapshot communication is malformed",
+                ) from exc
+            source_trigger_id = spec.get("triggered_by_inject_id")
+            triggered_by_inject_id = (
+                clone_inject_ids.get(source_trigger_id)
+                if isinstance(source_trigger_id, int)
+                else None
+            )
+            session.add(
+                Communication(
+                    exercise_id=clone.id,
+                    sender_id=(
+                        int(spec["sender_id"]) if isinstance(spec.get("sender_id"), int) else None
+                    ),
+                    sender_team=(
+                        str(spec["sender_team"]) if spec.get("sender_team") is not None else None
+                    ),
+                    direction=direction,
+                    external_entity=(
+                        str(spec["external_entity"])
+                        if spec.get("external_entity") is not None
+                        else None
+                    ),
+                    subject=str(spec.get("subject", "")),
+                    body=str(spec.get("body", "")),
+                    triggered_by_inject_id=triggered_by_inject_id,
+                    trigger_key=(
+                        str(spec["trigger_key"]) if spec.get("trigger_key") is not None else None
+                    ),
+                    visible_to_teams=(
+                        list(spec["visible_to_teams"])
+                        if isinstance(spec.get("visible_to_teams"), list)
+                        else None
+                    ),
+                    audience_explicit=bool(spec.get("audience_explicit", False)),
+                    sent_at=sent_at,
+                )
+            )
         await seed_progression(
             session,
             exercise_id=clone.id,

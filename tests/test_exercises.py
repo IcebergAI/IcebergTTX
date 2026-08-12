@@ -121,6 +121,16 @@ async def test_launch_captures_content_addressed_snapshot_and_uses_it_after_temp
 ):
     """A launched run is interpreted from its own canonical evidence, not its template."""
     assert draft_exercise.id is not None
+    prepared = await client.post(
+        f"/api/exercises/{draft_exercise.id}/communications/inject",
+        json={
+            "external_entity": "NCSC",
+            "subject": "Prepared advisory",
+            "body": "A launch-time advisory",
+        },
+        headers=_bearer(facilitator_token),
+    )
+    assert prepared.status_code == 201
     injects = (
         await session.exec(
             select(Inject).where(Inject.exercise_id == draft_exercise.id).order_by(col(Inject.id))
@@ -149,6 +159,7 @@ async def test_launch_captures_content_addressed_snapshot_and_uses_it_after_temp
     assert configuration["injects"][0]["sequence_order"] == injects[0].sequence_order
     assert configuration["inject_schedules"][0]["release_offset_minutes"] == 42
     assert configuration["inject_schedules"][0]["release_offset_explicit"] is True
+    assert configuration["communications"][0]["subject"] == "Prepared advisory"
     original = await definition_for_exercise(session, draft_exercise.id)
     assert original is not None
     assert original.title == sample_scenario.title
@@ -344,7 +355,7 @@ async def test_legacy_clone_preserves_matching_schedule_override(
     draft_exercise: Exercise,
     sample_scenario,
 ):
-    """A matching legacy row retains a frozen schedule as an explicit override."""
+    """Unknown legacy rows never gain scenario ownership from content matching."""
     from app.services.inject_service import promote_legacy_inject_provenance
 
     inject = (
@@ -362,9 +373,57 @@ async def test_legacy_clone_preserves_matching_schedule_override(
     assert draft_exercise.id is not None
     await promote_legacy_inject_provenance(session, draft_exercise.id, sample_scenario)
 
-    assert inject.scenario_seeded is True
-    assert inject.release_offset_explicit is True
+    assert inject.scenario_seeded is False
+    assert inject.release_offset_explicit is None
     assert inject.release_offset_minutes == 42
+
+
+async def test_run_snapshot_clones_prepared_communications(
+    client: AsyncClient,
+    facilitator_token: str,
+    session: AsyncSession,
+    draft_exercise: Exercise,
+):
+    """Prepared facilitator communications survive launch and draft cloning."""
+    assert draft_exercise.id is not None
+    prepared = await client.post(
+        f"/api/exercises/{draft_exercise.id}/communications/inject",
+        json={
+            "external_entity": "ICO",
+            "subject": "Clone me",
+            "body": "This message is part of the exercise setup.",
+            "visible_to_teams": ["it_ops"],
+        },
+        headers=_bearer(facilitator_token),
+    )
+    assert prepared.status_code == 201
+    started = await client.post(
+        f"/api/exercises/{draft_exercise.id}/start", headers=_bearer(facilitator_token)
+    )
+    assert started.status_code == 200
+
+    snapshot = (
+        await session.exec(
+            select(ExerciseRunSnapshot).where(ExerciseRunSnapshot.exercise_id == draft_exercise.id)
+        )
+    ).one()
+    assert json.loads(snapshot.configuration_json)["communications"][0]["body"].startswith(
+        "This message"
+    )
+
+    cloned = await client.post(
+        f"/api/exercises/{draft_exercise.id}/clone",
+        json={"title": "Communication clone"},
+        headers=_bearer(facilitator_token),
+    )
+    assert cloned.status_code == 201
+    clone_id = cloned.json()["id"]
+    communications = await client.get(
+        f"/api/exercises/{clone_id}/communications", headers=_bearer(facilitator_token)
+    )
+    assert communications.status_code == 200
+    assert [row["subject"] for row in communications.json()] == ["Clone me"]
+    assert communications.json()[0]["visible_to_teams"] == ["it_ops"]
 
 
 async def test_reused_private_clone_scenario_cannot_be_edited_in_place(

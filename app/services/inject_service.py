@@ -13,7 +13,7 @@ from app.models.exercise import ExerciseState
 from app.models.inject import Inject, InjectProgress, InjectState
 from app.models.scenario import Scenario
 from app.schemas.api import InjectPublic
-from app.schemas.scenario_json import InjectNode, ScenarioDefinition
+from app.schemas.scenario_json import ScenarioDefinition
 from app.services.domain_events import InjectReleased, dispatch, record
 from app.services.scenario_service import export_definition
 
@@ -101,21 +101,14 @@ def restore_snapshot_attachment(
 async def promote_legacy_inject_provenance(
     session: AsyncSession, exercise_id: int, scenario: Scenario
 ) -> None:
-    """Recover only strongly evidenced legacy provenance.
+    """Mark legacy-unknown rows as facilitator-owned, without guessing.
 
-    Legacy rows have no bit that can distinguish a scenario-derived row from a
-    facilitator row that reused the same node/group identity.  Identity-based
-    promotion is unsafe: it can turn the sole custom row into scenario-owned data
-    and overwrite it on the next edit.  Require the complete materialized content
-    to match the cloned Scenario; otherwise retain facilitator ownership.  A
-    schedule mismatch is preserved as an explicit override when the rest matches.
+    Older databases do not record whether an Inject was scenario materialization
+    or facilitator-authored.  Even a byte-for-byte content match cannot prove
+    provenance: a facilitator may intentionally replace a node with identical
+    content.  Treating every unknown row as facilitator-owned is conservative and
+    prevents a later scenario edit from silently overwriting historical content.
     """
-    definition = export_definition(scenario)
-    expected: dict[tuple[str | None, str | None], tuple[InjectNode, int]] = {}
-    for index, node in enumerate(definition.injects):
-        groups = node.target_teams or [None]
-        for group_id in groups:
-            expected[(node.id, group_id)] = (node, node.sequence_order or index)
     unknown = (
         await session.exec(
             select(Inject)
@@ -125,30 +118,9 @@ async def promote_legacy_inject_provenance(
         )
     ).all()
     for inject in unknown:
-        candidate = expected.get((inject.scenario_node_id, inject.group_id))
-        node, sequence_order = candidate if candidate is not None else (None, None)
-        matches_materialized_content = bool(
-            node is not None
-            and inject.title == node.title
-            and inject.content == node.content
-            and inject.target_teams == (node.target_teams or None)
-            and inject.sequence_order == sequence_order
-            and inject.attachment_path is None
-            and inject.attachment_filename is None
-            and inject.attachment_size is None
-        )
-        inject.scenario_seeded = matches_materialized_content
-        if (
-            matches_materialized_content
-            and node is not None
-            and inject.release_offset_explicit is None
-        ):
-            # The frozen legacy value is authoritative for the clone.  It follows
-            # future scenario edits only when it matches the cloned default;
-            # otherwise preserve it as a facilitator override.
-            inject.release_offset_explicit = (
-                inject.release_offset_minutes != node.release_at_minutes
-            )
+        inject.scenario_seeded = False
+        # Preserve the legacy schedule value and its unknown provenance.  A
+        # scheduler must not infer that it follows the mutable Scenario template.
         session.add(inject)
 
 

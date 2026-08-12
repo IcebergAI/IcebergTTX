@@ -68,11 +68,34 @@ def _snapshot_digest(
     return hashlib.sha256(payload).hexdigest()
 
 
+def _communication_snapshot(row: object) -> dict[str, object]:
+    """Serialize one legacy Communication row without carrying read receipts."""
+    mapping = row
+    return {
+        "id": mapping["id"],
+        "sender_id": mapping["sender_id"],
+        "sender_team": mapping["sender_team"],
+        "direction": str(mapping["direction"]),
+        "external_entity": mapping["external_entity"],
+        "subject": mapping["subject"],
+        "body": mapping["body"],
+        "triggered_by_inject_id": mapping["triggered_by_inject_id"],
+        "trigger_key": mapping["trigger_key"],
+        "visible_to_teams": mapping["visible_to_teams"],
+        "audience_explicit": mapping["audience_explicit"],
+        "sent_at": (
+            mapping["sent_at"].isoformat()
+            if hasattr(mapping["sent_at"], "isoformat")
+            else str(mapping["sent_at"])
+        ),
+    }
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     rows = bind.execute(
         sa.text(
-            "SELECT id, definition, configuration_json, schema_version "
+            "SELECT id, exercise_id, definition, configuration_json, schema_version "
             "FROM exerciserunsnapshot ORDER BY id"
         )
     ).mappings()
@@ -80,7 +103,7 @@ def upgrade() -> None:
         try:
             definition = json.loads(row["definition"])
             configuration = json.loads(row["configuration_json"])
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             # A malformed historical snapshot is already non-cloneable; leave it
             # untouched so the migration remains resumable and does not fabricate
             # a different definition.
@@ -103,6 +126,20 @@ def upgrade() -> None:
             spec["attachment_bytes_b64"] = encoded
             spec["attachment_sha256"] = digest
             spec["attachment_snapshot_status"] = capture_status
+            changed = True
+        if "communications" not in configuration:
+            communication_rows = bind.execute(
+                sa.text(
+                    "SELECT id, sender_id, sender_team, direction, external_entity, "
+                    "subject, body, triggered_by_inject_id, trigger_key, "
+                    "visible_to_teams, audience_explicit, sent_at "
+                    "FROM communication WHERE exercise_id=:exercise_id ORDER BY id"
+                ),
+                {"exercise_id": row["exercise_id"]},
+            ).mappings()
+            configuration["communications"] = [
+                _communication_snapshot(communication) for communication in communication_rows
+            ]
             changed = True
         if not changed:
             continue
