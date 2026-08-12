@@ -186,7 +186,7 @@ def _delete_attachment_path(attachment_path: str | None) -> None:
         # Keep the hierarchy tidy after successful post-commit deletion; failure is
         # harmless and reconciliation can retry later.
         resolved.parent.rmdir()
-    except OSError, ValueError:
+    except (OSError, ValueError):
         pass
 
 
@@ -390,7 +390,20 @@ async def update_schedule(
     """
     if body.release_offset_minutes is not None and body.release_offset_minutes < 0:
         raise HTTPException(status_code=422, detail="release_offset_minutes must be >= 0")
-    exercise = await require_exercise_access(session, exercise_id, current_user)
+    await require_exercise_access(session, exercise_id, current_user)
+    # Scenario reconciliation serializes on the Exercise row. Acquire the same
+    # lock before reading or changing schedule provenance so a concurrent edit
+    # cannot overwrite a facilitator's explicit override with a stale default.
+    exercise = (
+        await session.exec(
+            select(Exercise)
+            .where(col(Exercise.id) == exercise_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if exercise is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
     require_operational_mutability(exercise)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
     if inject.state != InjectState.pending:
