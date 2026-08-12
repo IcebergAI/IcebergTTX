@@ -21,10 +21,9 @@ def upgrade() -> None:
     )
     # Rows that predate this provenance field cannot distinguish a scenario default
     # from a facilitator override. NULL is an intentional safe-unknown state; the
-    # synchronizer preserves those values until a facilitator makes a new choice.
-    op.execute(
-        sa.text("UPDATE inject SET release_offset_explicit = NULL WHERE scenario_seeded = TRUE")
-    )
+    # synchronizer adopts the new scenario default on the next clone edit and then
+    # records an explicit non-override value.
+    op.execute(sa.text("UPDATE inject SET release_offset_explicit = NULL"))
 
 
 def downgrade() -> None:

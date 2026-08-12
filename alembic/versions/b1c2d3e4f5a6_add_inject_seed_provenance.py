@@ -15,32 +15,17 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column(
         "inject",
-        sa.Column("scenario_seeded", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("scenario_seeded", sa.Boolean(), nullable=True, server_default=sa.false()),
     )
     op.add_column(
         "communication",
         sa.Column("audience_explicit", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
-    # Recover provenance for rows that clearly match the current scenario node
-    # identity. Arbitrary facilitator-created node ids remain false by default.
-    bind = op.get_bind()
-    bind.execute(
-        sa.text(
-            """
-            UPDATE inject AS i
-            SET scenario_seeded = TRUE
-            FROM exercise AS e, scenario AS s
-            WHERE i.exercise_id = e.id
-              AND e.scenario_id = s.id
-              AND i.scenario_node_id IS NOT NULL
-              AND EXISTS (
-                  SELECT 1
-                  FROM jsonb_array_elements((s.definition::jsonb)->'injects') AS node
-                  WHERE node->>'id' = i.scenario_node_id
-              )
-            """
-        )
-    )
+    # Existing rows predate an explicit provenance bit.  Identity alone is not
+    # evidence: the API has always allowed facilitator-authored injects to reuse a
+    # scenario node id.  Preserve that uncertainty instead of classifying custom
+    # content as seeded and deleting it on the next clone edit.
+    op.execute(sa.text("UPDATE inject SET scenario_seeded = NULL"))
 
 
 def downgrade() -> None:

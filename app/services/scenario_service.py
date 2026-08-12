@@ -88,11 +88,16 @@ async def update_scenario(
     previous_definition = export_definition(scenario)
     if private_clone_reused:
         target = next((exercise for exercise in in_use if exercise.id == target_exercise_id), None)
-        if target is None:
+        if (
+            target is None
+            or target.created_by != updated_by
+            or target.state is not ExerciseState.draft
+            or target.cloned_from_exercise_id is None
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    "This clone scenario is shared by multiple drafts; supply the target "
+                    "This clone scenario is shared; supply an owned draft clone "
                     "exercise_id to fork and edit that clone"
                 ),
             )

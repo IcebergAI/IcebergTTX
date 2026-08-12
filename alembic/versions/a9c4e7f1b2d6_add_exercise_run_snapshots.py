@@ -93,9 +93,9 @@ def upgrade() -> None:
         inject_rows = bind.execute(
             sa.text(
                 """
-                SELECT id, scenario_node_id, scenario_seeded, title, content,
+                SELECT id, scenario_node_id, title, content,
                        target_teams, group_id, sequence_order,
-                       release_offset_minutes, release_offset_explicit, state,
+                       release_offset_minutes, state,
                        released_at, released_by, resolved_at, resolved_by,
                        resolution_reason, attachment_filename,
                        attachment_content_type, attachment_path, attachment_size
@@ -112,14 +112,17 @@ def upgrade() -> None:
                 {
                     "id": inject["id"],
                     "scenario_node_id": inject["scenario_node_id"],
-                    "scenario_seeded": inject["scenario_seeded"],
+                    # Seed provenance and explicit schedule provenance are added
+                    # by later migrations.  NULL records that this historical
+                    # value was not available at snapshot time.
+                    "scenario_seeded": None,
                     "title": inject["title"],
                     "content": inject["content"],
                     "target_teams": inject["target_teams"],
                     "group_id": inject["group_id"],
                     "sequence_order": inject["sequence_order"],
                     "release_offset_minutes": inject["release_offset_minutes"],
-                    "release_offset_explicit": inject["release_offset_explicit"],
+                    "release_offset_explicit": None,
                     "state": str(inject["state"]) if inject["state"] is not None else None,
                     "released_at": inject["released_at"].isoformat()
                     if inject["released_at"]

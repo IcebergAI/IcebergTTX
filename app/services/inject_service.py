@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
+from shutil import copyfile
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy import delete, update
@@ -14,6 +17,8 @@ from app.schemas.scenario_json import ScenarioDefinition
 from app.services.domain_events import InjectReleased, dispatch, record
 from app.services.scenario_service import export_definition
 
+ATTACHMENT_ROOT = Path("uploads/inject_attachments")
+
 
 @dataclass(frozen=True)
 class AttachmentMeta:
@@ -23,6 +28,35 @@ class AttachmentMeta:
     content_type: str
     path: str
     size: int
+
+
+def copy_attachment_for_exercise(attachment: AttachmentMeta, exercise_id: int) -> AttachmentMeta:
+    """Copy an attachment into the clone-owned directory.
+
+    Attachment paths are ownership-bearing database references. Reusing the source
+    path would let deleting a pending clone delete bytes still needed by the source.
+    Validate the source stays under the application root and give the copy a fresh
+    collision-resistant name.
+    """
+    root = ATTACHMENT_ROOT.resolve()
+    source = Path(attachment.path).resolve()
+    try:
+        source.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("attachment path escapes storage root") from exc
+    if not source.is_file():
+        raise FileNotFoundError(source)
+    destination_dir = root / str(exercise_id)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(attachment.filename).name or "attachment"
+    destination = destination_dir / f"{uuid4().hex}_{safe_name}"
+    copyfile(source, destination)
+    return AttachmentMeta(
+        filename=attachment.filename,
+        content_type=attachment.content_type,
+        path=str(destination),
+        size=destination.stat().st_size,
+    )
 
 
 async def create_inject(
@@ -37,7 +71,7 @@ async def create_inject(
     sequence_order: int = 0,
     release_offset_minutes: int | None = None,
     attachment: AttachmentMeta | None = None,
-    scenario_seeded: bool = False,
+    scenario_seeded: bool | None = False,
     commit: bool = True,
 ) -> Inject:
     normalized_group_id = group_id.strip() if group_id and group_id.strip() else None
@@ -326,8 +360,9 @@ async def sync_seeded_injects_from_scenario(
 ) -> None:
     """Reconcile scenario-derived rows while preserving draft-owned inject state.
 
-    Existing seeded rows retain facilitator schedule overrides; removed scenario
-    nodes are deleted, and new nodes are inserted with their declared defaults.
+    Existing seeded rows retain explicit facilitator schedule overrides; legacy
+    unknown rows adopt the edited scenario default, removed scenario nodes are
+    deleted, and new nodes are inserted with their declared defaults.
     Rows created through the inject API are never touched, even when they carry a
     scenario_node_id for UI lineage.
     """
@@ -362,11 +397,15 @@ async def sync_seeded_injects_from_scenario(
                 existing.sequence_order = sequence_order
                 existing.scenario_node_id = node.id
                 # New materialized rows follow the scenario until a facilitator
-                # explicitly changes their schedule. Legacy rows have NULL here
-                # because their historical intent is unknowable; preserve those
-                # values rather than silently destroying an old override.
-                if existing.release_offset_explicit is False:
+                # explicitly changes their schedule. Legacy NULL provenance is
+                # intentionally resolved to the edited scenario default because
+                # its historical intent cannot be recovered safely.
+                if existing.release_offset_explicit is not True:
                     existing.release_offset_minutes = node.release_at_minutes
+                    # Legacy NULL means "unknown", not an override.  Once this
+                    # draft is reconciled, the new scenario value is the explicit
+                    # baseline for future edits.
+                    existing.release_offset_explicit = False
                 session.add(existing)
                 continue
             await create_inject(

@@ -27,7 +27,9 @@ class Inject(SQLModel, table=True):
     scenario_node_id: str | None = None  # links back to the ScenarioDefinition inject id
     # True only for rows materialized from Scenario.definition. Facilitator-created
     # draft injects may also supply a node id, so identity alone is not provenance.
-    scenario_seeded: bool = Field(default=False, nullable=False)
+    # NULL is legacy-unknown provenance; new API rows are false and materialized
+    # scenario rows are true.
+    scenario_seeded: bool | None = Field(default=False, nullable=True)
     title: str
     content: str
     target_teams: list[str] | None = Field(  # team IDs; None = all teams

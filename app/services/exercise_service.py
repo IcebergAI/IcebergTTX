@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import HTTPException, status
 from sqlalchemy import update
@@ -21,7 +22,7 @@ from app.models.inject import Inject
 from app.models.scenario import Scenario
 from app.models.user import User
 from app.services.domain_events import ExerciseStateChanged, dispatch, record
-from app.services.inject_service import seed_injects_from_scenario
+from app.services.inject_service import copy_attachment_for_exercise, seed_injects_from_scenario
 from app.services.progression_service import seed_progression
 from app.services.scenario_service import (
     RUN_SNAPSHOT_SCHEMA_VERSION,
@@ -246,8 +247,8 @@ async def clone_exercise_as_draft(
     session.add(clone)
     await session.flush()
     assert clone.id is not None
+    copied_attachment_paths: list[str] = []
     try:
-        await seed_injects_from_scenario(session, clone.id, clone_scenario)
         # A frozen run contains the materialized launch configuration, not just
         # the reusable scenario definition. Restore authored injects and explicit
         # schedule overrides so cloning a run is a faithful, editable draft.
@@ -282,6 +283,17 @@ async def clone_exercise_as_draft(
                 }
                 for inject in source_injects
             ]
+        # Snapshots created before provenance columns were introduced contain
+        # unknown (NULL) provenance.  Do not pre-seed those clones: identity
+        # alone cannot distinguish a facilitator-authored inject that reused a
+        # scenario node id from a scenario-derived row.  Recreate every frozen
+        # row as unknown instead of silently duplicating or dropping one.
+        has_unknown_provenance = any(
+            isinstance(spec, dict) and spec.get("scenario_seeded") is None
+            for spec in snapshot_injects
+        )
+        if not has_unknown_provenance:
+            await seed_injects_from_scenario(session, clone.id, clone_scenario)
         clone_injects = (
             await session.exec(
                 select(Inject).where(Inject.exercise_id == clone.id).order_by(col(Inject.id))
@@ -298,7 +310,7 @@ async def clone_exercise_as_draft(
             if not isinstance(spec, dict):
                 continue
             identity = (spec.get("scenario_node_id"), spec.get("group_id"))
-            if spec.get("scenario_seeded"):
+            if spec.get("scenario_seeded") is True:
                 inject = seeded_by_identity.get(identity)
                 if inject is None:
                     continue
@@ -312,7 +324,7 @@ async def clone_exercise_as_draft(
                 continue
             attachment = None
             if spec.get("attachment_path"):
-                attachment = AttachmentMeta(
+                source_attachment = AttachmentMeta(
                     filename=str(spec.get("attachment_filename") or "attachment"),
                     content_type=str(
                         spec.get("attachment_content_type") or "application/octet-stream"
@@ -320,6 +332,8 @@ async def clone_exercise_as_draft(
                     path=str(spec["attachment_path"]),
                     size=int(spec.get("attachment_size") or 0),
                 )
+                attachment = copy_attachment_for_exercise(source_attachment, clone.id)
+                copied_attachment_paths.append(attachment.path)
             await create_inject(
                 session,
                 exercise_id=clone.id,
@@ -331,7 +345,7 @@ async def clone_exercise_as_draft(
                 sequence_order=int(spec.get("sequence_order", 0)),
                 release_offset_minutes=spec.get("release_offset_minutes"),
                 attachment=attachment,
-                scenario_seeded=False,
+                scenario_seeded=spec.get("scenario_seeded", False),
                 commit=False,
             )
         await seed_progression(
@@ -343,6 +357,8 @@ async def clone_exercise_as_draft(
         await session.commit()
     except Exception:
         await session.rollback()
+        for attachment_path in copied_attachment_paths:
+            Path(attachment_path).unlink(missing_ok=True)
         raise
     await session.refresh(clone)
     return clone
