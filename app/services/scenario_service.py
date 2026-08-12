@@ -80,9 +80,14 @@ async def update_scenario(
         from app.services.progression_service import seed_progression
 
         clone = in_use[0]
-        await session.exec(delete(InjectProgress).where(InjectProgress.exercise_id == clone.id))
-        await session.exec(delete(Inject).where(Inject.exercise_id == clone.id))
-        await session.exec(delete(ExerciseProgress).where(ExerciseProgress.exercise_id == clone.id))
+        assert clone.id is not None
+        await session.exec(
+            delete(InjectProgress).where(col(InjectProgress.exercise_id) == clone.id)
+        )
+        await session.exec(delete(Inject).where(col(Inject.exercise_id) == clone.id))
+        await session.exec(
+            delete(ExerciseProgress).where(col(ExerciseProgress.exercise_id) == clone.id)
+        )
         clone.current_node_id = definition.start_inject_id
         session.add(clone)
         await session.flush()
