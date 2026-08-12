@@ -548,6 +548,7 @@ async def clone_exercise_as_draft(
                         "embedded snapshot bytes"
                     ),
                 )
+            scenario_seeded = spec.get("scenario_seeded", False)
             created_inject = await create_inject(
                 session,
                 exercise_id=clone.id,
@@ -560,9 +561,18 @@ async def clone_exercise_as_draft(
                 release_offset_minutes=spec.get("release_offset_minutes"),
                 release_offset_explicit=spec.get("release_offset_explicit"),
                 attachment=attachment,
-                scenario_seeded=spec.get("scenario_seeded", False),
+                scenario_seeded=scenario_seeded,
                 commit=False,
             )
+            if scenario_seeded is None:
+                # SQLAlchemy applies the column's ``False`` insert default to an
+                # explicit NULL during create_inject's first flush. Restore the
+                # captured legacy-unknown provenance before the clone transaction
+                # commits; treating it as facilitator-authored would let later
+                # runnable scenario edits bypass the conservative legacy guard.
+                created_inject.scenario_seeded = None
+                session.add(created_inject)
+                await session.flush()
             source_id = spec.get("id")
             if isinstance(source_id, int) and created_inject.id is not None:
                 clone_inject_ids[source_id] = created_inject.id
