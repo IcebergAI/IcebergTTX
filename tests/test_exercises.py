@@ -121,6 +121,18 @@ async def test_launch_captures_content_addressed_snapshot_and_uses_it_after_temp
 ):
     """A launched run is interpreted from its own canonical evidence, not its template."""
     assert draft_exercise.id is not None
+    injects = (
+        await session.exec(
+            select(Inject).where(Inject.exercise_id == draft_exercise.id).order_by(Inject.id)
+        )
+    ).all()
+    assert injects
+    scheduled = await client.patch(
+        f"/api/exercises/{draft_exercise.id}/injects/{injects[0].id}/schedule",
+        json={"release_offset_minutes": 42},
+        headers=_bearer(facilitator_token),
+    )
+    assert scheduled.status_code == 200
     started = await client.post(
         f"/api/exercises/{draft_exercise.id}/start", headers=_bearer(facilitator_token)
     )
@@ -131,6 +143,9 @@ async def test_launch_captures_content_addressed_snapshot_and_uses_it_after_temp
         )
     ).one()
     assert len(snapshot.content_sha256) == 64
+    configuration = json.loads(snapshot.configuration_json)
+    assert configuration["inject_schedules"][0]["release_offset_minutes"] == 42
+    assert configuration["inject_schedules"][0]["release_offset_explicit"] is True
     original = await definition_for_exercise(session, draft_exercise.id)
     assert original is not None
     assert original.title == sample_scenario.title
@@ -244,6 +259,49 @@ async def test_clone_creates_distinct_editable_draft_with_lineage(
     assert edited_seed["release_offset_minutes"] == 42
     edited_default = next(row for row in injects.json() if row["scenario_node_id"] == "inject_02")
     assert edited_default["release_offset_minutes"] == 17
+
+
+async def test_reused_private_clone_scenario_cannot_be_edited_in_place(
+    client: AsyncClient,
+    facilitator_token: str,
+    draft_exercise: Exercise,
+    session: AsyncSession,
+):
+    assert draft_exercise.id is not None
+    assert (
+        await client.post(
+            f"/api/exercises/{draft_exercise.id}/start", headers=_bearer(facilitator_token)
+        )
+    ).status_code == 200
+    cloned = await client.post(
+        f"/api/exercises/{draft_exercise.id}/clone",
+        json={"title": "Shared clone source"},
+        headers=_bearer(facilitator_token),
+    )
+    assert cloned.status_code == 201
+    clone = await session.get(Exercise, cloned.json()["id"])
+    assert clone is not None
+    reused = await client.post(
+        "/api/exercises",
+        json={
+            "scenario_id": clone.scenario_id,
+            "title": "Second exercise using clone scenario",
+        },
+        headers=_bearer(facilitator_token),
+    )
+    assert reused.status_code == 201
+    scenario = await client.get(
+        f"/api/scenarios/{clone.scenario_id}", headers=_bearer(facilitator_token)
+    )
+    assert scenario.status_code == 200
+    definition = scenario.json()["definition"]
+    definition["title"] = "Unsafe shared edit"
+    edited = await client.put(
+        f"/api/scenarios/{clone.scenario_id}",
+        json=definition,
+        headers=_bearer(facilitator_token),
+    )
+    assert edited.status_code == 409
 
 
 async def test_active_exercise_llm_configuration_is_immutable(

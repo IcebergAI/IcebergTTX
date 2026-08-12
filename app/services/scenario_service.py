@@ -47,6 +47,19 @@ async def update_scenario(
     # an in-use library definition. A clone is the deliberate exception: it owns a
     # private Scenario row and is still a draft, so editing that row must update the
     # cloned exercise's actual source rather than creating an unreferenced fork.
+    # Serialize scenario edits with new exercise creation. Both operations read
+    # the same Scenario row before deciding whether clone edits may be in place.
+    locked_scenario = (
+        await session.exec(
+            select(Scenario)
+            .where(Scenario.id == scenario.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).first()
+    if locked_scenario is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found")
+    scenario = locked_scenario
     in_use = (
         await session.exec(
             select(Exercise).where(col(Exercise.scenario_id) == scenario.id).with_for_update()
@@ -60,6 +73,25 @@ async def update_scenario(
         and in_use[0].created_by == updated_by
         and scenario.created_by == updated_by
     )
+    private_clone_reused = (
+        updated_by is not None
+        and scenario.created_by == updated_by
+        and any(
+            exercise.state == ExerciseState.draft
+            and exercise.cloned_from_exercise_id is not None
+            and exercise.created_by == updated_by
+            for exercise in in_use
+        )
+        and not private_clone_draft
+    )
+    if private_clone_reused:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This clone scenario is already used by another exercise; edit the "
+                "clone after creating a distinct scenario copy"
+            ),
+        )
     if in_use and not private_clone_draft:
         return await create_scenario(
             session,

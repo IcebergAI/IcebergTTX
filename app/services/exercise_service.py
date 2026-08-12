@@ -17,6 +17,7 @@ from app.models.exercise import (
     ExerciseStateTransition,
     transition_action,
 )
+from app.models.inject import Inject
 from app.models.scenario import Scenario
 from app.models.user import User
 from app.services.domain_events import ExerciseStateChanged, dispatch, record
@@ -81,10 +82,32 @@ async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> Exe
     assert scenario.id is not None
     definition = export_definition(scenario)
     definition_json = canonical_definition_json(definition)
+    # Schedule overrides are materialized on Inject rows and are part of the
+    # runnable launch configuration, not merely the reusable Scenario template.
+    # Lock them under the already-locked Exercise so the snapshot cannot omit a
+    # committed override that the scheduler will use.
+    schedules = (
+        await session.exec(
+            select(Inject)
+            .where(Inject.exercise_id == exercise.id)
+            .with_for_update()
+            .order_by(Inject.id)
+        )
+    ).all()
     configuration: dict[str, object] = {
         "llm_enabled": locked_exercise.llm_enabled,
         "scenario_id": scenario.id,
         "scenario_version": scenario.version,
+        "inject_schedules": [
+            {
+                "inject_id": inject.id,
+                "scenario_node_id": inject.scenario_node_id,
+                "group_id": inject.group_id,
+                "release_offset_minutes": inject.release_offset_minutes,
+                "release_offset_explicit": inject.release_offset_explicit,
+            }
+            for inject in schedules
+        ],
     }
     snapshot = ExerciseRunSnapshot(
         exercise_id=exercise.id,
@@ -112,7 +135,14 @@ async def create_exercise(
     created_by: int,
     llm_enabled: bool = False,
 ) -> Exercise:
-    scenario = await session.get(Scenario, scenario_id)
+    scenario = (
+        await session.exec(
+            select(Scenario)
+            .where(Scenario.id == scenario_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).first()
     if not scenario:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found")
 
