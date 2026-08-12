@@ -42,6 +42,8 @@ from app.services.exercise_service import (
     clone_exercise_as_draft,
     create_exercise,
     enrol_member,
+    material_configuration_changes,
+    material_configuration_for_exercise,
     remove_member,
     transition_state_with_history,
     update_member_group,
@@ -324,12 +326,19 @@ async def compare_exercise_versions(
     current_user: FacilitatorDep,
     session: SessionDep,
 ):
-    """Compare the exact source run/draft definitions by stable node and team IDs."""
+    """Compare definitions and the materialized runnable input for two versions."""
     await require_exercise_owner(session, exercise_id, current_user)
     await require_exercise_owner(session, other_exercise_id, current_user)
     earlier = await definition_for_exercise(session, exercise_id)
     later = await definition_for_exercise(session, other_exercise_id)
-    if earlier is None or later is None:
+    earlier_configuration = await material_configuration_for_exercise(session, exercise_id)
+    later_configuration = await material_configuration_for_exercise(session, other_exercise_id)
+    if (
+        earlier is None
+        or later is None
+        or earlier_configuration is None
+        or later_configuration is None
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Exercise scenario was not found"
         )
@@ -337,6 +346,9 @@ async def compare_exercise_versions(
         "earlier_exercise_id": exercise_id,
         "later_exercise_id": other_exercise_id,
         "changes": material_definition_changes(earlier, later),
+        "configuration_changes": material_configuration_changes(
+            earlier_configuration, later_configuration
+        ),
     }
 
 

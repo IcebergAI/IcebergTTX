@@ -385,6 +385,16 @@ async def test_clone_creates_distinct_editable_draft_with_lineage(
     )
     assert compared.status_code == 200
     assert compared.json()["changes"]["injects_added"] == []
+    assert compared.json()["configuration_changes"] == {
+        "llm_enabled_changed": False,
+        "injects_changed": False,
+        "inject_count_before": 2,
+        "inject_count_after": 2,
+        "schedules_changed": False,
+        "communications_changed": False,
+        "communication_count_before": 0,
+        "communication_count_after": 0,
+    }
 
     scenario_response = await client.get(
         f"/api/scenarios/{clone.scenario_id}", headers=_bearer(facilitator_token)
@@ -443,6 +453,15 @@ async def test_clone_creates_distinct_editable_draft_with_lineage(
     assert edited_seed["release_offset_minutes"] == 42
     edited_default = next(row for row in injects.json() if row["scenario_node_id"] == "inject_02")
     assert edited_default["release_offset_minutes"] == 17
+    compared_after_edit = await client.get(
+        f"/api/exercises/{draft_exercise.id}/compare/{clone_id}",
+        headers=_bearer(facilitator_token),
+    )
+    assert compared_after_edit.status_code == 200
+    configuration_changes = compared_after_edit.json()["configuration_changes"]
+    assert configuration_changes["injects_changed"] is True
+    assert configuration_changes["inject_count_after"] == 3
+    assert configuration_changes["schedules_changed"] is True
 
 
 async def test_metadata_edit_keeps_legacy_clone_provenance_unresolved(
@@ -650,6 +669,32 @@ async def test_run_snapshot_clones_prepared_communications(
     ).one()
     await session.refresh(cloned_communication)
     assert cloned_communication.audience_explicit is None
+    compared = await client.get(
+        f"/api/exercises/{draft_exercise.id}/compare/{clone_id}",
+        headers=_bearer(facilitator_token),
+    )
+    assert compared.status_code == 200
+    assert compared.json()["configuration_changes"]["communications_changed"] is False
+
+    additional = await client.post(
+        f"/api/exercises/{clone_id}/communications/inject",
+        json={
+            "external_entity": "NCSC",
+            "subject": "A changed next-run input",
+            "body": "This communication exists only in the clone.",
+        },
+        headers=_bearer(facilitator_token),
+    )
+    assert additional.status_code == 201
+    compared_after_edit = await client.get(
+        f"/api/exercises/{draft_exercise.id}/compare/{clone_id}",
+        headers=_bearer(facilitator_token),
+    )
+    assert compared_after_edit.status_code == 200
+    communication_changes = compared_after_edit.json()["configuration_changes"]
+    assert communication_changes["communications_changed"] is True
+    assert communication_changes["communication_count_before"] == 1
+    assert communication_changes["communication_count_after"] == 2
 
 
 async def test_reused_private_clone_scenario_cannot_be_edited_in_place(

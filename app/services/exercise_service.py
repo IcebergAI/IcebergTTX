@@ -50,6 +50,162 @@ class ExerciseTransitionResult:
     action: str
 
 
+_MATERIAL_INJECT_FIELDS = (
+    "scenario_node_id",
+    "scenario_seeded",
+    "title",
+    "content",
+    "target_teams",
+    "group_id",
+    "sequence_order",
+    "attachment_filename",
+    "attachment_content_type",
+    "attachment_size",
+    "attachment_sha256",
+)
+_MATERIAL_SCHEDULE_FIELDS = (
+    "scenario_node_id",
+    "group_id",
+    "release_offset_minutes",
+    "release_offset_explicit",
+)
+_MATERIAL_COMMUNICATION_FIELDS = (
+    "sender_team",
+    "direction",
+    "external_entity",
+    "subject",
+    "body",
+    "visible_to_teams",
+    "audience_explicit",
+)
+
+
+def _canonical_material_rows(rows: object, fields: tuple[str, ...]) -> list[dict[str, object]]:
+    if not isinstance(rows, list):
+        return []
+    normalized = [
+        {field: row.get(field) for field in fields} for row in rows if isinstance(row, dict)
+    ]
+    return sorted(
+        normalized,
+        key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":")),
+    )
+
+
+def _attachment_sha256(path: str | None) -> str | None:
+    if not path:
+        return None
+    attachment = Path(path)
+    if not attachment.is_file():
+        return None
+    return hashlib.sha256(attachment.read_bytes()).hexdigest()
+
+
+def material_configuration_changes(
+    earlier: dict[str, object], later: dict[str, object]
+) -> dict[str, object]:
+    """Summarize runnable-input changes without comparing row-local identities.
+
+    Snapshot clones receive new database IDs, attachment paths, and timestamps. Those
+    implementation details are deliberately excluded; content, audiences, schedules,
+    attachments, and the LLM policy remain material launch inputs.
+    """
+
+    earlier_injects = _canonical_material_rows(earlier.get("injects"), _MATERIAL_INJECT_FIELDS)
+    later_injects = _canonical_material_rows(later.get("injects"), _MATERIAL_INJECT_FIELDS)
+    earlier_schedules = _canonical_material_rows(
+        earlier.get("inject_schedules"), _MATERIAL_SCHEDULE_FIELDS
+    )
+    later_schedules = _canonical_material_rows(
+        later.get("inject_schedules"), _MATERIAL_SCHEDULE_FIELDS
+    )
+    earlier_communications = _canonical_material_rows(
+        earlier.get("communications"), _MATERIAL_COMMUNICATION_FIELDS
+    )
+    later_communications = _canonical_material_rows(
+        later.get("communications"), _MATERIAL_COMMUNICATION_FIELDS
+    )
+    return {
+        "llm_enabled_changed": earlier.get("llm_enabled") != later.get("llm_enabled"),
+        "injects_changed": earlier_injects != later_injects,
+        "inject_count_before": len(earlier_injects),
+        "inject_count_after": len(later_injects),
+        "schedules_changed": earlier_schedules != later_schedules,
+        "communications_changed": earlier_communications != later_communications,
+        "communication_count_before": len(earlier_communications),
+        "communication_count_after": len(later_communications),
+    }
+
+
+async def material_configuration_for_exercise(
+    session: AsyncSession, exercise_id: int
+) -> dict[str, object] | None:
+    """Return frozen launch input for a run or current runnable input for a draft."""
+
+    snapshot = await snapshot_for_exercise(session, exercise_id)
+    if snapshot is not None:
+        raw = json.loads(snapshot.configuration_json)
+        return raw if isinstance(raw, dict) else None
+    exercise = await session.get(Exercise, exercise_id)
+    if exercise is None:
+        return None
+    injects = (
+        await session.exec(
+            select(Inject).where(Inject.exercise_id == exercise_id).order_by(col(Inject.id))
+        )
+    ).all()
+    communications = (
+        await session.exec(
+            select(Communication)
+            .where(Communication.exercise_id == exercise_id)
+            .where(Communication.direction == CommDirection.inbound)
+            .where(col(Communication.sender_id).is_(None))
+            .where(col(Communication.triggered_by_inject_id).is_(None))
+            .order_by(col(Communication.id))
+        )
+    ).all()
+    return {
+        "llm_enabled": exercise.llm_enabled,
+        "injects": [
+            {
+                "scenario_node_id": inject.scenario_node_id,
+                "scenario_seeded": inject.scenario_seeded,
+                "title": inject.title,
+                "content": inject.content,
+                "target_teams": inject.target_teams,
+                "group_id": inject.group_id,
+                "sequence_order": inject.sequence_order,
+                "attachment_filename": inject.attachment_filename,
+                "attachment_content_type": inject.attachment_content_type,
+                "attachment_size": inject.attachment_size,
+                "attachment_sha256": _attachment_sha256(inject.attachment_path),
+            }
+            for inject in injects
+        ],
+        "inject_schedules": [
+            {
+                "scenario_node_id": inject.scenario_node_id,
+                "group_id": inject.group_id,
+                "release_offset_minutes": inject.release_offset_minutes,
+                "release_offset_explicit": inject.release_offset_explicit,
+            }
+            for inject in injects
+        ],
+        "communications": [
+            {
+                "sender_team": communication.sender_team,
+                "direction": communication.direction.value,
+                "external_entity": communication.external_entity,
+                "subject": communication.subject,
+                "body": communication.body,
+                "visible_to_teams": communication.visible_to_teams,
+                "audience_explicit": communication.audience_explicit,
+            }
+            for communication in communications
+        ],
+    }
+
+
 async def _lock_current_exercise_context(
     session: AsyncSession, exercise_id: int
 ) -> tuple[Exercise, Scenario]:
