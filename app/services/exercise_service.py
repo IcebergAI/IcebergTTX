@@ -27,7 +27,6 @@ from app.models.user import User
 from app.services.domain_events import ExerciseStateChanged, dispatch, record
 from app.services.inject_service import (
     copy_attachment_for_exercise,
-    promote_legacy_inject_provenance,
     restore_snapshot_attachment,
     seed_injects_from_scenario,
 )
@@ -203,6 +202,9 @@ async def _freeze_run_snapshot(
         await session.exec(
             select(Communication)
             .where(Communication.exercise_id == exercise.id)
+            .where(Communication.direction == CommDirection.inbound)
+            .where(col(Communication.sender_id).is_(None))
+            .where(col(Communication.triggered_by_inject_id).is_(None))
             .with_for_update()
             .order_by(col(Communication.id))
         )
@@ -560,8 +562,9 @@ async def clone_exercise_as_draft(
                 delete(InjectProgress).where(col(InjectProgress.inject_id).in_(stale_ids))
             )
             await session.exec(delete(Inject).where(col(Inject.id).in_(stale_ids)))
-        if has_unknown_provenance:
-            await promote_legacy_inject_provenance(session, clone.id, clone_scenario)
+        # Keep NULL provenance as an explicit unresolved state.  Guessing that a
+        # legacy row was scenario-derived can overwrite facilitator-authored data;
+        # scenario editing rejects unresolved rows until an operator resolves them.
         snapshot_communications = snapshot_configuration.get("communications", [])
         if not isinstance(snapshot_communications, list):
             snapshot_communications = []

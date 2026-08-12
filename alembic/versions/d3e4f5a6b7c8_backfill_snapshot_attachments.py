@@ -133,7 +133,12 @@ def upgrade() -> None:
                     "SELECT id, sender_id, sender_team, direction, external_entity, "
                     "subject, body, triggered_by_inject_id, trigger_key, "
                     "visible_to_teams, audience_explicit, sent_at "
-                    "FROM communication WHERE exercise_id=:exercise_id ORDER BY id"
+                    "FROM communication "
+                    "WHERE exercise_id=:exercise_id "
+                    "AND direction='inbound' "
+                    "AND sender_id IS NULL "
+                    "AND triggered_by_inject_id IS NULL "
+                    "ORDER BY id"
                 ),
                 {"exercise_id": row["exercise_id"]},
             ).mappings()

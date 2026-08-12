@@ -123,6 +123,39 @@ async def update_scenario(
             definition=definition,
             created_by=updated_by or scenario.created_by,
         )
+    if private_clone_draft:
+        from app.models.inject import Inject
+
+        clone = in_use[0]
+        assert clone.id is not None
+        legacy_unknown = (
+            await session.exec(
+                select(Inject)
+                .where(col(Inject.exercise_id) == clone.id)
+                .where(col(Inject.scenario_seeded).is_(None))
+            )
+        ).all()
+        changes = material_definition_changes(previous_definition, definition)
+        if legacy_unknown and any(
+            changes[key]
+            for key in (
+                "injects_added",
+                "injects_removed",
+                "injects_changed",
+                "inject_order_changed",
+                "teams_added",
+                "teams_removed",
+                "teams_changed",
+            )
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This legacy clone contains injects with unknown provenance. "
+                    "Resolve or manually edit those injects before changing runnable "
+                    "scenario content."
+                ),
+            )
     scenario.title = definition.title
     scenario.description = definition.description
     scenario.tags = definition.tags or None

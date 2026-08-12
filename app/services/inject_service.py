@@ -444,6 +444,16 @@ async def sync_seeded_injects_from_scenario(
             .where(col(Inject.scenario_seeded).is_(True))
         )
     ).all()
+    custom_keys = {
+        (inject.scenario_node_id, inject.group_id)
+        for inject in (
+            await session.exec(
+                select(Inject)
+                .where(col(Inject.exercise_id) == exercise_id)
+                .where(col(Inject.scenario_seeded).is_not(True))
+            )
+        ).all()
+    }
     by_key: dict[tuple[str | None, str | None], list[Inject]] = {}
     for inject in seeded:
         by_key.setdefault((inject.scenario_node_id, inject.group_id), []).append(inject)
@@ -473,6 +483,11 @@ async def sync_seeded_injects_from_scenario(
                     # NULL is an unknown legacy value.  Preserve it rather than
                     # fabricating provenance and erasing a frozen schedule.
                 session.add(existing)
+                continue
+            # A legacy/custom row already occupies this identity.  Never create a
+            # second runnable row merely because provenance is unresolved; the
+            # facilitator can edit or resolve that row explicitly first.
+            if key in custom_keys:
                 continue
             await create_inject(
                 session,

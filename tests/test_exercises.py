@@ -378,6 +378,35 @@ async def test_legacy_clone_preserves_matching_schedule_override(
     assert inject.release_offset_minutes == 42
 
 
+async def test_legacy_clone_does_not_guess_provenance_or_duplicate_on_sync(
+    session: AsyncSession,
+    draft_exercise: Exercise,
+    sample_scenario,
+):
+    """Unknown legacy identities remain unresolved rather than becoming duplicates."""
+    from app.services.inject_service import sync_seeded_injects_from_scenario
+
+    inject = (
+        await session.exec(
+            select(Inject).where(Inject.exercise_id == draft_exercise.id).order_by(col(Inject.id))
+        )
+    ).first()
+    assert inject is not None
+    inject.scenario_seeded = False
+    session.add(inject)
+    await session.flush()
+    before = (
+        await session.exec(select(Inject).where(Inject.exercise_id == draft_exercise.id))
+    ).all()
+
+    await sync_seeded_injects_from_scenario(session, draft_exercise.id, sample_scenario)
+
+    after = (
+        await session.exec(select(Inject).where(Inject.exercise_id == draft_exercise.id))
+    ).all()
+    assert len(after) == len(before)
+
+
 async def test_run_snapshot_clones_prepared_communications(
     client: AsyncClient,
     facilitator_token: str,
