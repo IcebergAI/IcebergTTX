@@ -2,6 +2,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
+from fastapi import HTTPException, status
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -46,7 +47,11 @@ async def update_scenario(
     # an in-use library definition. A clone is the deliberate exception: it owns a
     # private Scenario row and is still a draft, so editing that row must update the
     # cloned exercise's actual source rather than creating an unreferenced fork.
-    in_use = (await session.exec(select(Exercise).where(Exercise.scenario_id == scenario.id))).all()
+    in_use = (
+        await session.exec(
+            select(Exercise).where(col(Exercise.scenario_id) == scenario.id).with_for_update()
+        )
+    ).all()
     private_clone_draft = (
         len(in_use) == 1
         and in_use[0].state == ExerciseState.draft
@@ -74,17 +79,67 @@ async def update_scenario(
         # state in the same transaction as the edit.
         from sqlalchemy import delete
 
-        from app.models.exercise import ExerciseProgress
+        from app.models.exercise import ExerciseMember, ExerciseProgress
         from app.models.inject import Inject, InjectProgress
         from app.services.inject_service import seed_injects_from_scenario
         from app.services.progression_service import seed_progression
 
         clone = in_use[0]
         assert clone.id is not None
-        await session.exec(
-            delete(InjectProgress).where(col(InjectProgress.exercise_id) == clone.id)
+        team_ids = {team.id for team in definition.participant_teams}
+        members = (
+            await session.exec(
+                select(ExerciseMember)
+                .where(col(ExerciseMember.exercise_id) == clone.id)
+                .where(col(ExerciseMember.group_id).is_not(None))
+            )
+        ).all()
+        invalid_member_groups = sorted(
+            {member.group_id for member in members if member.group_id not in team_ids}
         )
-        await session.exec(delete(Inject).where(col(Inject.exercise_id) == clone.id))
+        if invalid_member_groups:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Scenario teams cannot remove enrolled groups; reassign or remove "
+                    f"members first: {', '.join(invalid_member_groups)}"
+                ),
+            )
+        custom_injects = (
+            await session.exec(
+                select(Inject)
+                .where(col(Inject.exercise_id) == clone.id)
+                .where(col(Inject.scenario_node_id).is_(None))
+            )
+        ).all()
+        invalid_custom_groups = sorted(
+            {
+                group
+                for inject in custom_injects
+                for group in [inject.group_id, *(inject.target_teams or [])]
+                if group is not None and group not in team_ids
+            }
+        )
+        if invalid_custom_groups:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Scenario teams cannot remove groups targeted by custom injects; "
+                    f"edit those injects first: {', '.join(invalid_custom_groups)}"
+                ),
+            )
+        seeded_inject_ids = select(Inject.id).where(
+            col(Inject.exercise_id) == clone.id,
+            col(Inject.scenario_node_id).is_not(None),
+        )
+        await session.exec(
+            delete(InjectProgress).where(col(InjectProgress.inject_id).in_(seeded_inject_ids))
+        )
+        await session.exec(
+            delete(Inject)
+            .where(col(Inject.exercise_id) == clone.id)
+            .where(col(Inject.scenario_node_id).is_not(None))
+        )
         await session.exec(
             delete(ExerciseProgress).where(col(ExerciseProgress.exercise_id) == clone.id)
         )
