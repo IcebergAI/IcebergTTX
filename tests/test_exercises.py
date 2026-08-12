@@ -169,6 +169,37 @@ async def test_clone_creates_distinct_editable_draft_with_lineage(
     assert compared.status_code == 200
     assert compared.json()["changes"]["injects_added"] == []
 
+    scenario_response = await client.get(
+        f"/api/scenarios/{clone.scenario_id}", headers=_bearer(facilitator_token)
+    )
+    assert scenario_response.status_code == 200
+    edited_definition = scenario_response.json()["definition"]
+    edited_definition["title"] = "Repeat exercise edited"
+    edited = await client.put(
+        f"/api/scenarios/{clone.scenario_id}",
+        json=edited_definition,
+        headers=_bearer(facilitator_token),
+    )
+    assert edited.status_code == 200
+    assert edited.json()["id"] == clone.scenario_id
+    refreshed_clone = await client.get(
+        f"/api/exercises/{clone_id}", headers=_bearer(facilitator_token)
+    )
+    assert refreshed_clone.status_code == 200
+    assert refreshed_clone.json()["scenario_title"] == "Repeat exercise edited"
+
+
+async def test_active_exercise_llm_configuration_is_immutable(
+    client: AsyncClient, facilitator_token: str, active_exercise: Exercise
+):
+    response = await client.put(
+        f"/api/exercises/{active_exercise.id}",
+        json={"llm_enabled": not active_exercise.llm_enabled},
+        headers=_bearer(facilitator_token),
+    )
+    assert response.status_code == 409
+    assert "frozen" in response.json()["detail"]
+
 
 async def test_create_exercise_seeds_shared_and_group_injects(
     session: AsyncSession, facilitator: User

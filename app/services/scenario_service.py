@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.exercise import Exercise, ExerciseRunSnapshot
+from app.models.exercise import Exercise, ExerciseRunSnapshot, ExerciseState
 from app.models.scenario import Scenario
 from app.schemas.scenario_json import ScenarioDefinition
 
@@ -43,12 +43,19 @@ async def update_scenario(
     updated_by: int | None = None,
 ) -> Scenario:
     # Exercises capture a scenario at creation time semantically, so never rewrite
-    # an in-use definition. Preserve the collaborative library by returning a new
-    # editor-owned revision for future exercises instead of denying non-owner edits.
-    in_use = (
-        await session.exec(select(Exercise.id).where(Exercise.scenario_id == scenario.id))
-    ).first()
-    if in_use is not None:
+    # an in-use library definition. A clone is the deliberate exception: it owns a
+    # private Scenario row and is still a draft, so editing that row must update the
+    # cloned exercise's actual source rather than creating an unreferenced fork.
+    in_use = (await session.exec(select(Exercise).where(Exercise.scenario_id == scenario.id))).all()
+    private_clone_draft = (
+        len(in_use) == 1
+        and in_use[0].state == ExerciseState.draft
+        and in_use[0].cloned_from_exercise_id is not None
+        and updated_by is not None
+        and in_use[0].created_by == updated_by
+        and scenario.created_by == updated_by
+    )
+    if in_use and not private_clone_draft:
         return await create_scenario(
             session,
             definition=definition,

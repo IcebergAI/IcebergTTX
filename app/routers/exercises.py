@@ -214,6 +214,15 @@ async def update_exercise(
     # Debrief notes are the deliberate post-exercise workflow; other operational
     # settings remain frozen once an exercise is completed.
     updates = body.model_dump(exclude_unset=True)
+    if (
+        body.llm_enabled is not None
+        and ex.state != ExerciseState.draft
+        and body.llm_enabled != ex.llm_enabled
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="LLM configuration is frozen after the exercise starts",
+        )
     if ex.state == ExerciseState.completed and set(updates) - {"debrief_notes"}:
         require_operational_mutability(ex)
     ex.sqlmodel_update(updates)
