@@ -176,6 +176,7 @@ async def test_clone_creates_distinct_editable_draft_with_lineage(
     edited_definition = scenario_response.json()["definition"]
     edited_definition["title"] = "Repeat exercise edited"
     edited_definition["injects"][0]["title"] = "Edited first inject"
+    edited_definition["injects"][1]["release_at_minutes"] = 17
     before_injects = await client.get(
         f"/api/exercises/{clone_id}/injects", headers=_bearer(facilitator_token)
     )
@@ -223,6 +224,8 @@ async def test_clone_creates_distinct_editable_draft_with_lineage(
     }
     edited_seed = next(row for row in injects.json() if row["id"] == seeded_id)
     assert edited_seed["release_offset_minutes"] == 42
+    edited_default = next(row for row in injects.json() if row["scenario_node_id"] == "inject_02")
+    assert edited_default["release_offset_minutes"] == 17
 
 
 async def test_active_exercise_llm_configuration_is_immutable(

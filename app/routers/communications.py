@@ -2,17 +2,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.dependencies import get_current_user, require_role
 from app.models.communication import CommDirection, Communication
-from app.models.exercise import ExerciseState
+from app.models.exercise import Exercise, ExerciseState
 from app.models.user import User, UserRole
 from app.schemas.api import CommunicationPublic, UnreadCount
 from app.services.access_control import (
     exercise_group_for_user,
     require_exercise_access,
+    require_exercise_owner,
     require_operational_mutability,
 )
 from app.services.communication_service import (
@@ -50,6 +52,13 @@ class InjectCommRequest(BaseModel):
     external_entity: str
     subject: str
     body: str
+    visible_to_teams: list[str] | None = None
+
+
+class UpdateInjectCommRequest(BaseModel):
+    external_entity: str | None = None
+    subject: str | None = None
+    body: str | None = None
     visible_to_teams: list[str] | None = None
 
 
@@ -175,7 +184,20 @@ async def inject_comm(
     Intentionally has no exercise-state guard (unlike participant send_comm, #40):
     facilitators may seed simulated inbound comms during draft/paused setup.
     """
-    exercise = await require_exercise_access(session, exercise_id, current_user)
+    await require_exercise_access(session, exercise_id, current_user)
+    # Serialize validation and insertion with scenario team edits. Without this
+    # lock a request can resolve the old team set, wait on the FK, and commit an
+    # audience that the newly committed clone definition no longer contains.
+    exercise = (
+        await session.exec(
+            select(Exercise)
+            .where(col(Exercise.id) == exercise_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if exercise is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
     require_operational_mutability(exercise)
     visible_to_teams = (
         await validate_team_ids(session, exercise, body.visible_to_teams, field="visible_to_teams")
@@ -193,6 +215,94 @@ async def inject_comm(
         audience_explicit=body.visible_to_teams is not None,
     )
     return await comm_payload(comm, session)
+
+
+@router.put("/{comm_id}", response_model=CommunicationPublic)
+async def update_injected_comm(
+    exercise_id: int,
+    comm_id: int,
+    body: UpdateInjectCommRequest,
+    current_user: FacilitatorDep,
+    session: SessionDep,
+):
+    """Repair a facilitator-created inbound draft communication before launch."""
+    await require_exercise_owner(session, exercise_id, current_user)
+    exercise = (
+        await session.exec(
+            select(Exercise)
+            .where(col(Exercise.id) == exercise_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if exercise is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+    require_operational_mutability(exercise)
+    if exercise.state != ExerciseState.draft:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Injected communications can only be edited while the exercise is a draft",
+        )
+    communication = await _get_comm_or_404(session, exercise_id, comm_id)
+    if communication.direction != CommDirection.inbound or communication.triggered_by_inject_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only facilitator-created inbound communications can be edited",
+        )
+    fields = body.model_dump(exclude_unset=True)
+    if "external_entity" in fields:
+        communication.external_entity = body.external_entity
+    if "subject" in fields:
+        communication.subject = body.subject or ""
+    if "body" in fields:
+        communication.body = body.body or ""
+    if "visible_to_teams" in fields:
+        visible = await validate_team_ids(
+            session, exercise, body.visible_to_teams, field="visible_to_teams"
+        )
+        communication.visible_to_teams = (
+            visible or await all_team_ids_for_exercise(session, exercise_id) or None
+        )
+        communication.audience_explicit = body.visible_to_teams is not None
+    session.add(communication)
+    await session.commit()
+    await session.refresh(communication)
+    return await comm_payload(communication, session)
+
+
+@router.delete("/{comm_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_injected_comm(
+    exercise_id: int,
+    comm_id: int,
+    current_user: FacilitatorDep,
+    session: SessionDep,
+):
+    """Remove a facilitator-created inbound draft communication."""
+    await require_exercise_owner(session, exercise_id, current_user)
+    exercise = (
+        await session.exec(
+            select(Exercise)
+            .where(col(Exercise.id) == exercise_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if exercise is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
+    require_operational_mutability(exercise)
+    if exercise.state != ExerciseState.draft:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Injected communications can only be deleted while the exercise is a draft",
+        )
+    communication = await _get_comm_or_404(session, exercise_id, comm_id)
+    if communication.direction != CommDirection.inbound or communication.triggered_by_inject_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only facilitator-created inbound communications can be deleted",
+        )
+    await session.delete(communication)
+    await session.commit()
 
 
 # Must stay ahead of GET /{comm_id}: FastAPI matches routes in declaration order,

@@ -23,6 +23,7 @@ from app.services.exercise_service import enrol_member
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 async def _send(
     client: AsyncClient,
     token: str,
@@ -78,9 +79,7 @@ async def test_node_triggered_comm_is_idempotent_across_group_injects(monkeypatc
     # The comm frame is now a CommunicationCreated subscriber (#212). Patch the registry:
     # the module attribute is not what dispatch looks up.
     broadcast = AsyncMock()
-    monkeypatch.setitem(
-        domain_events._subscribers, domain_events.CommunicationCreated, [broadcast]
-    )
+    monkeypatch.setitem(domain_events._subscribers, domain_events.CommunicationCreated, [broadcast])
     try:
         async with AsyncSession(engine, expire_on_commit=False) as seed:
             owner = User(
@@ -183,10 +182,11 @@ async def test_node_triggered_comm_is_idempotent_across_group_injects(monkeypatc
 
 # ── Send ──────────────────────────────────────────────────────────────────────
 
+
 async def test_send_outbound(
     client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    r = (await _send(client, participant_token, active_exercise.id))
+    r = await _send(client, participant_token, active_exercise.id)
     assert r.status_code == 201
     data = r.json()
     assert data["direction"] == "outbound"
@@ -232,10 +232,47 @@ async def test_facilitator_inject_comm_allowed_in_draft(
     assert r.json()["direction"] == "inbound"
 
 
+async def test_draft_injected_communication_can_be_repaired_before_team_edit(
+    client: AsyncClient,
+    facilitator_token: str,
+    draft_exercise: Exercise,
+):
+    """Explicit audiences must have an API repair path before clone team changes."""
+    created = await _inject_comm(
+        client,
+        facilitator_token,
+        draft_exercise.id,
+        visible_to_teams=["it_ops"],
+    )
+    assert created.status_code == 201
+    comm_id = created.json()["id"]
+
+    # The facilitator can repair an explicit audience while the draft is editable.
+    updated = await client.put(
+        f"/api/exercises/{draft_exercise.id}/communications/{comm_id}",
+        json={"visible_to_teams": ["legal"], "subject": "Updated advisory"},
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["visible_to_teams"] == ["legal"]
+    assert updated.json()["subject"] == "Updated advisory"
+
+    deleted = await client.delete(
+        f"/api/exercises/{draft_exercise.id}/communications/{comm_id}",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert deleted.status_code == 204
+    missing = await client.get(
+        f"/api/exercises/{draft_exercise.id}/communications/{comm_id}",
+        headers={"Authorization": f"Bearer {facilitator_token}"},
+    )
+    assert missing.status_code == 404
+
+
 async def test_inject_inbound_facilitator(
     client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    r = (await _inject_comm(client, facilitator_token, active_exercise.id))
+    r = await _inject_comm(client, facilitator_token, active_exercise.id)
     assert r.status_code == 201
     data = r.json()
     assert data["direction"] == "inbound"
@@ -246,11 +283,12 @@ async def test_inject_inbound_facilitator(
 async def test_inject_inbound_participant_forbidden(
     client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    r = (await _inject_comm(client, participant_token, active_exercise.id))
+    r = await _inject_comm(client, participant_token, active_exercise.id)
     assert r.status_code == 403
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
+
 
 async def test_list_comms_all_visible(
     client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
@@ -272,10 +310,15 @@ async def test_visibility_filtering(
     client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
     """Comm visible only to 'legal' should NOT appear for it_ops participant."""
-    (await _inject_comm(
-        client, facilitator_token, active_exercise.id,
-        subject="Legal Only", visible_to_teams=["legal"]
-    ))
+    (
+        await _inject_comm(
+            client,
+            facilitator_token,
+            active_exercise.id,
+            subject="Legal Only",
+            visible_to_teams=["legal"],
+        )
+    )
     r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {participant_token}"},  # participant is it_ops
@@ -289,10 +332,15 @@ async def test_visibility_own_team(
     client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
     """Comm targeted to it_ops is visible to the it_ops participant."""
-    (await _inject_comm(
-        client, facilitator_token, active_exercise.id,
-        subject="IT Ops Only", visible_to_teams=["it_ops"]
-    ))
+    (
+        await _inject_comm(
+            client,
+            facilitator_token,
+            active_exercise.id,
+            subject="IT Ops Only",
+            visible_to_teams=["it_ops"],
+        )
+    )
     r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {participant_token}"},
@@ -323,7 +371,7 @@ async def test_participant_does_not_see_other_participant_outbound(
     legal_token = create_access_token(subject=legal.email, role=legal.role.value)
 
     (await _send(client, participant_token, active_exercise.id, subject="IT Ops outbound"))
-    legal_r = (await _send(client, legal_token, active_exercise.id, subject="Legal outbound"))
+    legal_r = await _send(client, legal_token, active_exercise.id, subject="Legal outbound")
     assert legal_r.status_code == 201
     assert legal_r.json()["sender_team"] == "legal"
 
@@ -366,13 +414,13 @@ async def test_participant_can_send_outbound_to_team(
     await enrol_member(session, exercise=active_exercise, user_id=legal.id, group_id="legal")
     legal_token = create_access_token(subject=legal.email, role=legal.role.value)
 
-    created = (await _send(
+    created = await _send(
         client,
         participant_token,
         active_exercise.id,
         subject="Legal help needed",
         visible_to_teams=["legal"],
-    ))
+    )
     assert created.status_code == 201
     payload = created.json()
     assert payload["external_entity"] is None
@@ -397,9 +445,7 @@ async def test_participant_can_send_outbound_to_team(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {facilitator_token}"},
     )
-    facilitator_comm = next(
-        c for c in facilitator_r.json() if c["subject"] == "Legal help needed"
-    )
+    facilitator_comm = next(c for c in facilitator_r.json() if c["subject"] == "Legal help needed")
     assert facilitator_comm["sender_team"] == "it_ops"
     assert facilitator_comm["visible_to_teams"] == ["legal"]
 
@@ -407,23 +453,28 @@ async def test_participant_can_send_outbound_to_team(
 async def test_participant_send_to_unknown_team_rejected(
     client: AsyncClient, participant_token: str, active_exercise: Exercise
 ):
-    r = (await _send(
+    r = await _send(
         client,
         participant_token,
         active_exercise.id,
         subject="Unknown team",
         visible_to_teams=["not_a_team"],
-    ))
+    )
     assert r.status_code == 422
 
 
 async def test_facilitator_sees_all_regardless_of_visibility(
     client: AsyncClient, facilitator_token: str, active_exercise: Exercise
 ):
-    (await _inject_comm(
-        client, facilitator_token, active_exercise.id,
-        subject="Secret", visible_to_teams=["legal"]
-    ))
+    (
+        await _inject_comm(
+            client,
+            facilitator_token,
+            active_exercise.id,
+            subject="Secret",
+            visible_to_teams=["legal"],
+        )
+    )
     r = await client.get(
         f"/api/exercises/{active_exercise.id}/communications",
         headers={"Authorization": f"Bearer {facilitator_token}"},
@@ -434,6 +485,7 @@ async def test_facilitator_sees_all_regardless_of_visibility(
 
 
 # ── Mark read ─────────────────────────────────────────────────────────────────
+
 
 async def test_get_comm_is_side_effect_free(
     client: AsyncClient,
@@ -517,9 +569,7 @@ async def test_read_state_is_private_to_the_current_viewer(
         )
     ).json()
 
-    assert next(item for item in facilitator_list if item["id"] == comm["id"])[
-        "is_read"
-    ] is True
+    assert next(item for item in facilitator_list if item["id"] == comm["id"])["is_read"] is True
     participant_comm = next(item for item in participant_list if item["id"] == comm["id"])
     assert participant_comm["is_read"] is False
     assert participant_comm["read_at"] is None
@@ -583,9 +633,7 @@ async def test_concurrent_read_receipts_are_lossless_and_cascade():
             definition = ScenarioDefinition(
                 title="Receipt concurrency",
                 start_inject_id="opening",
-                injects=[
-                    InjectNode(id="opening", title="Opening", content="Opening")
-                ],
+                injects=[InjectNode(id="opening", title="Opening", content="Opening")],
             )
             scenario = Scenario(
                 title=definition.title,
@@ -637,9 +685,7 @@ async def test_concurrent_read_receipts_are_lossless_and_cascade():
         async with AsyncSession(engine, expire_on_commit=False) as verify:
             receipts = (
                 await verify.exec(
-                    select(CommunicationRead).where(
-                        CommunicationRead.communication_id == comm_id
-                    )
+                    select(CommunicationRead).where(CommunicationRead.communication_id == comm_id)
                 )
             ).all()
             assert {receipt.user_id for receipt in receipts} == {reader_a_id, reader_b_id}
@@ -650,9 +696,7 @@ async def test_concurrent_read_receipts_are_lossless_and_cascade():
             await verify.commit()
             remaining = (
                 await verify.exec(
-                    select(CommunicationRead).where(
-                        CommunicationRead.communication_id == comm_id
-                    )
+                    select(CommunicationRead).where(CommunicationRead.communication_id == comm_id)
                 )
             ).all()
             assert [receipt.user_id for receipt in remaining] == [reader_b_id]
@@ -663,9 +707,7 @@ async def test_concurrent_read_receipts_are_lossless_and_cascade():
             await verify.commit()
             assert (
                 await verify.exec(
-                    select(CommunicationRead).where(
-                        CommunicationRead.communication_id == comm_id
-                    )
+                    select(CommunicationRead).where(CommunicationRead.communication_id == comm_id)
                 )
             ).all() == []
             exercise_id = None
@@ -702,6 +744,7 @@ async def test_get_comm_not_found(
 
 # ── WS broadcast ──────────────────────────────────────────────────────────────
 
+
 async def test_ws_receives_communication(
     client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
@@ -726,10 +769,15 @@ async def test_ws_visibility_filtered_broadcast(
         client,
         headers={"origin": "http://testserver", "cookie": f"access_token={participant_token}"},
     ) as ws:
-        (await _inject_comm(
-            client, facilitator_token, active_exercise.id,
-            subject="Legal Only WS", visible_to_teams=["legal"]
-        ))
+        (
+            await _inject_comm(
+                client,
+                facilitator_token,
+                active_exercise.id,
+                subject="Legal Only WS",
+                visible_to_teams=["legal"],
+            )
+        )
         await ws.send_json({"type": "ping"})
         msg = await ws.receive_json()
 
@@ -761,13 +809,15 @@ async def test_ws_team_outbound_reaches_recipient_team(
         client,
         headers={"origin": "http://testserver", "cookie": f"access_token={legal_token}"},
     ) as ws:
-        (await _send(
-            client,
-            participant_token,
-            active_exercise.id,
-            subject="WS legal help",
-            visible_to_teams=["legal"],
-        ))
+        (
+            await _send(
+                client,
+                participant_token,
+                active_exercise.id,
+                subject="WS legal help",
+                visible_to_teams=["legal"],
+            )
+        )
         msg = await ws.receive_json()
 
     assert msg["type"] == "communication_received"
@@ -780,12 +830,18 @@ async def test_unread_count_respects_team_visibility(
 ):
     """The badge must not count comms the viewer isn't allowed to read."""
     await _inject_comm(
-        client, facilitator_token, active_exercise.id,
-        subject="IT Ops Only", visible_to_teams=["it_ops"],
+        client,
+        facilitator_token,
+        active_exercise.id,
+        subject="IT Ops Only",
+        visible_to_teams=["it_ops"],
     )
     await _inject_comm(
-        client, facilitator_token, active_exercise.id,
-        subject="Legal Only", visible_to_teams=["legal"],
+        client,
+        facilitator_token,
+        active_exercise.id,
+        subject="Legal Only",
+        visible_to_teams=["legal"],
     )
 
     r = await client.get(
@@ -807,8 +863,11 @@ async def test_unread_count_drops_once_a_comm_is_read(
     client: AsyncClient, facilitator_token: str, participant_token: str, active_exercise: Exercise
 ):
     resp = await _inject_comm(
-        client, facilitator_token, active_exercise.id,
-        subject="Advisory", visible_to_teams=["it_ops"],
+        client,
+        facilitator_token,
+        active_exercise.id,
+        subject="Advisory",
+        visible_to_teams=["it_ops"],
     )
     comm_id = resp.json()["id"]
     headers = {"Authorization": f"Bearer {participant_token}"}
@@ -829,6 +888,7 @@ async def test_unread_count_drops_once_a_comm_is_read(
 
 
 # ── Batched sender-team resolution (#210) ─────────────────────────────────────
+
 
 async def _seed_unresolved_comms(
     session: AsyncSession, exercise_id: int, sender_id: int, count: int, prefix: str

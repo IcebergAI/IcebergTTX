@@ -7,13 +7,13 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ValidationError
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from starlette.datastructures import UploadFile
 
 from app.database import get_session
 from app.dependencies import get_current_user, require_role
-from app.models.exercise import ExerciseState
+from app.models.exercise import Exercise, ExerciseState
 from app.models.inject import Inject, InjectState
 from app.models.user import User, UserRole
 from app.schemas.api import InjectPublic
@@ -239,7 +239,20 @@ async def create(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    exercise = await require_exercise_access(session, exercise_id, current_user)
+    await require_exercise_access(session, exercise_id, current_user)
+    # Scenario edits and child creation serialize on the same Exercise row.
+    # Lock before resolving team IDs so a child cannot validate the old definition,
+    # wait on its FK insert, and commit after a team replacement.
+    exercise = (
+        await session.exec(
+            select(Exercise)
+            .where(col(Exercise.id) == exercise_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if exercise is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
     require_operational_mutability(exercise)
     target_teams = await validate_team_ids(
         session, exercise, body.target_teams, field="target_teams"
@@ -386,6 +399,7 @@ async def update_schedule(
             detail=f"Inject is '{inject.state}', cannot schedule",
         )
     inject.release_offset_minutes = body.release_offset_minutes
+    inject.release_offset_explicit = True
     session.add(inject)
     record(session, InjectUpdated(exercise_id=exercise_id, inject_id=inject_id))
     # Enqueued in the same transaction as the new offset (only affects a running

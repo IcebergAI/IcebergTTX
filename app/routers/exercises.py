@@ -408,7 +408,17 @@ async def list_members(exercise_id: int, current_user: CurrentUserDep, session: 
 async def add_member(
     exercise_id: int, body: EnrolMemberRequest, current_user: FacilitatorDep, session: SessionDep
 ):
-    ex = await require_exercise_owner(session, exercise_id, current_user)
+    await require_exercise_owner(session, exercise_id, current_user)
+    ex = (
+        await session.exec(
+            select(Exercise)
+            .where(col(Exercise.id) == exercise_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if ex is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
     require_operational_mutability(ex)
     member = await enrol_member(session, exercise=ex, user_id=body.user_id, group_id=body.group_id)
     audit_service.emit(
@@ -429,7 +439,17 @@ async def patch_member(
     current_user: FacilitatorDep,
     session: SessionDep,
 ):
-    ex = await require_exercise_owner(session, exercise_id, current_user)
+    await require_exercise_owner(session, exercise_id, current_user)
+    ex = (
+        await session.exec(
+            select(Exercise)
+            .where(col(Exercise.id) == exercise_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if ex is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
     require_operational_mutability(ex)
     member = await update_member_group(
         session, exercise=ex, user_id=user_id, group_id=body.group_id
@@ -448,7 +468,17 @@ async def patch_member(
 async def delete_member(
     exercise_id: int, user_id: int, current_user: FacilitatorDep, session: SessionDep
 ):
-    ex = await require_exercise_owner(session, exercise_id, current_user)
+    await require_exercise_owner(session, exercise_id, current_user)
+    ex = (
+        await session.exec(
+            select(Exercise)
+            .where(col(Exercise.id) == exercise_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if ex is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found")
     require_operational_mutability(ex)
     await remove_member(session, exercise=ex, user_id=user_id)
     audit_service.emit(

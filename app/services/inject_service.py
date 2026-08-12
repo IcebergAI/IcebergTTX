@@ -361,8 +361,12 @@ async def sync_seeded_injects_from_scenario(
                 existing.group_id = group_id
                 existing.sequence_order = sequence_order
                 existing.scenario_node_id = node.id
-                # Keep release_offset_minutes: a draft facilitator may have
-                # deliberately overridden the scenario default.
+                # New materialized rows follow the scenario until a facilitator
+                # explicitly changes their schedule. Legacy rows have NULL here
+                # because their historical intent is unknowable; preserve those
+                # values rather than silently destroying an old override.
+                if existing.release_offset_explicit is False:
+                    existing.release_offset_minutes = node.release_at_minutes
                 session.add(existing)
                 continue
             await create_inject(

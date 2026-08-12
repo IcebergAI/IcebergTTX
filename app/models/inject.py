@@ -39,6 +39,9 @@ class Inject(SQLModel, table=True):
     # auto-releases. None = manual-only ("pull not push" default). Seeded from the
     # scenario node's `release_at_minutes`, but runtime-mutable (set/cancel per inject).
     release_offset_minutes: int | None = Field(default=None)
+    # False follows the scenario definition; True records an explicit facilitator
+    # override (including clearing back to manual release). None is legacy unknown.
+    release_offset_explicit: bool | None = Field(default=False, nullable=True)
     state: InjectState = Field(default=InjectState.pending)
     released_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     released_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
