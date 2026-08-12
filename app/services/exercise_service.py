@@ -29,6 +29,7 @@ from app.services.scenario_service import (
     definition_for_exercise,
     export_definition,
     snapshot_content_sha256,
+    snapshot_for_exercise,
 )
 from app.services.team_service import scenario_team_ids as definition_team_ids
 from app.services.team_service import validate_team_ids as validate_definition_team_ids
@@ -57,6 +58,18 @@ async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> Exe
     ).first()
     if existing is not None:
         return existing
+    # Lock in the same Scenario -> Exercise order used by scenario editing and
+    # creation. A launch/edit race therefore serializes instead of deadlocking.
+    scenario = (
+        await session.exec(
+            select(Scenario).where(Scenario.id == exercise.scenario_id).with_for_update()
+        )
+    ).first()
+    if scenario is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Exercise scenario was not found",
+        )
     # Re-read after the state CAS while holding the same row lock. A concurrent
     # draft-settings update either committed before this point (and is captured)
     # or waits until launch completes; no mixed configuration can be recorded.
@@ -69,16 +82,6 @@ async def _freeze_run_snapshot(session: AsyncSession, exercise: Exercise) -> Exe
         )
     ).first()
     assert locked_exercise is not None
-    scenario = (
-        await session.exec(
-            select(Scenario).where(Scenario.id == exercise.scenario_id).with_for_update()
-        )
-    ).first()
-    if scenario is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Exercise scenario was not found",
-        )
     assert scenario.id is not None
     definition = export_definition(scenario)
     definition_json = canonical_definition_json(definition)
@@ -245,6 +248,92 @@ async def clone_exercise_as_draft(
     assert clone.id is not None
     try:
         await seed_injects_from_scenario(session, clone.id, clone_scenario)
+        # A frozen run contains the materialized launch configuration, not just
+        # the reusable scenario definition. Restore authored injects and explicit
+        # schedule overrides so cloning a run is a faithful, editable draft.
+        snapshot = await snapshot_for_exercise(session, source.id)
+        snapshot_configuration = (
+            json.loads(snapshot.configuration_json) if snapshot is not None else {}
+        )
+        snapshot_injects = snapshot_configuration.get("injects", [])
+        if not isinstance(snapshot_injects, list):
+            snapshot_injects = []
+        source_injects = (
+            await session.exec(
+                select(Inject).where(Inject.exercise_id == source.id).order_by(col(Inject.id))
+            )
+        ).all()
+        if not snapshot_injects:
+            snapshot_injects = [
+                {
+                    "scenario_node_id": inject.scenario_node_id,
+                    "scenario_seeded": inject.scenario_seeded,
+                    "title": inject.title,
+                    "content": inject.content,
+                    "target_teams": inject.target_teams,
+                    "group_id": inject.group_id,
+                    "sequence_order": inject.sequence_order,
+                    "release_offset_minutes": inject.release_offset_minutes,
+                    "release_offset_explicit": inject.release_offset_explicit,
+                    "attachment_filename": inject.attachment_filename,
+                    "attachment_content_type": inject.attachment_content_type,
+                    "attachment_path": inject.attachment_path,
+                    "attachment_size": inject.attachment_size,
+                }
+                for inject in source_injects
+            ]
+        clone_injects = (
+            await session.exec(
+                select(Inject).where(Inject.exercise_id == clone.id).order_by(col(Inject.id))
+            )
+        ).all()
+        seeded_by_identity = {
+            (inject.scenario_node_id, inject.group_id): inject
+            for inject in clone_injects
+            if inject.scenario_seeded
+        }
+        from app.services.inject_service import AttachmentMeta, create_inject
+
+        for spec in snapshot_injects:
+            if not isinstance(spec, dict):
+                continue
+            identity = (spec.get("scenario_node_id"), spec.get("group_id"))
+            if spec.get("scenario_seeded"):
+                inject = seeded_by_identity.get(identity)
+                if inject is None:
+                    continue
+                inject.title = str(spec.get("title", inject.title))
+                inject.content = str(spec.get("content", inject.content))
+                inject.target_teams = spec.get("target_teams")
+                inject.sequence_order = int(spec.get("sequence_order", inject.sequence_order))
+                inject.release_offset_minutes = spec.get("release_offset_minutes")
+                inject.release_offset_explicit = spec.get("release_offset_explicit", False)
+                session.add(inject)
+                continue
+            attachment = None
+            if spec.get("attachment_path"):
+                attachment = AttachmentMeta(
+                    filename=str(spec.get("attachment_filename") or "attachment"),
+                    content_type=str(
+                        spec.get("attachment_content_type") or "application/octet-stream"
+                    ),
+                    path=str(spec["attachment_path"]),
+                    size=int(spec.get("attachment_size") or 0),
+                )
+            await create_inject(
+                session,
+                exercise_id=clone.id,
+                title=str(spec.get("title", "Untitled inject")),
+                content=str(spec.get("content", "")),
+                scenario_node_id=spec.get("scenario_node_id"),
+                target_teams=spec.get("target_teams"),
+                group_id=spec.get("group_id"),
+                sequence_order=int(spec.get("sequence_order", 0)),
+                release_offset_minutes=spec.get("release_offset_minutes"),
+                attachment=attachment,
+                scenario_seeded=False,
+                commit=False,
+            )
         await seed_progression(
             session,
             exercise_id=clone.id,

@@ -1,7 +1,7 @@
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel as _BaseModel
 from pydantic import ValidationError
@@ -103,7 +103,11 @@ async def get_scenario(scenario_id: int, _: FacilitatorDep, session: SessionDep)
 
 @router.put("/{scenario_id}", response_model=ScenarioDetail)
 async def update(
-    scenario_id: int, body: ScenarioDefinition, current_user: FacilitatorDep, session: SessionDep
+    scenario_id: int,
+    body: ScenarioDefinition,
+    current_user: FacilitatorDep,
+    session: SessionDep,
+    exercise_id: int | None = Query(default=None, description="Clone draft to fork when shared"),
 ):
     scenario = await _get_or_404(session, scenario_id)
     assert current_user.id is not None
@@ -112,6 +116,7 @@ async def update(
         scenario,
         definition=body,
         updated_by=current_user.id,
+        target_exercise_id=exercise_id,
     )
     return _scenario_detail(scenario)
 

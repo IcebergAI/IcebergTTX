@@ -42,6 +42,7 @@ async def update_scenario(
     *,
     definition: ScenarioDefinition,
     updated_by: int | None = None,
+    target_exercise_id: int | None = None,
 ) -> Scenario:
     # Exercises capture a scenario at creation time semantically, so never rewrite
     # an in-use library definition. A clone is the deliberate exception: it owns a
@@ -85,20 +86,40 @@ async def update_scenario(
         and not private_clone_draft
     )
     if private_clone_reused:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This clone scenario is already used by another exercise; edit the "
-                "clone after creating a distinct scenario copy"
-            ),
+        target = next((exercise for exercise in in_use if exercise.id == target_exercise_id), None)
+        if target is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This clone scenario is shared by multiple drafts; supply the target "
+                    "exercise_id to fork and edit that clone"
+                ),
+            )
+        previous_definition = export_definition(scenario)
+        fork = Scenario(
+            title=scenario.title,
+            description=scenario.description,
+            version=scenario.version,
+            tags=scenario.tags,
+            definition=scenario.definition,
+            created_by=updated_by or scenario.created_by,
         )
+        session.add(fork)
+        await session.flush()
+        assert fork.id is not None
+        target.scenario_id = fork.id
+        session.add(target)
+        scenario = fork
+        in_use = [target]
+        private_clone_draft = True
     if in_use and not private_clone_draft:
         return await create_scenario(
             session,
             definition=definition,
             created_by=updated_by or scenario.created_by,
         )
-    previous_definition = export_definition(scenario)
+    if not private_clone_reused:
+        previous_definition = export_definition(scenario)
     scenario.title = definition.title
     scenario.description = definition.description
     scenario.tags = definition.tags or None
