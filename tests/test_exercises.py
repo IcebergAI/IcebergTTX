@@ -182,11 +182,14 @@ async def test_clone_creates_distinct_editable_draft_with_lineage(
     )
     assert edited.status_code == 200
     assert edited.json()["id"] == clone.scenario_id
-    refreshed_clone = await client.get(
-        f"/api/exercises/{clone_id}", headers=_bearer(facilitator_token)
+    assert edited.json()["title"] == "Repeat exercise edited"
+    # Single-exercise responses intentionally leave the denormalised list-view
+    # scenario_title unset; the scenario endpoint is the source of truth here.
+    refreshed_scenario = await client.get(
+        f"/api/scenarios/{clone.scenario_id}", headers=_bearer(facilitator_token)
     )
-    assert refreshed_clone.status_code == 200
-    assert refreshed_clone.json()["scenario_title"] == "Repeat exercise edited"
+    assert refreshed_scenario.status_code == 200
+    assert refreshed_scenario.json()["title"] == "Repeat exercise edited"
 
 
 async def test_active_exercise_llm_configuration_is_immutable(
