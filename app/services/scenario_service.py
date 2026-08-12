@@ -83,10 +83,7 @@ async def update_scenario(
         from app.models.communication import Communication
         from app.models.exercise import ExerciseMember, ExerciseProgress
         from app.models.inject import Inject
-        from app.services.inject_service import (
-            seed_injects_from_scenario,
-            sync_seeded_injects_from_scenario,
-        )
+        from app.services.inject_service import sync_seeded_injects_from_scenario
         from app.services.progression_service import seed_progression
 
         clone = in_use[0]
@@ -167,7 +164,6 @@ async def update_scenario(
         clone.current_node_id = definition.start_inject_id
         session.add(clone)
         await session.flush()
-        await seed_injects_from_scenario(session, clone.id, scenario)
         await seed_progression(
             session,
             exercise_id=clone.id,
