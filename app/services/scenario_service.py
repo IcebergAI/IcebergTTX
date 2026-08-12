@@ -219,6 +219,13 @@ def material_definition_changes(
     """
     old_nodes = {node.id: node.model_dump(mode="json") for node in earlier.injects}
     new_nodes = {node.id: node.model_dump(mode="json") for node in later.injects}
+    # The materializer uses definition order as the fallback sequence for nodes
+    # without an explicit sequence_order. Preserve this as an explicit comparison
+    # result so a facilitator cannot miss a runnable-order change that leaves each
+    # node's individual payload unchanged.
+    inject_order_changed = [node.id for node in earlier.injects] != [
+        node.id for node in later.injects
+    ]
     old_teams = {team.id: team.model_dump(mode="json") for team in earlier.participant_teams}
     new_teams = {team.id: team.model_dump(mode="json") for team in later.participant_teams}
     return {
@@ -229,6 +236,7 @@ def material_definition_changes(
             for node_id in old_nodes.keys() & new_nodes.keys()
             if old_nodes[node_id] != new_nodes[node_id]
         ),
+        "inject_order_changed": inject_order_changed,
         "teams_added": sorted(new_teams.keys() - old_teams.keys()),
         "teams_removed": sorted(old_teams.keys() - new_teams.keys()),
         "teams_changed": sorted(

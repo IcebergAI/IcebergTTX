@@ -26,7 +26,7 @@ from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services import domain_events
 from app.services.exercise_service import transition_state
 from app.services.progression_service import inject_audience_contexts
-from app.services.scenario_service import definition_for_exercise
+from app.services.scenario_service import definition_for_exercise, material_definition_changes
 from app.services.ws_manager import manager
 
 
@@ -63,6 +63,24 @@ def test_targeted_shared_inject_excludes_non_target_participant_contexts():
         for index, group in enumerate(("it_ops", "legal", "finance"), start=1)
     ]
     assert inject_audience_contexts(inject, members) == {"it_ops", "legal"}
+
+
+def test_compare_reports_material_inject_reordering():
+    earlier = ScenarioDefinition(
+        title="Order",
+        participant_teams=[],
+        injects=[
+            InjectNode(id="first", title="First", content="1"),
+            InjectNode(id="second", title="Second", content="2"),
+        ],
+        start_inject_id="first",
+    )
+    later = earlier.model_copy(update={"injects": list(reversed(earlier.injects))})
+
+    changes = material_definition_changes(earlier, later)
+
+    assert changes["inject_order_changed"] is True
+    assert changes["injects_changed"] == []
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
