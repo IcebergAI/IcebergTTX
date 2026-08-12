@@ -66,6 +66,7 @@ async def _get_or_404(session: AsyncSession, scenario_id: int) -> Scenario:
 
 # ── List ──────────────────────────────────────────────────────────────────────
 
+
 @router.get("", response_model=list[ScenarioSummary])
 async def list_scenarios(_: FacilitatorDep, session: SessionDep):
     scenarios = (await session.exec(select(Scenario))).all()
@@ -73,6 +74,7 @@ async def list_scenarios(_: FacilitatorDep, session: SessionDep):
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
+
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=ScenarioDetail)
 async def create(body: ScenarioDefinition, current_user: FacilitatorDep, session: SessionDep):
@@ -82,6 +84,7 @@ async def create(body: ScenarioDefinition, current_user: FacilitatorDep, session
 
 
 # ── Import from JSON body ─────────────────────────────────────────────────────
+
 
 @router.post("/import", status_code=status.HTTP_201_CREATED, response_model=ScenarioDetail)
 async def import_scenario(body: _ImportBody, current_user: FacilitatorDep, session: SessionDep):
@@ -94,12 +97,14 @@ async def import_scenario(body: _ImportBody, current_user: FacilitatorDep, sessi
 
 # ── Get ───────────────────────────────────────────────────────────────────────
 
+
 @router.get("/{scenario_id}", response_model=ScenarioDetail)
 async def get_scenario(scenario_id: int, _: FacilitatorDep, session: SessionDep):
     return _scenario_detail(await _get_or_404(session, scenario_id))
 
 
 # ── Update ────────────────────────────────────────────────────────────────────
+
 
 @router.put("/{scenario_id}", response_model=ScenarioDetail)
 async def update(
@@ -123,6 +128,7 @@ async def update(
 
 # ── Delete ────────────────────────────────────────────────────────────────────
 
+
 @router.delete("/{scenario_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete(scenario_id: int, _: FacilitatorDep, session: SessionDep):
     scenario = await _get_or_404(session, scenario_id)
@@ -140,11 +146,13 @@ async def delete(scenario_id: int, _: FacilitatorDep, session: SessionDep):
 
 # ── Export as downloadable JSON ───────────────────────────────────────────────
 
+
 @router.get("/{scenario_id}/export")
 async def export(scenario_id: int, _: FacilitatorDep, session: SessionDep):
     scenario = await _get_or_404(session, scenario_id)
     definition = export_definition(scenario)
     import re
+
     safe = re.sub(r"[^\w\-]", "_", scenario.title.lower())
     filename = f"{safe}.json"
     return JSONResponse(
@@ -154,6 +162,7 @@ async def export(scenario_id: int, _: FacilitatorDep, session: SessionDep):
 
 
 # ── Validate ──────────────────────────────────────────────────────────────────
+
 
 @router.get("/{scenario_id}/validate")
 async def validate(scenario_id: int, _: FacilitatorDep, session: SessionDep):

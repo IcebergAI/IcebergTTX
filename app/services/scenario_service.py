@@ -85,6 +85,7 @@ async def update_scenario(
         )
         and not private_clone_draft
     )
+    previous_definition = export_definition(scenario)
     if private_clone_reused:
         target = next((exercise for exercise in in_use if exercise.id == target_exercise_id), None)
         if target is None:
@@ -95,7 +96,6 @@ async def update_scenario(
                     "exercise_id to fork and edit that clone"
                 ),
             )
-        previous_definition = export_definition(scenario)
         fork = Scenario(
             title=scenario.title,
             description=scenario.description,
@@ -118,8 +118,6 @@ async def update_scenario(
             definition=definition,
             created_by=updated_by or scenario.created_by,
         )
-    if not private_clone_reused:
-        previous_definition = export_definition(scenario)
     scenario.title = definition.title
     scenario.description = definition.description
     scenario.tags = definition.tags or None
