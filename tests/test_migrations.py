@@ -264,15 +264,139 @@ async def test_launch_snapshot_migration_preserves_legacy_uncertainty(empty_data
             }
             assert origins == {"Legacy active": None, "Legacy draft": False}
 
+        # A previous-version replica knows only the lifecycle state. After the schema
+        # migration its draft -> active write must fail closed rather than create a new
+        # run with pending provenance and no snapshot.
+        with pytest.raises(asyncpg.RaiseError, match="provenance is inconsistent"):
+            await connection.execute(
+                """
+                UPDATE exercise
+                SET state = 'active'::exercisestate, started_at = now()
+                WHERE id = $1
+                """,
+                draft_id,
+            )
+        assert (
+            await connection.fetchval(
+                "SELECT state::text FROM exercise WHERE id = $1", draft_id
+            )
+            == "draft"
+        )
+
+        # Child writes omitted by an old replica are classified while holding the
+        # parent row: a post-migration write into a running legacy exercise is known
+        # runtime data, not fabricated launch configuration.
+        classified_origin = await connection.fetchval(
+            """
+            INSERT INTO communication (
+                exercise_id, sender_id, sender_team, direction,
+                external_entity, subject, body, triggered_by_inject_id,
+                trigger_key, visible_to_teams, sent_at
+            ) VALUES (
+                $1, $2, NULL, 'inbound'::commdirection,
+                'NCSC', 'Post-migration', 'Created after upgrade',
+                NULL, NULL, NULL, now()
+            )
+            RETURNING created_during_run
+            """,
+            active_id,
+            owner_id,
+        )
+        assert classified_origin is True
+
         digest = "a" * 64
         await connection.execute(
             """
             INSERT INTO exercise_launch_snapshot
                 (digest, schema_version, content, created_at)
-            VALUES ($1, '1.0', '{}'::jsonb, now())
+            VALUES (
+                $1,
+                '1.0',
+                '{"exercise":{"title":"Legacy draft","llm_enabled":false}}'::jsonb,
+                now()
+            )
             """,
             digest,
         )
+
+        # The new application can atomically link a matching snapshot and cross the
+        # boundary. Thereafter old replicas cannot rewrite any frozen projection.
+        await connection.execute(
+            """
+            UPDATE exercise
+            SET state = 'active'::exercisestate,
+                started_at = now(),
+                launch_provenance = 'exact'::snapshotprovenance,
+                launch_snapshot_digest = $2
+            WHERE id = $1
+            """,
+            draft_id,
+            digest,
+        )
+        with pytest.raises(asyncpg.RaiseError, match="launch settings are immutable"):
+            await connection.execute(
+                "UPDATE exercise SET title = 'Drifted' WHERE id = $1",
+                draft_id,
+            )
+        with pytest.raises(asyncpg.RaiseError, match="launch settings are immutable"):
+            await connection.execute(
+                "UPDATE exercise SET scenario_id = $2 WHERE id = $1",
+                draft_id,
+                scenario_id + 1,
+            )
+        with pytest.raises(asyncpg.RaiseError, match="inject fields are immutable"):
+            await connection.execute(
+                """
+                UPDATE inject
+                SET release_offset_minutes = 99
+                WHERE exercise_id = $1
+                """,
+                draft_id,
+            )
+        with pytest.raises(asyncpg.RaiseError, match="inject fields are immutable"):
+            await connection.execute(
+                "DELETE FROM inject WHERE exercise_id = $1",
+                draft_id,
+            )
+        with pytest.raises(asyncpg.RaiseError, match="communications are immutable"):
+            await connection.execute(
+                """
+                UPDATE communication
+                SET subject = 'Drifted'
+                WHERE exercise_id = $1
+                """,
+                draft_id,
+            )
+        with pytest.raises(asyncpg.RaiseError, match="communications are immutable"):
+            await connection.execute(
+                "DELETE FROM communication WHERE exercise_id = $1",
+                draft_id,
+            )
+
+        runtime_inject_id, runtime_origin = await connection.fetchrow(
+            """
+            INSERT INTO inject (
+                exercise_id, scenario_node_id, title, content, target_teams,
+                group_id, sequence_order, release_offset_minutes, state,
+                released_at, released_by, resolved_at, resolved_by,
+                resolution_reason, attachment_filename,
+                attachment_content_type, attachment_path, attachment_size,
+                attachment_sha256
+            ) VALUES (
+                $1, NULL, 'Runtime', 'Allowed', NULL, NULL, 10, NULL,
+                'pending'::injectstate, NULL, NULL, NULL, NULL, NULL,
+                NULL, NULL, NULL, NULL, NULL
+            )
+            RETURNING id, created_during_run
+            """,
+            draft_id,
+        )
+        assert runtime_origin is True
+        await connection.execute(
+            "UPDATE inject SET title = 'Runtime edited' WHERE id = $1",
+            runtime_inject_id,
+        )
+
         with pytest.raises(asyncpg.RaiseError, match="snapshots are immutable"):
             async with connection.transaction():
                 await connection.execute(

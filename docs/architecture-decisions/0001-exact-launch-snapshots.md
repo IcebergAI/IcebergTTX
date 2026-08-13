@@ -60,6 +60,13 @@ Incidental row IDs, repository state, filesystem paths, and the exercise creator
 hashed. Two otherwise equal configurations may therefore share one immutable snapshot.
 A material setting change produces another digest.
 
+`ExerciseMember.group_id` is the participant's exercise audience in the draft and in the
+current runtime roster. `User.team` may provide its initial enrolment default, but later
+global account edits never grant or revoke access inside a launched run. Freeze copies the
+launch-time value into the snapshot. An explicit post-launch roster/group intervention may
+change current runtime access without rewriting that launch evidence; those two time-scoped
+claims are not reconciled into one another.
+
 Attachment bytes remain in managed storage, but the frozen digest is the immutable
 reference. Reads verify the bytes and size against that reference and fail closed on
 absence or mismatch; they never serve different bytes under the frozen claim.
@@ -83,6 +90,13 @@ create an explicitly runtime-scoped object, but cannot mutate launch-configured 
 Concurrent first-launch requests yield one transition and one linked digest; the loser
 receives a conflict.
 
+Database triggers enforce the boundary during a one-release rolling update. A previous
+binary may continue creating drafts, but its snapshot-unaware `draft -> active` write is
+rejected. Child inserts that omit the new origin column lock the parent and are classified
+as draft configuration or runtime data from the serialized parent state. Static exact-run
+Exercise, Inject, and prepared-communication projections cannot be rewritten through an
+old route or direct ORM write.
+
 ## Legacy runs
 
 Exactness is unavailable when launch-time history was never stored. Migration states are:
@@ -91,9 +105,11 @@ Exactness is unavailable when launch-time history was never stored. Migration st
 - `exact`: a new run crossed the transactional freeze boundary; and
 - `unknown`: the run launched before snapshots and cannot be reconstructed exactly.
 
-Child provenance on a migrated launched run remains SQL `NULL` (unknown). Current Inject,
-member, communication, or attachment rows are not copied into a snapshot. Reports may
-show current legacy data, but must label it as current/unknown rather than launch truth.
+Child provenance already present on a migrated launched run remains SQL `NULL` (unknown).
+Rows provably inserted after the migration are classified from the locked parent state;
+this proves their post-upgrade timing, not their historical launch contents. Current
+Inject, member, communication, or attachment rows are not copied into a snapshot. Reports
+may show current legacy data, but must label it as current/unknown rather than launch truth.
 Legacy clone behaviour belongs to the compatibility issue and must either degrade to a
 clearly labelled scenario-template copy or refuse a full-fidelity clone.
 

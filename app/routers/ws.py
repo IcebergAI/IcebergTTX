@@ -68,14 +68,17 @@ async def exercise_ws(
     member = await exercise_member_for_user(session, exercise_id, user.id)
     group_id = member.group_id if member else None
     if user.role == UserRole.participant:
-        # A real participant is bucketed strictly by their enrolled group; only a
-        # facilitator *previewing* as a participant derives the group from the
-        # (validated-via-apply_role_preview) preview team. This prevents a genuine
-        # participant from subscribing to another team's broadcasts via view_team (#30).
+        # A real participant is bucketed strictly by the exercise membership frozen at
+        # launch; only a facilitator *previewing* as a participant derives the group
+        # from the validated preview team. Mutable global User.team is not runtime
+        # launch authority.
         if is_actual_facilitator(user):
             group_id = group_id or user.team
         else:
-            group_id = member.group_id if member else user.team
+            if member is None:
+                await ws.close(code=4003)
+                return
+            group_id = member.group_id
     user_id = user.id
     role = user.role.value
 
@@ -124,7 +127,7 @@ async def exercise_ws(
                             if current_member is None:
                                 await ws.close(code=4003)
                                 break
-                            current_group = current_member.group_id or current.team
+                            current_group = current_member.group_id
                     manager.refresh_authorization(
                         ws,
                         exercise_id,

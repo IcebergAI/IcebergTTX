@@ -66,7 +66,7 @@ async def _comm_visible_to_user(session: AsyncSession, comm: Communication, user
     if user.role in (UserRole.facilitator, UserRole.observer):
         return True
     if comm.direction == CommDirection.outbound:
-        group_id = await exercise_group_for_user(session, comm.exercise_id, user) or user.team
+        group_id = await exercise_group_for_user(session, comm.exercise_id, user)
         sender_team = await sender_team_for_comm(session, comm)
         sent_by_user = comm.sender_id == user.id and (
             sender_team is None or sender_team == group_id
@@ -78,7 +78,7 @@ async def _comm_visible_to_user(session: AsyncSession, comm: Communication, user
         return group_id in comm.visible_to_teams
     if not comm.visible_to_teams:
         return True
-    group_id = await exercise_group_for_user(session, comm.exercise_id, user) or user.team
+    group_id = await exercise_group_for_user(session, comm.exercise_id, user)
     return group_id in comm.visible_to_teams
 
 
@@ -86,7 +86,7 @@ async def _viewer_team(session: AsyncSession, exercise_id: int, user: User) -> s
     """The team whose visibility rules apply to this viewer. None for facilitators."""
     if user.role != UserRole.participant:
         return None
-    return await exercise_group_for_user(session, exercise_id, user) or user.team
+    return await exercise_group_for_user(session, exercise_id, user)
 
 
 @router.get("", response_model=list[CommunicationPublic])
@@ -144,9 +144,7 @@ async def send_comm(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Participants can only send outbound communications",
         )
-    sender_team = (
-        await exercise_group_for_user(session, exercise_id, current_user) or current_user.team
-    )
+    sender_team = await exercise_group_for_user(session, exercise_id, current_user)
     visible_to_teams = await validate_team_ids(
         session, exercise, body.visible_to_teams, field="visible_to_teams"
     )

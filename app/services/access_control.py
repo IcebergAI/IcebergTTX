@@ -119,9 +119,9 @@ def inject_matches_group(
     """Whether an inject targets the given group.
 
     A group-scoped inject matches only its exact group. A team-targeted inject
-    matches when the group (or, when supplied, the user's global team) is in its
-    target list. An untargeted inject matches everyone. Pass ``user_team`` to
-    include the fallback team match (visibility checks do; branch resolution does not).
+    matches when the group (or, for an explicitly supplied non-exercise context,
+    ``user_team``) is in its target list. Runtime visibility uses the materialised
+    ExerciseMember group; mutable global User state is not launch authority.
     """
     if inject.group_id is not None:
         return group_id == inject.group_id
@@ -154,7 +154,7 @@ def inject_visible_to(inject: Inject, user: User, group_id: str | None) -> bool:
         return False
     if user.role == UserRole.observer:
         return True
-    return inject_matches_group(inject, group_id, user_team=user.team)
+    return inject_matches_group(inject, group_id)
 
 
 async def is_inject_visible_to_user(session: AsyncSession, inject: Inject, user: User) -> bool:

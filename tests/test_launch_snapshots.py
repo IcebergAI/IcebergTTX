@@ -23,6 +23,7 @@ from app.models.scenario import Scenario
 from app.models.user import User, UserRole
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition
 from app.services.exercise_service import create_exercise, enrol_member, transition_state
+from app.services.inject_service import create_inject
 from app.services.launch_snapshot_service import (
     lock_configuration_owner,
     require_inject_configuration_mutable,
@@ -226,6 +227,68 @@ async def test_material_launch_configuration_changes_the_digest(
     assert changed.launch_snapshot_digest is not None
     assert first.launch_snapshot_digest == second.launch_snapshot_digest
     assert first.launch_snapshot_digest != changed.launch_snapshot_digest
+
+
+async def test_canonical_equivalents_ignore_audience_and_incidental_row_order(
+    session: AsyncSession,
+    facilitator: User,
+):
+    definitions = [
+        ScenarioDefinition(
+            title="Canonical audience",
+            participant_teams=[
+                {"id": "legal", "label": "Legal"},
+                {"id": "ops", "label": "Operations"},
+            ],
+            injects=[
+                InjectNode(
+                    id="start",
+                    title="Start",
+                    content="Respond",
+                    target_teams=target_order,
+                )
+            ],
+            start_inject_id="start",
+        )
+        for target_order in (["legal", "ops"], ["ops", "legal"])
+    ]
+    scenarios = [
+        await create_scenario(session, definition=definition, created_by=facilitator.id)
+        for definition in definitions
+    ]
+    exercises = [
+        await create_exercise(
+            session,
+            scenario_id=scenario.id,
+            title="Canonical run",
+            created_by=facilitator.id,
+        )
+        for scenario in scenarios
+    ]
+
+    # These custom rows have identical domain sort keys apart from their content. They
+    # are inserted in opposite orders so a row-ID tie-breaker would change the digest.
+    for exercise, titles, audience in (
+        (exercises[0], ("Alpha", "Beta"), ["legal", "ops"]),
+        (exercises[1], ("Beta", "Alpha"), ["ops", "legal"]),
+    ):
+        for title in titles:
+            await create_inject(
+                session,
+                exercise_id=exercise.id,
+                title=title,
+                content=f"{title} content",
+                target_teams=audience,
+                sequence_order=99,
+                commit=False,
+            )
+        await session.commit()
+
+    launched = [
+        await transition_state(session, exercise, ExerciseState.active)
+        for exercise in exercises
+    ]
+    assert launched[0].launch_snapshot_digest == launched[1].launch_snapshot_digest
 
 
 async def _persisted_draft() -> tuple[int, int, int, int]:

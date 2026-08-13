@@ -37,6 +37,14 @@ def snapshot_digest(content: dict[str, Any]) -> str:
     return hashlib.sha256(canonical_snapshot_bytes(content)).hexdigest()
 
 
+def _canonical_scenario_definition(definition: ScenarioDefinition) -> dict[str, Any]:
+    """Canonicalise set-like scenario fields without changing authored sequence."""
+    content = definition.model_dump(mode="json")
+    for inject in content.get("injects", []):
+        inject["target_teams"] = sorted(inject.get("target_teams") or [])
+    return content
+
+
 def attachment_digest(path: str) -> tuple[str, int]:
     digest = hashlib.sha256()
     size = 0
@@ -197,15 +205,7 @@ async def build_launch_content(
         )
 
     inject_content = []
-    for inject in sorted(
-        injects,
-        key=lambda item: (
-            item.sequence_order,
-            item.scenario_node_id or "",
-            item.group_id or "",
-            item.id or 0,
-        ),
-    ):
+    for inject in injects:
         if inject.created_during_run is not False:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -223,42 +223,55 @@ async def build_launch_content(
                 "attachment": await _attachment_snapshot(inject),
             }
         )
+    inject_content.sort(
+        key=lambda item: (
+            item["sequence_order"],
+            item["scenario_node_id"] or "",
+            item["group_id"] or "",
+            canonical_snapshot_bytes(item),
+        )
+    )
+
+    member_content = [
+        {
+            "user_id": member.user_id,
+            "group_id": member.group_id,
+            "role": member.role_at_enrolment.value,
+        }
+        for member in members
+    ]
+    member_content.sort(key=lambda item: (item["user_id"], canonical_snapshot_bytes(item)))
+
+    communication_content = [
+        {
+            "direction": communication.direction.value,
+            "sender_id": communication.sender_id,
+            "sender_team": communication.sender_team,
+            "external_entity": communication.external_entity,
+            "subject": communication.subject,
+            "body": communication.body,
+            "visible_to_teams": sorted(communication.visible_to_teams or []),
+            "sent_at": communication.sent_at.isoformat(),
+        }
+        for communication in communications
+    ]
+    communication_content.sort(
+        key=lambda item: (item["sent_at"], canonical_snapshot_bytes(item))
+    )
 
     return {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "scenario": {
             "version": scenario.version,
-            "definition": export_definition(scenario).model_dump(mode="json"),
+            "definition": _canonical_scenario_definition(export_definition(scenario)),
         },
         "exercise": {
             "title": exercise.title,
             "llm_enabled": exercise.llm_enabled,
         },
         "injects": inject_content,
-        "members": [
-            {
-                "user_id": member.user_id,
-                "group_id": member.group_id,
-                "role": member.role_at_enrolment.value,
-            }
-            for member in sorted(members, key=lambda item: (item.user_id, item.id or 0))
-        ],
-        "prepared_communications": [
-            {
-                "direction": communication.direction.value,
-                "sender_id": communication.sender_id,
-                "sender_team": communication.sender_team,
-                "external_entity": communication.external_entity,
-                "subject": communication.subject,
-                "body": communication.body,
-                "visible_to_teams": sorted(communication.visible_to_teams or []),
-                "sent_at": communication.sent_at.isoformat(),
-            }
-            for communication in sorted(
-                communications,
-                key=lambda item: (item.sent_at, item.id or 0),
-            )
-        ],
+        "members": member_content,
+        "prepared_communications": communication_content,
     }
 
 
@@ -287,6 +300,10 @@ async def freeze_launch_configuration(
         members=members,
         communications=communications,
     )
+    # Attachment digests are part of the static Inject projection. Persist them while
+    # the parent is still pending so the database's exact-run mutation guard can then
+    # enforce the post-launch boundary for old and new application replicas alike.
+    await session.flush()
     digest = snapshot_digest(content)
     await session.exec(
         pg_insert(ExerciseLaunchSnapshot)

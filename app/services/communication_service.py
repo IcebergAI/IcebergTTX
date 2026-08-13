@@ -143,11 +143,13 @@ async def sender_teams_for_comms(
     ).all()
     group_ids = {(m.exercise_id, m.user_id): m.group_id for m in members}
 
-    # Only senders with no exercise-scoped group need their global team looked up.
+    # Only senders with no exercise membership need the legacy global-team fallback.
+    # A present membership with a NULL group is an explicit exercise-scoped audience,
+    # not permission to consult mutable User state after launch.
     fallback_ids = {
         c.sender_id
         for c in unresolved
-        if c.sender_id is not None and not group_ids.get((c.exercise_id, c.sender_id))
+        if c.sender_id is not None and (c.exercise_id, c.sender_id) not in group_ids
     }
     user_teams: dict[int, str | None] = {}
     if fallback_ids:
@@ -158,9 +160,8 @@ async def sender_teams_for_comms(
 
     for c in unresolved:
         assert c.id is not None and c.sender_id is not None
-        resolved[c.id] = group_ids.get((c.exercise_id, c.sender_id)) or user_teams.get(
-            c.sender_id
-        )
+        key = (c.exercise_id, c.sender_id)
+        resolved[c.id] = group_ids[key] if key in group_ids else user_teams.get(c.sender_id)
     return resolved
 
 
@@ -239,7 +240,7 @@ async def sender_team_for_comm(session: AsyncSession | None, comm: Communication
             .where(ExerciseMember.user_id == comm.sender_id)
         )
     ).first()
-    if member and member.group_id:
+    if member is not None:
         return member.group_id
     user = await session.get(User, comm.sender_id)
     return user.team if user else None
