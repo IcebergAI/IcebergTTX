@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -293,6 +294,8 @@ async def freeze_launch_configuration(
             digest=digest,
             schema_version=SNAPSHOT_SCHEMA_VERSION,
             content=content,
+            # Core INSERTs bypass SQLModel's Python-side default factory.
+            created_at=datetime.now(UTC),
         )
         .on_conflict_do_nothing(index_elements=["digest"])
     )
