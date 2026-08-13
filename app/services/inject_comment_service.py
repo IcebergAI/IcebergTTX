@@ -20,9 +20,7 @@ async def comment_group_for_user(session: AsyncSession, inject: Inject, user: Us
     if teams:
         if exercise_group in teams:
             return exercise_group
-        if user.team in teams:
-            return user.team
-    return exercise_group or user.team
+    return exercise_group
 
 
 async def comment_payload(session: AsyncSession, comment: InjectComment) -> dict:
@@ -99,5 +97,4 @@ async def create_inject_comment(
     await session.refresh(comment)
     await dispatch(session)
     return comment, payload
-
 

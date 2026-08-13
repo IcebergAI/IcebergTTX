@@ -831,16 +831,11 @@ async def test_out_of_audience_response_does_not_resolve_or_advance(
     facilitator: User,
     participant: User,
 ):
-    """A response from a context outside the release audience moves nothing (#256).
+    """An out-of-audience member cannot see or answer the inject (#256).
 
-    Scenario nodes materialize as group-scoped physical injects, so the only
-    fallback-visible shape is an ad-hoc inject with several target teams
-    (group_id stays None). The User.team visibility fallback lets a member
-    enrolled in one group *see* such an inject targeted at their global team --
-    but their response submits under their enrolment group, which the release
-    never seeded. Before the fix, resolve_response_progression invented an
-    InjectProgress row for that context (corrupting the shared-close audience)
-    and advanced that context's cursor.
+    ExerciseMember.group_id is the runtime audience authority. A later or divergent
+    global User.team value cannot grant access to an audience that was not frozen in
+    the exercise roster, so the invalid response is stopped before progression.
     """
     from app.models.exercise import ExerciseState
     from app.models.inject import InjectProgress
@@ -867,8 +862,8 @@ async def test_out_of_audience_response_does_not_resolve_or_advance(
     exercise = await create_exercise(
         session, title="Audience gate", scenario_id=scenario.id, created_by=facilitator.id
     )
-    # The fixture participant's global team is it_ops, but they are enrolled into
-    # legal -- the fallback makes the it_ops-targeted inject visible to them.
+    # The fixture participant's mutable global team is it_ops, but this exercise
+    # explicitly enrols them into legal.
     await enrol_member(session, exercise=exercise, user_id=participant.id, group_id="legal")
     insider = User(
         email="insider@example.com",
@@ -900,12 +895,18 @@ async def test_out_of_audience_response_does_not_resolve_or_advance(
         )
     ).status_code == 200
 
-    # The legal-enrolled member can see and answer it, and the response is recorded...
-    r = await _submit(client, participant_token, exercise.id, inject_id, selected_option=None)
-    assert r.status_code == 201
-    assert r.json()["group_id"] == "legal"
+    visible = await client.get(
+        f"/api/exercises/{exercise.id}/injects",
+        headers={"Authorization": f"Bearer {participant_token}"},
+    )
+    assert visible.status_code == 200
+    assert inject_id not in {inject["id"] for inject in visible.json()}
 
-    # ...but it resolves no context the release opened and moves no cursor.
+    # The legal-enrolled member cannot bypass the frozen audience with User.team.
+    r = await _submit(client, participant_token, exercise.id, inject_id, selected_option=None)
+    assert r.status_code == 404
+
+    # No response context was invented and the legal cursor did not move.
     legal_rows = (
         await session.exec(
             select(InjectProgress).where(

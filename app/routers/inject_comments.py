@@ -55,7 +55,7 @@ def _can_see_comment(
         return False
     if user.role in (UserRole.facilitator, UserRole.observer):
         return True
-    return comment.group_id == (group_id or user.team)
+    return comment.group_id == group_id
 
 
 @router.get("", response_model=list[InjectCommentPublic])

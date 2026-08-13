@@ -46,6 +46,11 @@ class Inject(SQLModel, table=True):
     attachment_content_type: str | None = None
     attachment_path: str | None = None
     attachment_size: int | None = None
+    attachment_sha256: str | None = Field(default=None, max_length=64)
+    # False means the row was part of draft launch configuration. True identifies an
+    # explicit facilitator intervention created after the immutable launch boundary.
+    # NULL is intentionally retained for legacy rows whose origin is unknowable.
+    created_during_run: bool | None = Field(default=False)
 
     exercise: Optional["Exercise"] = Relationship(back_populates="injects")
     responses: list["Response"] = Relationship(back_populates="inject", cascade_delete=True)

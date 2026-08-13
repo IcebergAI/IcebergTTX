@@ -13,9 +13,15 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.dependencies import get_current_user, require_role
-from app.models.exercise import Exercise, ExerciseMember, ExerciseState
+from app.models.exercise import (
+    Exercise,
+    ExerciseMember,
+    ExerciseState,
+    SnapshotProvenance,
+)
 from app.models.inject import Inject
 from app.models.inject_comment import InjectComment
+from app.models.launch_snapshot import ExerciseLaunchSnapshot
 from app.models.report_summary import ExecutiveSummary
 from app.models.response import Response
 from app.models.user import User, UserRole
@@ -24,6 +30,7 @@ from app.schemas.api import (
     ExecutiveSummaryPublic,
     ExerciseProgressionPublic,
     ExercisePublic,
+    LaunchSnapshotPublic,
     MemberPublic,
     ReportSummaryState,
     TimelineEvent,
@@ -47,6 +54,7 @@ from app.services.exercise_service import (
 )
 from app.services.exercise_service import list_members as members_for_exercise
 from app.services.inject_service import attachment_paths_for_exercise
+from app.services.launch_snapshot_service import lock_configuration_owner
 from app.services.llm.service import active_provider
 from app.services.llm_service import queue_summary_pipeline
 from app.services.progression_service import progression_snapshot
@@ -55,10 +63,8 @@ from app.services.report_service import (
     executive_summary_for_exercise,
     render_markdown,
 )
-from app.services.scenario_service import get_scenario_definition, titles_for
-from app.services.schedule_service import (
-    schedule_exercise_injects,
-)
+from app.services.scenario_service import definition_for_exercise, titles_for
+from app.services.schedule_service import schedule_exercise_injects
 from app.services.timeline_service import (
     ExerciseBundle,
     build_timeline,
@@ -186,11 +192,34 @@ async def get_exercise_progression(
 
 @router.get("/{exercise_id}/teams")
 async def list_exercise_teams(exercise_id: int, current_user: CurrentUserDep, session: SessionDep):
-    exercise = await require_exercise_access(session, exercise_id, current_user)
-    definition = await get_scenario_definition(session, exercise.scenario_id)
+    await require_exercise_access(session, exercise_id, current_user)
+    definition = await definition_for_exercise(session, exercise_id)
     if not definition:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found")
     return [team.model_dump() for team in definition.participant_teams]
+
+
+@router.get("/{exercise_id}/launch-snapshot", response_model=LaunchSnapshotPublic)
+async def get_launch_snapshot(
+    exercise_id: int,
+    current_user: FacilitatorDep,
+    session: SessionDep,
+):
+    exercise = await require_exercise_owner(session, exercise_id, current_user)
+    if exercise.launch_snapshot_digest is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Launch snapshot unavailable ({exercise.launch_provenance.value})",
+        )
+    snapshot = await session.get(ExerciseLaunchSnapshot, exercise.launch_snapshot_digest)
+    if snapshot is None:
+        raise RuntimeError("exercise references a missing launch snapshot")
+    return LaunchSnapshotPublic(
+        digest=snapshot.digest,
+        schema_version=snapshot.schema_version,
+        content=snapshot.content,
+        created_at=snapshot.created_at.isoformat(),
+    )
 
 
 @router.put("/{exercise_id}", response_model=ExercisePublic)
@@ -204,6 +233,13 @@ async def update_exercise(
     # Debrief notes are the deliberate post-exercise workflow; other operational
     # settings remain frozen once an exercise is completed.
     updates = body.model_dump(exclude_unset=True)
+    if set(updates) & {"title", "llm_enabled"}:
+        _, ex = await lock_configuration_owner(session, ex)
+        if ex.launch_provenance == SnapshotProvenance.exact:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Title and LLM launch settings are frozen after launch",
+            )
     if ex.state == ExerciseState.completed and set(updates) - {"debrief_notes"}:
         require_operational_mutability(ex)
     ex.sqlmodel_update(updates)
@@ -217,6 +253,7 @@ async def update_exercise(
 async def delete_exercise(exercise_id: int, current_user: FacilitatorDep, session: SessionDep):
     ex = await require_exercise_owner(session, exercise_id, current_user)
     require_operational_mutability(ex)
+    _, ex = await lock_configuration_owner(session, ex)
     if ex.state != ExerciseState.draft:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -261,9 +298,10 @@ async def _transition(
     # transaction and dispatched by transition_state_with_history itself (#212), so it has
     # already gone out by the time we get here. A rolled-back transition raises above and
     # emits neither projection.
-    # Start/resume enqueue pending schedules. Pause and complete enqueue nothing and
-    # cancel nothing: a job written before the pause fires, re-reads the exercise, and
-    # either no-ops or re-defers itself against the resumed clock (#213).
+    # Start/resume enqueue pending schedules. The queue is a reconstructable projection,
+    # not part of the immutable launch boundary: startup reconciliation repairs a crash
+    # between these commits. Pause and complete cancel nothing; a durable job re-reads
+    # state and no-ops or re-defers.
     if target == ExerciseState.active:
         await schedule_exercise_injects(session, result.exercise)
         await session.commit()
@@ -469,7 +507,7 @@ async def get_debrief(exercise_id: int, current_user: FacilitatorDep, session: S
     """Owner-only debrief notes (#112): the scenario author's read-only talking points
     plus the editable exercise-level notes. Never exposed to participants/observers."""
     ex = await require_exercise_owner(session, exercise_id, current_user)
-    definition = await get_scenario_definition(session, ex.scenario_id)
+    definition = await definition_for_exercise(session, exercise_id)
     return DebriefNotes(
         exercise_id=exercise_id,
         scenario_debrief_notes=definition.debrief_notes if definition else None,

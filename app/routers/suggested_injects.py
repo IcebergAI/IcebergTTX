@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.dependencies import require_role
+from app.models.exercise import ExerciseState
 from app.models.inject import Inject
 from app.models.suggested_inject import SuggestedInject, SuggestedInjectStatus
 from app.models.user import User, UserRole
@@ -17,6 +18,7 @@ from app.services.access_control import (
     require_operational_mutability,
 )
 from app.services.inject_service import create_inject
+from app.services.launch_snapshot_service import lock_configuration_owner
 from app.services.llm_service import suggested_payload
 
 router = APIRouter(prefix="/exercises/{exercise_id}/suggested-injects", tags=["suggested-injects"])
@@ -56,6 +58,8 @@ async def approve(
 ):
     exercise = await require_exercise_owner(session, exercise_id, current_user)
     require_operational_mutability(exercise)
+    _, exercise = await lock_configuration_owner(session, exercise)
+    require_operational_mutability(exercise)
     s = (
         await session.exec(
             select(SuggestedInject)
@@ -90,6 +94,7 @@ async def approve(
         target_teams=target_teams,
         group_id=group_id,
         sequence_order=next_order,
+        created_during_run=exercise.state != ExerciseState.draft,
         commit=False,
     )
 

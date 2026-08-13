@@ -349,8 +349,7 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
     from app.models.exercise import Exercise
     from app.models.inject import Inject
     from app.models.response import Response
-    from app.models.scenario import Scenario
-    from app.services.scenario_service import export_definition
+    from app.services.scenario_service import definition_for_exercise
 
     async with AsyncSession(engine, expire_on_commit=False) as session:
         response = await session.get(Response, response_id)
@@ -390,11 +389,9 @@ async def _run_llm_pipeline(response_id: int, inject_id: int, exercise_id: int) 
             logger.info("LLM pipeline skipped: no AI provider configured (LLM_PROVIDER)")
             return
 
-        scenario = await session.get(Scenario, exercise.scenario_id)
-        if not scenario:
+        definition = await definition_for_exercise(session, exercise_id)
+        if definition is None:
             return
-
-        definition = export_definition(scenario)
 
         assessment, assessment_created = await _assess_response_result(
             session, response, inject, definition

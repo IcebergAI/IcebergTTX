@@ -28,7 +28,7 @@ from app.services.response_service import (
     response_validation_error,
     submit_response,
 )
-from app.services.scenario_service import get_inject_node, get_scenario_definition
+from app.services.scenario_service import definition_for_exercise, get_inject_node
 
 router = APIRouter(prefix="/exercises/{exercise_id}/responses", tags=["responses"])
 
@@ -97,7 +97,7 @@ async def submit(
             detail="Response already submitted for this inject",
         )
 
-    definition = await get_scenario_definition(session, exercise.scenario_id)
+    definition = await definition_for_exercise(session, exercise_id)
     node = None
     if definition and inject.scenario_node_id is not None:
         node = get_inject_node(definition, inject.scenario_node_id)

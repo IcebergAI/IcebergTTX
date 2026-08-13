@@ -10,6 +10,7 @@ from app.models.exercise import ExerciseState
 from app.models.inject import Inject, InjectState
 from app.models.scenario import Scenario
 from app.schemas.api import InjectPublic
+from app.schemas.scenario_json import ScenarioDefinition
 from app.services.domain_events import InjectReleased, dispatch, record
 from app.services.scenario_service import export_definition
 
@@ -22,6 +23,7 @@ class AttachmentMeta:
     content_type: str
     path: str
     size: int
+    sha256: str
 
 
 async def create_inject(
@@ -36,6 +38,7 @@ async def create_inject(
     sequence_order: int = 0,
     release_offset_minutes: int | None = None,
     attachment: AttachmentMeta | None = None,
+    created_during_run: bool = False,
     commit: bool = True,
 ) -> Inject:
     normalized_group_id = group_id.strip() if group_id and group_id.strip() else None
@@ -55,6 +58,8 @@ async def create_inject(
         attachment_content_type=attachment.content_type if attachment else None,
         attachment_path=attachment.path if attachment else None,
         attachment_size=attachment.size if attachment else None,
+        attachment_sha256=attachment.sha256 if attachment else None,
+        created_during_run=created_during_run,
     )
     session.add(inject)
     await session.flush()
@@ -192,21 +197,30 @@ def inject_attachment_payload(inject: Inject) -> dict | None:
     }
 
 
-async def _inject_node(session: AsyncSession, inject: Inject):
+async def _inject_node(
+    session: AsyncSession,
+    inject: Inject,
+    definition: ScenarioDefinition | None = None,
+):
     if not inject.scenario_node_id:
         return None
     from app.services.scenario_service import definition_for_exercise, get_inject_node
 
-    definition = await definition_for_exercise(session, inject.exercise_id)
+    if definition is None:
+        definition = await definition_for_exercise(session, inject.exercise_id)
     if not definition:
         return None
     return get_inject_node(definition, inject.scenario_node_id)
 
 
 async def _inject_options(
-    session: AsyncSession, inject: Inject, *, include_progression: bool = False
+    session: AsyncSession,
+    inject: Inject,
+    *,
+    include_progression: bool = False,
+    definition: ScenarioDefinition | None = None,
 ) -> list[dict]:
-    node = await _inject_node(session, inject)
+    node = await _inject_node(session, inject, definition)
     if not node:
         return []
     options: list[dict] = []
@@ -222,7 +236,11 @@ async def _inject_options(
 
 
 async def inject_payload(
-    session: AsyncSession, inject: Inject, *, include_progression: bool = False
+    session: AsyncSession,
+    inject: Inject,
+    *,
+    include_progression: bool = False,
+    definition: ScenarioDefinition | None = None,
 ) -> dict:
     """Canonical inject serialization shared by the API responses and WS broadcasts.
 
@@ -235,7 +253,7 @@ async def inject_payload(
     Redacting by default means a forgotten caller over-redacts (safe) rather than leaks.
     """
     assert inject.id is not None
-    node = await _inject_node(session, inject)
+    node = await _inject_node(session, inject, definition)
     payload = InjectPublic(
         id=inject.id,
         exercise_id=inject.exercise_id,
@@ -252,7 +270,12 @@ async def inject_payload(
         resolved_by=inject.resolved_by,
         resolution_reason=inject.resolution_reason,
         release_offset_minutes=inject.release_offset_minutes,
-        options=await _inject_options(session, inject, include_progression=include_progression),
+        options=await _inject_options(
+            session,
+            inject,
+            include_progression=include_progression,
+            definition=definition,
+        ),
         next_inject_id=(node.next_inject_id if node and include_progression else None),
         free_text_response=node.free_text_response if node else True,
         attachment=inject_attachment_payload(inject),

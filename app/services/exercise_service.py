@@ -17,10 +17,15 @@ from app.models.exercise import (
 )
 from app.models.scenario import Scenario
 from app.models.user import User
+from app.services.access_control import require_operational_mutability
 from app.services.domain_events import ExerciseStateChanged, dispatch, record
 from app.services.inject_service import seed_injects_from_scenario
+from app.services.launch_snapshot_service import (
+    freeze_launch_configuration,
+    lock_configuration_owner,
+)
 from app.services.progression_service import seed_progression
-from app.services.scenario_service import export_definition
+from app.services.scenario_service import definition_for_exercise, export_definition
 from app.services.team_service import scenario_team_ids as definition_team_ids
 from app.services.team_service import validate_team_ids as validate_definition_team_ids
 
@@ -40,7 +45,14 @@ async def create_exercise(
     created_by: int,
     llm_enabled: bool = False,
 ) -> Exercise:
-    scenario = await session.get(Scenario, scenario_id)
+    scenario = (
+        await session.exec(
+            select(Scenario)
+            .where(Scenario.id == scenario_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
     if not scenario:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found")
 
@@ -103,6 +115,12 @@ async def transition_state_with_history(
     Exercise update share one transaction; callers may safely emit external
     projections only after this function returns.
     """
+    if exercise.state == ExerciseState.draft and new_state == ExerciseState.active:
+        try:
+            exercise = await freeze_launch_configuration(session, exercise)
+        except Exception:
+            await session.rollback()
+            raise
     previous_state = exercise.state
     if new_state not in VALID_TRANSITIONS[previous_state]:
         raise HTTPException(
@@ -189,10 +207,11 @@ async def transition_state_with_history(
 
 
 async def scenario_group_ids(session: AsyncSession, exercise: Exercise) -> set[str]:
-    scenario = await session.get(Scenario, exercise.scenario_id)
-    if not scenario:
+    if exercise.id is None:
         return set()
-    definition = export_definition(scenario)
+    definition = await definition_for_exercise(session, exercise.id)
+    if definition is None:
+        return set()
     return definition_team_ids(definition)
 
 
@@ -218,12 +237,14 @@ async def validate_team_ids(
     """Normalize and validate a non-empty, duplicate-free scenario team audience."""
     if team_ids is None:
         return None
-    scenario = await session.get(Scenario, exercise.scenario_id)
-    if not scenario:
+    if exercise.id is None:
+        raise HTTPException(status_code=422, detail="exercise scenario was not found")
+    definition = await definition_for_exercise(session, exercise.id)
+    if definition is None:
         raise HTTPException(status_code=422, detail="exercise scenario was not found")
     try:
         return validate_definition_team_ids(
-            team_ids, export_definition(scenario), field=field
+            team_ids, definition, field=field
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -248,6 +269,9 @@ async def enrol_member(
     assert exercise.id is not None
     from app.services.progression_service import roster_changes_allowed
 
+    _, exercise = await lock_configuration_owner(session, exercise)
+    assert exercise.id is not None
+    require_operational_mutability(exercise)
     if not await roster_changes_allowed(session, exercise.id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -278,6 +302,7 @@ async def enrol_member(
         user_id=user_id,
         group_id=resolved_group_id,
         role_at_enrolment=user.role,
+        created_during_run=exercise.state != ExerciseState.draft,
     )
     session.add(member)
     try:
@@ -320,6 +345,9 @@ async def update_member_group(
     assert exercise.id is not None
     from app.services.progression_service import roster_changes_allowed
 
+    _, exercise = await lock_configuration_owner(session, exercise)
+    assert exercise.id is not None
+    require_operational_mutability(exercise)
     if not await roster_changes_allowed(session, exercise.id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -347,6 +375,9 @@ async def remove_member(session: AsyncSession, *, exercise: Exercise, user_id: i
     assert exercise.id is not None
     from app.services.progression_service import roster_changes_allowed
 
+    _, exercise = await lock_configuration_owner(session, exercise)
+    assert exercise.id is not None
+    require_operational_mutability(exercise)
     if not await roster_changes_allowed(session, exercise.id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
