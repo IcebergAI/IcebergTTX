@@ -43,8 +43,8 @@ from app.services.launch_snapshot_service import (
     lock_configuration_owner,
     require_inject_configuration_mutable,
 )
-from app.services.schedule_service import arm_inject_schedule
 from app.services.scenario_service import definition_for_exercise
+from app.services.schedule_service import arm_inject_schedule
 
 router = APIRouter(prefix="/exercises/{exercise_id}/injects", tags=["injects"])
 
