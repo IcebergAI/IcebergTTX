@@ -48,7 +48,7 @@ async def empty_database():
             await admin.close()
 
 
-def _run_alembic(command_name: str, database: str) -> None:
+def _run_alembic(command_name: str, database: str, revision: str = "head") -> None:
     """Run an Alembic command against ``database`` in a worker thread.
 
     Alembic's async ``env.py`` calls ``asyncio.run``, which cannot be invoked from a
@@ -65,7 +65,9 @@ def _run_alembic(command_name: str, database: str) -> None:
     # The async driver explicitly: env.py only normalises the URL it derives itself.
     config.set_main_option("sqlalchemy.url", make_async_url(_dsn(database)))
     if command_name == "upgrade":
-        command.upgrade(config, "head")
+        command.upgrade(config, revision)
+    elif command_name == "downgrade":
+        command.downgrade(config, revision)
     else:
         getattr(command, command_name)(config)
 
@@ -121,3 +123,162 @@ async def test_the_rate_limit_table_is_unlogged(empty_database):
     # pg_class.relpersistence is Postgres's internal "char" type, so asyncpg hands it
     # back as bytes rather than str.
     assert persistence == b"u"
+
+
+async def test_launch_snapshot_migration_preserves_legacy_uncertainty(empty_database):
+    """A legacy active run remains unknown; only an unlaunched draft is authoritative."""
+    await asyncio.to_thread(_run_alembic, "upgrade", empty_database, "d8e9f0a1b2c3")
+    connection = await asyncpg.connect(_dsn(empty_database))
+    try:
+        owner_id = await connection.fetchval(
+            """
+            INSERT INTO "user" (
+                email, display_name, hashed_password, role, team, is_active,
+                created_at, is_admin, must_change_password, auth_provider,
+                subject, auth_tenant, role_managed_by_idp
+            ) VALUES (
+                'legacy-owner@example.test', 'Legacy Owner', NULL,
+                'facilitator'::userrole, NULL, true, now(), false, false,
+                'local', NULL, NULL, false
+            ) RETURNING id
+            """
+        )
+        scenario_id = await connection.fetchval(
+            """
+            INSERT INTO scenario (
+                title, description, version, tags, definition,
+                created_by, created_at, updated_at
+            ) VALUES (
+                'Legacy', NULL, '1.0', NULL, '{"title":"Legacy","injects":[]}',
+                $1, now(), now()
+            ) RETURNING id
+            """,
+            owner_id,
+        )
+
+        async def exercise(state: str, title: str) -> int:
+            return await connection.fetchval(
+                """
+                INSERT INTO exercise (
+                    scenario_id, title, state, current_node_id, llm_enabled,
+                    debrief_notes, started_at, ended_at, paused_at,
+                    accumulated_pause_seconds, created_by, created_at
+                ) VALUES (
+                    $1, $2, $3::exercisestate, NULL, false,
+                    NULL, CASE WHEN $3 = 'draft' THEN NULL ELSE now() END,
+                    NULL, NULL, 0, $4, now()
+                ) RETURNING id
+                """,
+                scenario_id,
+                title,
+                state,
+                owner_id,
+            )
+
+        active_id = await exercise("active", "Legacy active")
+        draft_id = await exercise("draft", "Legacy draft")
+        for exercise_id in (active_id, draft_id):
+            await connection.execute(
+                """
+                INSERT INTO inject (
+                    exercise_id, scenario_node_id, title, content, target_teams,
+                    group_id, sequence_order, release_offset_minutes, state,
+                    released_at, released_by, resolved_at, resolved_by,
+                    resolution_reason, attachment_filename,
+                    attachment_content_type, attachment_path, attachment_size
+                ) VALUES (
+                    $1, 'start', 'Start', 'Respond', NULL, NULL, 0, NULL,
+                    'pending'::injectstate, NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL
+                )
+                """,
+                exercise_id,
+            )
+            await connection.execute(
+                """
+                INSERT INTO exercisemember (
+                    exercise_id, user_id, group_id, role_at_enrolment, joined_at
+                ) VALUES ($1, $2, NULL, 'facilitator'::userrole, now())
+                """,
+                exercise_id,
+                owner_id,
+            )
+            await connection.execute(
+                """
+                INSERT INTO communication (
+                    exercise_id, sender_id, sender_team, direction,
+                    external_entity, subject, body, triggered_by_inject_id,
+                    trigger_key, visible_to_teams, sent_at
+                ) VALUES (
+                    $1, $2, NULL, 'inbound'::commdirection,
+                    'NCSC', 'Legacy', 'Unknown timing', NULL, NULL, NULL, now()
+                )
+                """,
+                exercise_id,
+                owner_id,
+            )
+    finally:
+        await connection.close()
+
+    await asyncio.to_thread(_run_alembic, "upgrade", empty_database)
+    # A repeated startup migration is a no-op, not a duplicate type/trigger failure.
+    await asyncio.to_thread(_run_alembic, "upgrade", empty_database)
+
+    connection = await asyncpg.connect(_dsn(empty_database))
+    try:
+        exercises = {
+            row["title"]: row
+            for row in await connection.fetch(
+                """
+                SELECT title, launch_provenance::text AS provenance,
+                       launch_snapshot_digest
+                FROM exercise
+                """
+            )
+        }
+        assert exercises["Legacy active"]["provenance"] == "unknown"
+        assert exercises["Legacy draft"]["provenance"] == "pending"
+        assert all(row["launch_snapshot_digest"] is None for row in exercises.values())
+        assert await connection.fetchval("SELECT count(*) FROM exercise_launch_snapshot") == 0
+
+        with pytest.raises(asyncpg.CheckViolationError):
+            await connection.execute(
+                """
+                UPDATE exercise
+                SET launch_provenance = 'exact'::snapshotprovenance
+                WHERE id = $1
+                """,
+                draft_id,
+            )
+
+        for table_name in ("inject", "communication", "exercisemember"):
+            origins = {
+                row["title"]: row["created_during_run"]
+                for row in await connection.fetch(
+                    f"""
+                    SELECT exercise.title, child.created_during_run
+                    FROM {table_name} AS child
+                    JOIN exercise ON exercise.id = child.exercise_id
+                    """
+                )
+            }
+            assert origins == {"Legacy active": None, "Legacy draft": False}
+
+        digest = "a" * 64
+        await connection.execute(
+            """
+            INSERT INTO exercise_launch_snapshot
+                (digest, schema_version, content, created_at)
+            VALUES ($1, '1.0', '{}'::jsonb, now())
+            """,
+            digest,
+        )
+        with pytest.raises(asyncpg.RaiseError, match="snapshots are immutable"):
+            async with connection.transaction():
+                await connection.execute(
+                    "UPDATE exercise_launch_snapshot "
+                    "SET content = '{\"changed\":true}' WHERE digest = $1",
+                    digest,
+                )
+    finally:
+        await connection.close()

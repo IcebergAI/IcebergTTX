@@ -28,6 +28,7 @@ from app.services.communication_service import (
     unread_count,
 )
 from app.services.exercise_service import validate_team_ids
+from app.services.launch_snapshot_service import lock_configuration_owner
 
 router = APIRouter(prefix="/exercises/{exercise_id}/communications", tags=["communications"])
 
@@ -159,6 +160,7 @@ async def send_comm(
         sender_team=sender_team,
         external_entity=None if visible_to_teams else body.external_entity,
         visible_to_teams=visible_to_teams,
+        created_during_run=True,
     )
     return await comm_payload(comm, session)
 
@@ -177,6 +179,8 @@ async def inject_comm(
     """
     exercise = await require_exercise_access(session, exercise_id, current_user)
     require_operational_mutability(exercise)
+    _, exercise = await lock_configuration_owner(session, exercise)
+    require_operational_mutability(exercise)
     visible_to_teams = (
         await validate_team_ids(session, exercise, body.visible_to_teams, field="visible_to_teams")
         or await all_team_ids_for_exercise(session, exercise_id)
@@ -190,6 +194,7 @@ async def inject_comm(
         body=body.body,
         external_entity=body.external_entity,
         visible_to_teams=visible_to_teams,
+        created_during_run=exercise.state != ExerciseState.draft,
     )
     return await comm_payload(comm, session)
 

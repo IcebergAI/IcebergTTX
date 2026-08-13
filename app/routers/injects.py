@@ -1,3 +1,5 @@
+import asyncio
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -35,6 +37,11 @@ from app.services.inject_service import (
     get_inject_or_404,
     inject_payload,
     release_inject,
+)
+from app.services.launch_snapshot_service import (
+    attachment_digest,
+    lock_configuration_owner,
+    require_inject_configuration_mutable,
 )
 from app.services.schedule_service import arm_inject_schedule
 
@@ -148,6 +155,7 @@ async def _save_attachment(
     # Stream to disk in chunks and abort as soon as the running total exceeds the
     # cap, so an oversized upload is never fully buffered in memory (#39).
     size = 0
+    digest = hashlib.sha256()
     try:
         with storage_path.open("wb") as out:
             while chunk := await file.read(ATTACHMENT_CHUNK_BYTES):
@@ -158,6 +166,7 @@ async def _save_attachment(
                         detail="Attachment is too large",
                     )
                 out.write(chunk)
+                digest.update(chunk)
     except HTTPException:
         storage_path.unlink(missing_ok=True)
         raise
@@ -168,6 +177,7 @@ async def _save_attachment(
         content_type=_normalize_content_type(file.content_type),
         path=str(storage_path),
         size=size,
+        sha256=digest.hexdigest(),
     )
 
 
@@ -230,6 +240,8 @@ async def create(
         ) from exc
     exercise = await require_exercise_access(session, exercise_id, current_user)
     require_operational_mutability(exercise)
+    _, exercise = await lock_configuration_owner(session, exercise)
+    require_operational_mutability(exercise)
     target_teams = await validate_team_ids(
         session, exercise, body.target_teams, field="target_teams"
     )
@@ -248,6 +260,7 @@ async def create(
             group_id=group_id,
             sequence_order=body.sequence_order,
             attachment=attachment_meta,
+            created_during_run=exercise.state != ExerciseState.draft,
         )
     except Exception:
         if attachment_meta:
@@ -274,7 +287,10 @@ async def delete_inject(
 ):
     exercise = await require_exercise_owner(session, exercise_id, current_user)
     require_operational_mutability(exercise)
+    _, exercise = await lock_configuration_owner(session, exercise)
+    require_operational_mutability(exercise)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
+    require_inject_configuration_mutable(exercise, inject)
     # A released inject carries after-action evidence (participant responses, comments, and
     # per-group resolution progress all cascade off the inject row) and is on participant
     # screens. Deleting it would silently destroy that record, so the delete is conditional on
@@ -307,6 +323,21 @@ async def download_attachment(
     path = Path(inject.attachment_path)
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    if inject.attachment_sha256 is not None:
+        try:
+            digest, actual_size = await asyncio.to_thread(attachment_digest, str(path))
+        except OSError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Attachment not found",
+            ) from exc
+        if digest != inject.attachment_sha256 or (
+            inject.attachment_size is not None and actual_size != inject.attachment_size
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Attachment integrity check failed",
+            )
     return FileResponse(
         path,
         media_type=_normalize_content_type(inject.attachment_content_type),
@@ -368,7 +399,10 @@ async def update_schedule(
         raise HTTPException(status_code=422, detail="release_offset_minutes must be >= 0")
     exercise = await require_exercise_access(session, exercise_id, current_user)
     require_operational_mutability(exercise)
+    _, exercise = await lock_configuration_owner(session, exercise)
+    require_operational_mutability(exercise)
     inject = await get_inject_or_404(session, exercise_id, inject_id)
+    require_inject_configuration_mutable(exercise, inject)
     if inject.state != InjectState.pending:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

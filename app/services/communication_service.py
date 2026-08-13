@@ -30,6 +30,7 @@ async def create_communication(
     external_entity: str | None = None,
     triggered_by_inject_id: int | None = None,
     visible_to_teams: list[str] | None = None,
+    created_during_run: bool = False,
 ) -> Communication:
     comm = Communication(
         exercise_id=exercise_id,
@@ -41,6 +42,7 @@ async def create_communication(
         body=body,
         triggered_by_inject_id=triggered_by_inject_id,
         visible_to_teams=visible_to_teams or None,
+        created_during_run=created_during_run,
     )
     session.add(comm)
     # Flush for the id: the event names the row rather than carrying it, because the
@@ -327,6 +329,7 @@ async def deliver_triggered_communication(
             external_entity=external_entity,
             triggered_by_inject_id=inject_id,
             trigger_key=trigger_key,
+            created_during_run=True,
             sent_at=datetime.now(UTC),
         )
         .on_conflict_do_nothing(constraint="uq_communication_exercise_trigger_key")

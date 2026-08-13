@@ -7,6 +7,16 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (see the
 
 ## [Unreleased]
 
+### Added
+- **New launches receive an exact immutable configuration snapshot** (#315) — the first
+  draft-to-active transition now freezes the validated scenario, exercise flags,
+  materialised inject configuration and attachment digests, roster, and prepared
+  communications in one content-addressed record and transaction. Runtime scenario
+  reads use the frozen definition, launch-configured fields cannot drift, and attachment
+  reads verify their frozen digest. Runs launched before the migration are explicitly
+  `unknown`; no upgrade-time row is presented as historical launch truth. Clone,
+  comparison, reporting, and legacy compatibility remain separate follow-up work.
+
 ### Security
 - **Emailed links are rooted at `PUBLIC_BASE_URL`, never the request host** (#258) —
   password-reset and invite links previously fell back to the client-supplied `Host`

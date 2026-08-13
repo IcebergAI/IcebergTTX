@@ -48,6 +48,10 @@ class Communication(SQLModel, table=True):
     visible_to_teams: list[str] | None = Field(  # None = all teams
         default=None, sa_column=Column(JSONB)
     )
+    # Draft facilitator communications are launch configuration; communications
+    # generated or sent after launch are runtime history.
+    # NULL is intentionally retained for legacy rows whose origin is unknowable.
+    created_during_run: bool | None = Field(default=False)
     sent_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )

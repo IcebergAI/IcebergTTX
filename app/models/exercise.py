@@ -26,6 +26,12 @@ class ExerciseState(StrEnum):
     completed = "completed"
 
 
+class SnapshotProvenance(StrEnum):
+    pending = "pending"
+    exact = "exact"
+    unknown = "unknown"
+
+
 # Valid one-step transitions
 VALID_TRANSITIONS: dict[ExerciseState, set[ExerciseState]] = {
     ExerciseState.draft: {ExerciseState.active},
@@ -49,12 +55,31 @@ def transition_action(from_state: ExerciseState, to_state: ExerciseState) -> str
 
 
 class Exercise(SQLModel, table=True):
+    __table_args__ = (
+        CheckConstraint(
+            "(launch_provenance = 'exact' AND launch_snapshot_digest IS NOT NULL) "
+            "OR (launch_provenance IN ('pending', 'unknown') "
+            "AND launch_snapshot_digest IS NULL)",
+            name="ck_exercise_launch_provenance_digest",
+        ),
+    )
+
     id: int | None = Field(default=None, primary_key=True)
     scenario_id: int = Field(foreign_key="scenario.id", index=True)
     title: str
     state: ExerciseState = Field(default=ExerciseState.draft)
     current_node_id: str | None = None  # tracks active inject in the scenario tree
     llm_enabled: bool = Field(default=False)
+    # Drafts are pending. A successful first launch atomically records an exact,
+    # content-addressed snapshot. Runs already in progress at upgrade remain unknown;
+    # current database state is never promoted to fictional launch provenance.
+    launch_provenance: SnapshotProvenance = Field(default=SnapshotProvenance.pending)
+    launch_snapshot_digest: str | None = Field(
+        default=None,
+        foreign_key="exercise_launch_snapshot.digest",
+        index=True,
+        max_length=64,
+    )
     # Facilitator's live/after-action observations (#112) — the raw material of the
     # after-action report. Owner-only; never exposed to participants/observers.
     debrief_notes: str | None = None
@@ -118,6 +143,9 @@ class ExerciseMember(SQLModel, table=True):
     # administrator later changes the user's global role. Removing and re-enrolling
     # a user intentionally captures a new snapshot.
     role_at_enrolment: UserRole
+    # False is launch configuration, true is an explicit runtime roster change,
+    # and NULL is reserved for legacy rows whose timing cannot be proven.
+    created_during_run: bool | None = Field(default=False)
     joined_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
     )

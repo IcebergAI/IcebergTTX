@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from app.models.communication import CommDirection
-from app.models.exercise import ExerciseState
+from app.models.exercise import ExerciseState, SnapshotProvenance
 from app.models.inject import InjectState
 from app.models.suggested_inject import SuggestedInjectStatus
 from app.models.user import UserRole
@@ -46,6 +46,8 @@ class ExercisePublic(BaseModel):
     state: ExerciseState
     current_node_id: str | None = None
     llm_enabled: bool
+    launch_provenance: SnapshotProvenance
+    launch_snapshot_digest: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
     # Pause-aware clock (#116) — the client ticks HH:MM:SS from these without per-second WS.
@@ -65,6 +67,8 @@ class ExercisePublic(BaseModel):
             state=ex.state,
             current_node_id=ex.current_node_id,
             llm_enabled=ex.llm_enabled,
+            launch_provenance=ex.launch_provenance,
+            launch_snapshot_digest=ex.launch_snapshot_digest,
             started_at=ex.started_at.isoformat() if ex.started_at else None,
             ended_at=ex.ended_at.isoformat() if ex.ended_at else None,
             paused_at=ex.paused_at.isoformat() if ex.paused_at else None,
@@ -72,6 +76,13 @@ class ExercisePublic(BaseModel):
             created_by=ex.created_by,
             created_at=ex.created_at.isoformat(),
         )
+
+
+class LaunchSnapshotPublic(BaseModel):
+    digest: str
+    schema_version: str
+    content: dict[str, Any]
+    created_at: str
 
 
 class ExerciseStateChange(BaseModel):

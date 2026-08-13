@@ -13,7 +13,6 @@ from app.services.access_control import inject_matches_group
 from app.services.exercise_service import create_exercise, enrol_member, transition_state
 from app.services.inject_service import release_inject
 from app.services.scenario_service import create_scenario
-from app.services.schedule_service import schedule_exercise_injects
 
 SAMPLES_DIR = Path(__file__).resolve().parents[1] / "samples"
 
@@ -98,12 +97,6 @@ async def create_sample_demo_exercise(
     session.add(member)
     await session.commit()
     exercise = await transition_state(session, exercise, ExerciseState.active)
-    # Enqueue any release_at_minutes schedules the sample defines (#269): activating via
-    # transition_state alone leaves them dormant until a resume or restart. Committed
-    # here and not left to a later caller: the release below is conditional, so without
-    # this the no-start-inject path would silently roll the jobs back at teardown.
-    await schedule_exercise_injects(session, exercise)
-    await session.commit()
     # A multi-team start node seeds one physical inject per team; unordered .first()
     # could pick another team's copy, whose audience (only the demo member's group
     # is enrolled) is empty — and release_inject then 409s the whole demo load

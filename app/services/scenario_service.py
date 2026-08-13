@@ -40,6 +40,17 @@ async def update_scenario(
     definition: ScenarioDefinition,
     updated_by: int | None = None,
 ) -> Scenario:
+    locked = (
+        await session.exec(
+            select(Scenario)
+            .where(Scenario.id == scenario.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if locked is None:
+        raise ValueError("scenario no longer exists")
+    scenario = locked
     # Exercises capture a scenario at creation time semantically, so never rewrite
     # an in-use definition. Preserve the collaborative library by returning a new
     # editor-owned revision for future exercises instead of denying non-owner edits.
@@ -103,6 +114,12 @@ async def definition_for_exercise(
     exercise = await session.get(Exercise, exercise_id)
     if not exercise:
         return None
+    if exercise.launch_snapshot_digest is not None:
+        from app.services.launch_snapshot_service import launch_definition_for_exercise
+
+        frozen = await launch_definition_for_exercise(session, exercise)
+        if frozen is not None:
+            return frozen
     return await get_scenario_definition(session, exercise.scenario_id)
 
 

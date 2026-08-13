@@ -22,6 +22,7 @@ class AttachmentMeta:
     content_type: str
     path: str
     size: int
+    sha256: str
 
 
 async def create_inject(
@@ -36,6 +37,7 @@ async def create_inject(
     sequence_order: int = 0,
     release_offset_minutes: int | None = None,
     attachment: AttachmentMeta | None = None,
+    created_during_run: bool = False,
     commit: bool = True,
 ) -> Inject:
     normalized_group_id = group_id.strip() if group_id and group_id.strip() else None
@@ -55,6 +57,8 @@ async def create_inject(
         attachment_content_type=attachment.content_type if attachment else None,
         attachment_path=attachment.path if attachment else None,
         attachment_size=attachment.size if attachment else None,
+        attachment_sha256=attachment.sha256 if attachment else None,
+        created_during_run=created_during_run,
     )
     session.add(inject)
     await session.flush()
