@@ -26,7 +26,6 @@ from app.services.launch_snapshot_service import (
 )
 from app.services.progression_service import seed_progression
 from app.services.scenario_service import definition_for_exercise, export_definition
-from app.services.schedule_service import schedule_exercise_injects
 from app.services.team_service import scenario_team_ids as definition_team_ids
 from app.services.team_service import validate_team_ids as validate_definition_team_ids
 
@@ -169,11 +168,6 @@ async def transition_state_with_history(
             ),
         )
 
-    # The Core compare-and-swap deliberately skipped identity-map synchronization.
-    # Refresh inside this transaction so scheduling sees the newly active state and
-    # timestamp rather than the caller's stale draft/paused object.
-    await session.refresh(exercise)
-
     transition = ExerciseStateTransition(
         exercise_id=exercise.id,
         from_state=previous_state,
@@ -196,11 +190,6 @@ async def transition_state_with_history(
                 action=transition_action(previous_state, new_state),
             ),
         )
-        # Launch/resume and durable scheduling are one transaction. A process cannot
-        # leave an active exercise whose frozen schedule was never enqueued; rollback of
-        # queueing also rolls back snapshot, transition, and state.
-        if new_state == ExerciseState.active:
-            await schedule_exercise_injects(session, exercise)
         await session.commit()
     except Exception:
         await session.rollback()

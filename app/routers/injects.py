@@ -44,6 +44,7 @@ from app.services.launch_snapshot_service import (
     require_inject_configuration_mutable,
 )
 from app.services.schedule_service import arm_inject_schedule
+from app.services.scenario_service import definition_for_exercise
 
 router = APIRouter(prefix="/exercises/{exercise_id}/injects", tags=["injects"])
 
@@ -219,9 +220,20 @@ async def list_injects(exercise_id: int, current_user: CurrentUserDep, session: 
         # One membership lookup for the whole list, not one per inject (#263).
         group_id = await exercise_group_for_user(session, exercise_id, current_user)
         visible = [i for i in injects if inject_visible_to(i, current_user, group_id)]
+    # Resolve the authoritative live/frozen definition once for the whole collection.
+    # Passing it through avoids one Exercise + snapshot lookup per Inject.
+    definition = await definition_for_exercise(session, exercise_id)
     # Only facilitators get branch topology (next_inject_id); participants/observers
     # get the redacted payload so they can't read the branch map ahead of choosing (#266).
-    return [await inject_payload(session, i, include_progression=is_facilitator) for i in visible]
+    return [
+        await inject_payload(
+            session,
+            i,
+            include_progression=is_facilitator,
+            definition=definition,
+        )
+        for i in visible
+    ]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=InjectPublic)

@@ -1,7 +1,7 @@
 """Invariant tests for the bounded immutable-launch-snapshot foundation."""
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -112,8 +112,10 @@ async def test_failed_attachment_capture_leaves_launch_unstarted_and_unsnapshott
     draft_exercise: Exercise,
     session: AsyncSession,
 ):
+    exercise_id = draft_exercise.id
+    assert exercise_id is not None
     inject = (
-        await session.exec(select(Inject).where(Inject.exercise_id == draft_exercise.id))
+        await session.exec(select(Inject).where(Inject.exercise_id == exercise_id))
     ).first()
     assert inject is not None
     inject.attachment_path = f"/tmp/icebergttx-missing-{uuid4().hex}"
@@ -123,12 +125,12 @@ async def test_failed_attachment_capture_leaves_launch_unstarted_and_unsnapshott
     await session.commit()
 
     response = await client.post(
-        f"/api/exercises/{draft_exercise.id}/start",
+        f"/api/exercises/{exercise_id}/start",
         headers=_bearer(facilitator_token),
     )
     assert response.status_code == 409
 
-    stored = await session.get(Exercise, draft_exercise.id, populate_existing=True)
+    stored = await session.get(Exercise, exercise_id, populate_existing=True)
     assert stored is not None
     assert stored.state == ExerciseState.draft
     assert stored.launch_provenance == SnapshotProvenance.pending
@@ -136,25 +138,27 @@ async def test_failed_attachment_capture_leaves_launch_unstarted_and_unsnapshott
     transitions = (
         await session.exec(
             select(ExerciseStateTransition).where(
-                ExerciseStateTransition.exercise_id == draft_exercise.id
+                ExerciseStateTransition.exercise_id == exercise_id
             )
         )
     ).all()
     assert transitions == []
 
 
-async def test_schedule_queue_failure_rolls_back_snapshot_and_launch(
+async def test_transition_event_failure_rolls_back_snapshot_and_launch(
     monkeypatch: pytest.MonkeyPatch,
     draft_exercise: Exercise,
     session: AsyncSession,
 ):
-    queue = AsyncMock(side_effect=RuntimeError("queue unavailable"))
-    monkeypatch.setattr("app.services.exercise_service.schedule_exercise_injects", queue)
+    exercise_id = draft_exercise.id
+    assert exercise_id is not None
+    event_record = Mock(side_effect=RuntimeError("event recording unavailable"))
+    monkeypatch.setattr("app.services.exercise_service.record", event_record)
 
-    with pytest.raises(RuntimeError, match="queue unavailable"):
+    with pytest.raises(RuntimeError, match="event recording unavailable"):
         await transition_state(session, draft_exercise, ExerciseState.active)
 
-    stored = await session.get(Exercise, draft_exercise.id, populate_existing=True)
+    stored = await session.get(Exercise, exercise_id, populate_existing=True)
     assert stored is not None
     assert stored.state == ExerciseState.draft
     assert stored.launch_provenance == SnapshotProvenance.pending
@@ -162,11 +166,11 @@ async def test_schedule_queue_failure_rolls_back_snapshot_and_launch(
     assert (
         await session.exec(
             select(ExerciseStateTransition).where(
-                ExerciseStateTransition.exercise_id == draft_exercise.id
+                ExerciseStateTransition.exercise_id == exercise_id
             )
         )
     ).all() == []
-    queue.assert_awaited_once()
+    event_record.assert_called_once()
 
 
 async def test_launched_runtime_definition_comes_from_snapshot_not_mutable_scenario_row(

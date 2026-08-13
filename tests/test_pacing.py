@@ -23,6 +23,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.communication import CommDirection, Communication
 from app.models.exercise import Exercise, ExerciseState, ExerciseStateTransition
 from app.models.inject import Inject, InjectState
+from app.models.scenario import Scenario
 from app.models.user import User
 from app.schemas.scenario_json import InjectNode, ScenarioDefinition, TriggerComm
 from app.services import schedule_service, task_queue
@@ -125,6 +126,46 @@ async def _first_inject(session: AsyncSession, exercise_id: int) -> Inject:
     return (
         await session.exec(select(Inject).where(Inject.exercise_id == exercise_id))
     ).first()
+
+
+async def _active_exercise_with_trigger(
+    session: AsyncSession,
+    facilitator: User,
+    participant: User,
+    trigger: TriggerComm,
+) -> tuple[Exercise, Scenario]:
+    definition = ScenarioDefinition(
+        title="Triggered communications",
+        participant_teams=[{"id": "it_ops", "label": "IT Ops"}],
+        injects=[
+            InjectNode(
+                id="inject_01",
+                title="Initial Alert",
+                content="Respond",
+                target_teams=["it_ops"],
+                triggers_communications=[trigger],
+            )
+        ],
+        start_inject_id="inject_01",
+    )
+    scenario = await create_scenario(
+        session,
+        definition=definition,
+        created_by=facilitator.id,
+    )
+    exercise = await create_exercise(
+        session,
+        scenario_id=scenario.id,
+        title="Triggered exercise",
+        created_by=facilitator.id,
+    )
+    await enrol_member(
+        session,
+        exercise=exercise,
+        user_id=participant.id,
+        group_id="it_ops",
+    )
+    return await transition_state(session, exercise, ExerciseState.active), scenario
 
 
 # ── Validator ─────────────────────────────────────────────────────────────────
@@ -342,10 +383,13 @@ async def test_schedule_patch_enqueues_against_the_new_offset(
     client: AsyncClient, facilitator_token: str, session: AsyncSession,
     active_exercise: Exercise,
 ):
-    ir = await client.get(
-        f"/api/exercises/{active_exercise.id}/injects", headers=AUTH(facilitator_token)
+    created = await client.post(
+        f"/api/exercises/{active_exercise.id}/injects",
+        json={"title": "Runtime inject", "content": "Intervention", "sequence_order": 99},
+        headers=AUTH(facilitator_token),
     )
-    inject_id = ir.json()[0]["id"]
+    assert created.status_code == 201
+    inject_id = created.json()["id"]
 
     r = await client.patch(
         f"/api/exercises/{active_exercise.id}/injects/{inject_id}/schedule",
@@ -834,8 +878,6 @@ async def test_releasing_an_inject_enqueues_its_triggered_comms_transactionally(
     session: AsyncSession,
     facilitator: User,
     participant: User,
-    sample_scenario,
-    active_exercise: Exercise,
 ):
     """#211, closed structurally.
 
@@ -843,19 +885,18 @@ async def test_releasing_an_inject_enqueues_its_triggered_comms_transactionally(
     and then lost its process left them unarmed forever. Enqueued in the release's own
     transaction, the jobs exist if and only if the release does.
     """
-    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
-    definition.injects[0].triggers_communications = [
+    active_exercise, _ = await _active_exercise_with_trigger(
+        session,
+        facilitator,
+        participant,
         TriggerComm(
             external_entity="NCSC",
             direction="inbound",
             subject="Delayed advisory",
             body="Call the incident hotline.",
             delay_after_release_seconds=300,
-        )
-    ]
-    sample_scenario.definition = definition.model_dump_json()
-    session.add(sample_scenario)
-    await session.commit()
+        ),
+    )
     inject = await _first_inject(session, active_exercise.id)
 
     from app.services.inject_service import release_inject
@@ -870,25 +911,25 @@ async def test_releasing_an_inject_enqueues_its_triggered_comms_transactionally(
 
 async def test_triggered_comms_are_reconstructed_from_durable_state(
     session: AsyncSession,
-    active_exercise: Exercise,
-    sample_scenario,
+    facilitator: User,
+    participant: User,
 ):
     """Resume and startup reconciliation both derive owed comms from rows alone (#194)."""
-    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
-    definition.injects[0].triggers_communications = [
+    active_exercise, _ = await _active_exercise_with_trigger(
+        session,
+        facilitator,
+        participant,
         TriggerComm(
             external_entity="NCSC",
             direction="inbound",
             subject="Delayed advisory",
             body="Call the incident hotline.",
             delay_after_release_seconds=300,
-        )
-    ]
-    sample_scenario.definition = definition.model_dump_json()
+        ),
+    )
     inject = await _first_inject(session, active_exercise.id)
     inject.state = InjectState.released
     inject.released_at = datetime.now(UTC) - timedelta(seconds=30)
-    session.add(sample_scenario)
     session.add(inject)
     await session.commit()
 
@@ -902,26 +943,27 @@ async def test_triggered_comms_are_reconstructed_from_durable_state(
 
 async def test_an_already_delivered_trigger_is_not_reconstructed(
     session: AsyncSession,
-    active_exercise: Exercise,
-    sample_scenario,
+    facilitator: User,
+    participant: User,
 ):
     """The persisted trigger_key is the record of delivery, and it wins over any
     reconstruction — which is what stops a restart from re-sending it."""
-    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
-    definition.injects[0].triggers_communications = [
+    active_exercise, _ = await _active_exercise_with_trigger(
+        session,
+        facilitator,
+        participant,
         TriggerComm(
             external_entity="NCSC",
             direction="inbound",
             subject="Delayed advisory",
             body="Call the incident hotline.",
             delay_after_release_seconds=300,
-        )
-    ]
-    sample_scenario.definition = definition.model_dump_json()
+        ),
+    )
     inject = await _first_inject(session, active_exercise.id)
     inject.state = InjectState.released
     inject.released_at = datetime.now(UTC) - timedelta(seconds=30)
-    session.add_all([sample_scenario, inject])
+    session.add(inject)
     session.add(
         Communication(
             exercise_id=active_exercise.id,
@@ -940,24 +982,27 @@ async def test_an_already_delivered_trigger_is_not_reconstructed(
     assert await _comm_jobs(session, "inject_01") == []
 
 
-async def test_a_triggered_comm_job_reads_its_content_at_delivery_time(
+async def test_a_triggered_comm_job_reads_its_frozen_launch_content(
     task_session: AsyncSession,
-    active_exercise: Exercise,
-    sample_scenario,
+    facilitator: User,
+    participant: User,
 ):
-    """Content lives in the scenario, not the job args, so a facilitator's edit between
-    enqueue and delivery is honoured rather than delivering the superseded text."""
-    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
-    definition.injects[0].triggers_communications = [
+    """A later template edit cannot change communication content for a launched run."""
+    active_exercise, sample_scenario = await _active_exercise_with_trigger(
+        task_session,
+        facilitator,
+        participant,
         TriggerComm(
             external_entity="NCSC",
             direction="inbound",
-            subject="Edited subject",
-            body="Edited body.",
+            subject="Frozen subject",
+            body="Frozen body.",
             delay_after_release_seconds=0,
-        )
-    ]
-    sample_scenario.definition = definition.model_dump_json()
+        ),
+    )
+    changed = ScenarioDefinition.model_validate_json(sample_scenario.definition)
+    changed.injects[0].triggers_communications[0].subject = "Edited template subject"
+    sample_scenario.definition = changed.model_dump_json()
     inject = await _first_inject(task_session, active_exercise.id)
     inject.state = InjectState.released
     inject.released_at = datetime.now(UTC)
@@ -976,31 +1021,32 @@ async def test_a_triggered_comm_job_reads_its_content_at_delivery_time(
             select(Communication).where(Communication.exercise_id == active_exercise.id)
         )
     ).all()
-    assert [c.subject for c in comms] == ["Edited subject"]
+    assert [c.subject for c in comms] == ["Frozen subject"]
 
 
 async def test_a_triggered_comm_job_delivers_once(
     task_session: AsyncSession,
-    active_exercise: Exercise,
-    sample_scenario,
+    facilitator: User,
+    participant: User,
 ):
     """Duplicate jobs are expected — the unique (exercise_id, trigger_key) insert is what
     makes them cost nothing."""
-    definition = ScenarioDefinition.model_validate_json(sample_scenario.definition)
-    definition.injects[0].triggers_communications = [
+    active_exercise, _ = await _active_exercise_with_trigger(
+        task_session,
+        facilitator,
+        participant,
         TriggerComm(
             external_entity="NCSC",
             direction="inbound",
             subject="Advisory",
             body="Hotline.",
             delay_after_release_seconds=0,
-        )
-    ]
-    sample_scenario.definition = definition.model_dump_json()
+        ),
+    )
     inject = await _first_inject(task_session, active_exercise.id)
     inject.state = InjectState.released
     inject.released_at = datetime.now(UTC)
-    task_session.add_all([sample_scenario, inject])
+    task_session.add(inject)
     await task_session.commit()
 
     for _ in range(3):

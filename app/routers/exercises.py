@@ -64,6 +64,7 @@ from app.services.report_service import (
     render_markdown,
 )
 from app.services.scenario_service import definition_for_exercise, titles_for
+from app.services.schedule_service import schedule_exercise_injects
 from app.services.timeline_service import (
     ExerciseBundle,
     build_timeline,
@@ -297,8 +298,13 @@ async def _transition(
     # transaction and dispatched by transition_state_with_history itself (#212), so it has
     # already gone out by the time we get here. A rolled-back transition raises above and
     # emits neither projection.
-    # Start/resume schedules are already enqueued in the transition transaction. Pause
-    # and complete cancel nothing: a durable job re-reads state and no-ops or re-defers.
+    # Start/resume enqueue pending schedules. The queue is a reconstructable projection,
+    # not part of the immutable launch boundary: startup reconciliation repairs a crash
+    # between these commits. Pause and complete cancel nothing; a durable job re-reads
+    # state and no-ops or re-defers.
+    if target == ExerciseState.active:
+        await schedule_exercise_injects(session, result.exercise)
+        await session.commit()
     return _exercise_out(result.exercise)
 
 
