@@ -17,8 +17,34 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from app.services import proxy
+
 if TYPE_CHECKING:
+    import httpx2
+
     from app.config import LLMProviderConfig
+
+
+def sdk_http_client(api_base: str) -> httpx2.AsyncClient | None:
+    """A proxied ``httpx2`` client for an SDK to dial ``api_base`` with, or None to
+    let the SDK build its own default.
+
+    ``httpx2`` is imported here rather than at module scope because it arrives only
+    with a provider SDK (both ship it in place of ``httpx``), and no LLM SDK is a
+    core dependency — ``service.py`` imports every adapter module unconditionally to
+    self-register, so a base install with no ``llm-*`` extra must still import them.
+    Same reason the adapters import their SDK inside ``_get_client()``.
+
+    The client is built against the provider's base URL and resolved once, because
+    the SDK client is long-lived; a proxy change invalidates it via
+    ``reset_provider_cache()``.
+    """
+    proxy_kwargs = proxy.resolve_kwargs(api_base)
+    if not proxy_kwargs:
+        return None
+    import httpx2
+
+    return httpx2.AsyncClient(**proxy_kwargs)
 
 
 class LLMProvider(Protocol):

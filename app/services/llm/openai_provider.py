@@ -14,12 +14,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import httpx
-
-from app.services import proxy
-from app.services.llm.base import register_adapter
+from app.services.llm.base import register_adapter, sdk_http_client
 
 if TYPE_CHECKING:
+    import httpx2
+
     from app.config import LLMProviderConfig
 
 OPENAI_API_BASE = "https://api.openai.com"
@@ -40,11 +39,11 @@ class OpenAICompatAdapter:
         Ollama's local endpoint is covered by the default no-proxy list."""
         return self.cfg.base_url or OPENAI_API_BASE
 
-    def _http_client(self) -> httpx.AsyncClient | None:
-        """A proxied httpx client, or None to let the SDK build its own default.
-        Resolved once, against the base URL — the SDK client is long-lived."""
-        proxy_kwargs = proxy.resolve_kwargs(self.api_base())
-        return httpx.AsyncClient(**proxy_kwargs) if proxy_kwargs else None
+    def _http_client(self) -> httpx2.AsyncClient | None:
+        """A proxied client for this provider's base URL; None lets the SDK build
+        its own default. This SDK still accepts a legacy ``httpx`` client, but the
+        Anthropic one does not — both use ``httpx2`` so there is one answer."""
+        return sdk_http_client(self.api_base())
 
     def _get_client(self):
         if self._client is not None:

@@ -6,11 +6,11 @@ ID (Bedrock requires an ``anthropic.``-prefixed ID, direct Anthropic must not ca
 it). Prompt caching (a ``cache_control`` block on the shared context) is applied
 only on the direct API path; the retired beta header is no longer required.
 
-The ``anthropic`` SDK is a core dependency; ``anthropic[bedrock]`` (boto3) is the
-optional ``llm-bedrock`` extra, imported lazily so a non-Bedrock deployment never
-needs it.
+The ``anthropic`` SDK is the optional ``llm-anthropic`` extra and ``anthropic[bedrock]``
+(boto3) the ``llm-bedrock`` extra — no LLM SDK is a core dependency, so both are
+imported lazily and a deployment using neither never needs them.
 """
-# pyright: reportPrivateImportUsage=false, reportCallIssue=false, reportArgumentType=false
+# pyright: reportPrivateImportUsage=false, reportCallIssue=false
 # The optional Bedrock class and documented message payload shape are selected at
 # runtime, but are not fully represented by the installed Anthropic SDK stubs.
 
@@ -18,12 +18,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import httpx
-
-from app.services import proxy
-from app.services.llm.base import register_adapter
+from app.services.llm.base import register_adapter, sdk_http_client
 
 if TYPE_CHECKING:
+    import httpx2
+
     from app.config import LLMProviderConfig
 
 ANTHROPIC_API_BASE = "https://api.anthropic.com"
@@ -50,14 +49,12 @@ class AnthropicFamilyAdapter:
             return _BEDROCK_HOST.format(region=self.cfg.aws_region)
         return ANTHROPIC_API_BASE
 
-    def _http_client(self) -> httpx.AsyncClient | None:
-        """A proxied httpx client, or None to let the SDK build its own default.
-
-        Resolved once here, against the provider's base URL, because the SDK client
-        is long-lived; a proxy change invalidates it via ``reset_provider_cache()``.
+    def _http_client(self) -> httpx2.AsyncClient | None:
+        """A proxied client for this provider's base URL; None lets the SDK build
+        its own default. The SDK requires an ``httpx2`` client and rejects a legacy
+        ``httpx`` one outright (``TypeError``), so the type here is load-bearing.
         """
-        proxy_kwargs = proxy.resolve_kwargs(self.api_base())
-        return httpx.AsyncClient(**proxy_kwargs) if proxy_kwargs else None
+        return sdk_http_client(self.api_base())
 
     def _get_client(self):
         if self._client is not None:
@@ -120,7 +117,11 @@ class AnthropicFamilyAdapter:
             model=self.model,
             max_tokens=max_tokens,
             system=system,
-            messages=[{"role": "user", "content": content}],
+            # The documented content-block payload is wider than the SDK's TypedDict
+            # stubs. Narrowed to this call rather than suppressed file-wide, so a real
+            # argument-type error (notably the http_client type, which the SDK enforces
+            # at runtime) still surfaces here.
+            messages=[{"role": "user", "content": content}],  # pyright: ignore[reportArgumentType]
         )
         for block in msg.content:
             text = getattr(block, "text", None)

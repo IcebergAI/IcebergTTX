@@ -6,6 +6,7 @@ defaults ``trust_env=True``, honouring any ambient HTTPS_PROXY). Each wiring tes
 therefore has a paired "unset" case.
 """
 
+import httpx2
 import pytest
 from httpx import AsyncClient
 
@@ -223,7 +224,8 @@ def test_bedrock_bypass_keys_off_the_aws_host():
     )
     bedrock_kwargs = proxy.resolve_kwargs(bedrock.api_base())
     assert bedrock_kwargs == {"trust_env": False, "proxy": None}
-    assert bedrock._http_client() is not None  # direct, but env proxy stays disabled
+    # Direct, but env proxy stays disabled — and still the httpx2 client the SDK needs.
+    assert isinstance(bedrock._http_client(), httpx2.AsyncClient)
 
     # ...while the Anthropic host is still proxied under the very same config.
     direct = AnthropicFamilyAdapter(_llm_cfg())
@@ -244,7 +246,9 @@ def test_anthropic_client_gets_proxied_http_client(monkeypatch):
 
     AnthropicFamilyAdapter(_llm_cfg())._get_client()
 
-    assert captured["http_client"] is not None
+    # Type, not just presence: the real AsyncAnthropic raises TypeError unless this
+    # is an httpx2 client, and _FakeAnthropic can't reproduce that check itself.
+    assert isinstance(captured["http_client"], httpx2.AsyncClient)
 
 
 async def test_anthropic_client_unchanged_when_cache_unloaded(monkeypatch):

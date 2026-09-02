@@ -8,7 +8,7 @@ routing without touching the DB.
 A save must also invalidate the two caches that captured the *old* proxy at
 construction time:
 
-- the LLM adapters build a long-lived SDK client (with its own ``httpx.AsyncClient``)
+- the LLM adapters build a long-lived SDK client (with its own ``httpx2.AsyncClient``)
   and ``active_provider()`` caches the provider → ``reset_provider_cache()``;
 - Authlib registers each OIDC provider once, baking ``client_kwargs`` (and hence the
   proxy) into a cached client → ``reset_registration()``.
