@@ -55,11 +55,14 @@ dependencies = [
 # your LLM_PROVIDER: llm-anthropic (direct Anthropic), llm-bedrock (Anthropic on
 # AWS — the anthropic SDK's Bedrock client, pulls boto3), or llm-openai (covers
 # LLM_PROVIDER=openai, ollama, and gemini via the OpenAI-compatible surface).
-llm-anthropic = ["anthropic>=0.120.2"]
-llm-bedrock = ["anthropic[bedrock]>=0.120.2"]
-llm-openai = ["openai>=2.51.0"]
+# The floors are the first majors built on httpx2 (anthropic 1.x, openai 3.x): the
+# adapters hand the SDK an ``httpx2.AsyncClient`` for outbound proxying (#97), which
+# the httpx-era releases would reject.
+llm-anthropic = ["anthropic>=1.2.0"]
+llm-bedrock = ["anthropic[bedrock]>=1.2.0"]
+llm-openai = ["openai>=3.6.0"]
 # Install every provider SDK at once (used by the container image).
-llm-all = ["anthropic[bedrock]>=0.120.2", "openai>=2.51.0"]
+llm-all = ["anthropic[bedrock]>=1.2.0", "openai>=3.6.0"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
@@ -77,8 +80,8 @@ dev = [
     "pytest-playwright>=0.7",
     # All provider SDKs so a dev env can run/smoke any LLM_PROVIDER (the test suite
     # itself mocks providers and needs none of these).
-    "anthropic[bedrock]>=0.120.2",
-    "openai>=2.51.0",
+    "anthropic[bedrock]>=1.2.0",
+    "openai>=3.6.0",
 ]
 
 [project.scripts]

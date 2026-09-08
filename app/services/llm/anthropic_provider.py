@@ -18,12 +18,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import httpx
-
 from app.services import proxy
 from app.services.llm.base import register_adapter
 
 if TYPE_CHECKING:
+    import httpx2
+
     from app.config import LLMProviderConfig
 
 ANTHROPIC_API_BASE = "https://api.anthropic.com"
@@ -50,14 +50,24 @@ class AnthropicFamilyAdapter:
             return _BEDROCK_HOST.format(region=self.cfg.aws_region)
         return ANTHROPIC_API_BASE
 
-    def _http_client(self) -> httpx.AsyncClient | None:
-        """A proxied httpx client, or None to let the SDK build its own default.
+    def _http_client(self) -> httpx2.AsyncClient | None:
+        """A proxied httpx2 client, or None to let the SDK build its own default.
 
         Resolved once here, against the provider's base URL, because the SDK client
         is long-lived; a proxy change invalidates it via ``reset_provider_cache()``.
+
+        ``httpx2`` (not ``httpx``) because anthropic>=1 is built on it; it ships with
+        the SDK, so the import is lazy like the SDK's own — core installs without an
+        ``llm-anthropic``/``llm-bedrock`` extra have neither, and this module imports
+        eagerly. The proxy kwargs (``proxy`` / ``trust_env``) are spelled the same in
+        both.
         """
         proxy_kwargs = proxy.resolve_kwargs(self.api_base())
-        return httpx.AsyncClient(**proxy_kwargs) if proxy_kwargs else None
+        if not proxy_kwargs:
+            return None
+        import httpx2
+
+        return httpx2.AsyncClient(**proxy_kwargs)
 
     def _get_client(self):
         if self._client is not None:
@@ -88,7 +98,7 @@ class AnthropicFamilyAdapter:
         return self._client
 
     async def aclose(self) -> None:
-        """Close the built SDK client and its httpx pool; a no-op when unbuilt (#269)."""
+        """Close the built SDK client and its HTTP pool; a no-op when unbuilt (#269)."""
         client, self._client = self._client, None
         if client is not None:
             await client.close()
