@@ -1,10 +1,8 @@
-# pyright: reportArgumentType=false
-# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.user import UserRole
@@ -83,17 +81,15 @@ class Exercise(SQLModel, table=True):
     # Facilitator's live/after-action observations (#112) — the raw material of the
     # after-action report. Owner-only; never exposed to participants/observers.
     debrief_notes: str | None = None
-    started_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
-    ended_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
     # Pause-aware clock (#116). `paused_at` is set while the exercise is paused (else
     # None); `accumulated_pause_seconds` is the total of all completed pause spans.
     # Effective elapsed = (now|paused_at|ended_at - started_at) - accumulated_pause_seconds.
-    paused_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    paused_at: datetime | None = None
     accumulated_pause_seconds: float = Field(default=0.0)
     created_by: int = Field(foreign_key="user.id")
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     scenario: Optional["Scenario"] = Relationship(back_populates="exercises")
     injects: list["Inject"] = Relationship(back_populates="exercise", cascade_delete=True)
@@ -146,9 +142,7 @@ class ExerciseMember(SQLModel, table=True):
     # False is launch configuration, true is an explicit runtime roster change,
     # and NULL is reserved for legacy rows whose timing cannot be proven.
     created_during_run: bool | None = Field(default=False)
-    joined_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    joined_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     exercise: Optional["Exercise"] = Relationship(back_populates="members")
 
@@ -171,10 +165,7 @@ class ExerciseStateTransition(SQLModel, table=True):
     from_state: ExerciseState
     to_state: ExerciseState
     actor_id: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
-    transitioned_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True), nullable=False),
-    )
+    transitioned_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     exercise: Optional["Exercise"] = Relationship(back_populates="state_transitions")
 
@@ -201,9 +192,7 @@ class ExerciseProgress(SQLModel, table=True):
     current_inject_id: int | None = Field(
         default=None, foreign_key="inject.id", ondelete="SET NULL", index=True
     )
-    advanced_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    advanced_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     advanced_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
 
     exercise: Optional["Exercise"] = Relationship(back_populates="progression")

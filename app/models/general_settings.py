@@ -1,7 +1,5 @@
-# pyright: reportArgumentType=false
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -18,6 +16,4 @@ class GeneralSettings(SQLModel, table=True):
     registration_lockout_seconds: int = 3600
     password_reset_max_attempts: int = 5
     password_reset_lockout_seconds: int = 3600
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

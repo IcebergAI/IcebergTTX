@@ -1,9 +1,7 @@
-# pyright: reportArgumentType=false
-# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime, UniqueConstraint
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -18,8 +16,6 @@ class ResponseAssessment(SQLModel, table=True):
     assessment_text: str
     decision_quality: str | None = None          # "good" | "adequate" | "poor"
     recommended_branch_option_id: str | None = None  # maps to a scenario option id
-    assessed_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    assessed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     response: Optional["Response"] = Relationship(back_populates="assessment")

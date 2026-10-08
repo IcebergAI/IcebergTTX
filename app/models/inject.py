@@ -1,10 +1,8 @@
-# pyright: reportArgumentType=false
-# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import Column, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -37,9 +35,9 @@ class Inject(SQLModel, table=True):
     # scenario node's `release_at_minutes`, but runtime-mutable (set/cancel per inject).
     release_offset_minutes: int | None = Field(default=None)
     state: InjectState = Field(default=InjectState.pending)
-    released_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    released_at: datetime | None = None
     released_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
-    resolved_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    resolved_at: datetime | None = None
     resolved_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
     resolution_reason: str | None = None
     attachment_filename: str | None = None
@@ -81,6 +79,6 @@ class InjectProgress(SQLModel, table=True):
     inject_id: int = Field(foreign_key="inject.id", ondelete="CASCADE")
     group_id: str | None = None
     state: InjectState = Field(default=InjectState.released)
-    resolved_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    resolved_at: datetime | None = None
     resolved_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
     resolution_reason: str | None = None

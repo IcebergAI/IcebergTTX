@@ -17,8 +17,10 @@ structure. Subsystem deep-dives are indexed there and live in [PLAN.md](PLAN.md)
 - Dependencies via **uv** against the committed `uv.lock`. After changing deps:
   `uv lock` and commit the result (`uv lock --check` gates CI).
 - Everything touching the DB is async; background workers use
-  `async with AsyncSession(engine)`. Datetime columns are
-  `Field(sa_type=DateTime(timezone=True))` with `datetime.now(UTC)` values.
+  `async with AsyncSession(engine)`. Datetime columns are plain `datetime` fields
+  (SQLModel ≥0.0.45 maps them to `UTCDateTime` → `timestamptz`) with
+  `datetime.now(UTC)` values; never add `sa_type=DateTime(timezone=True)` (bypasses
+  SQLModel's UTC processing) and never bind a naive datetime (rejected at execute).
 - Schema changes go through Alembic (`alembic revision --autogenerate -m "..."`, needs
   a running Postgres). Hand-written migrations need a **unique** `revision` id — a
   collision surfaces as a misleading `Cycle is detected in revisions` error; grep

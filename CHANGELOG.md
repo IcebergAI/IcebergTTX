@@ -17,6 +17,15 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (see the
   `unknown`; no upgrade-time row is presented as historical launch truth. Clone,
   comparison, reporting, and legacy compatibility remain separate follow-up work.
 
+### Changed
+- **SQLModel 0.0.48 and a full dependency refresh** — timestamp columns are now plain
+  `datetime` fields that SQLModel maps to its `UTCDateTime` type (still Postgres
+  `timestamptz`, so no migration): values are normalised to UTC on write, come back as
+  aware UTC datetimes, and a naive datetime is rejected at execute time instead of being
+  stored ambiguously. The lock also moves to SQLAlchemy 2.1, Starlette 1.7, FastAPI
+  0.142, websockets 17, uvicorn 0.54, procrastinate 3.10, and the current Anthropic and
+  OpenAI SDKs.
+
 ### Security
 - **Emailed links are rooted at `PUBLIC_BASE_URL`, never the request host** (#258) —
   password-reset and invite links previously fell back to the client-supplied `Host`

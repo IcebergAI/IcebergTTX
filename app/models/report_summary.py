@@ -1,9 +1,6 @@
-# pyright: reportArgumentType=false
-# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -22,9 +19,7 @@ class ExecutiveSummary(SQLModel, table=True):
     exercise_id: int = Field(foreign_key="exercise.id", ondelete="CASCADE", unique=True)
     summary_text: str
     llm_model: str  # provider.llm_model_label at generation time
-    generated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     edited: bool = Field(default=False)
 
     exercise: Optional["Exercise"] = Relationship(back_populates="executive_summary")

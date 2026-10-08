@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -33,11 +32,6 @@ class AuthToken(SQLModel, table=True):
         default=None, foreign_key="exercise.id", ondelete="SET NULL", index=True
     )
     # Indexed for the retention sweep's cutoff scan (#251), not for any read path.
-    expires_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False, index=True)
-    )
-    used_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True), nullable=False),
-    )
+    expires_at: datetime = Field(index=True)
+    used_at: datetime | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

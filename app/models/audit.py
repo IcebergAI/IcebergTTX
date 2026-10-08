@@ -1,8 +1,5 @@
-# pyright: reportArgumentType=false
-# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -20,7 +17,6 @@ class AuditEvent(SQLModel, table=True):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         index=True,
-        sa_type=DateTime(timezone=True),
     )
     request_id: str | None = Field(default=None, index=True)
     source_ip: str | None = None

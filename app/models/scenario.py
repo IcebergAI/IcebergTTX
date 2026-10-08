@@ -1,9 +1,7 @@
-# pyright: reportArgumentType=false
-# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -19,12 +17,8 @@ class Scenario(SQLModel, table=True):
     tags: list[str] | None = Field(default=None, sa_column=Column(JSONB))
     definition: str  # Full ScenarioDefinition JSON blob (validated text, not JSONB)
     created_by: int = Field(foreign_key="user.id")
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Navigation only — deleting a scenario in use is blocked by a route guard,
     # never cascaded (it would destroy live exercise data).

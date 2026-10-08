@@ -1,7 +1,5 @@
-# pyright: reportArgumentType=false
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -42,6 +40,4 @@ class OIDCSettings(SQLModel, table=True):
     oidc_okta_role_claim: str = "groups"
     oidc_okta_role_map: str = ""
 
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
