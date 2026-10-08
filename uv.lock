@@ -805,7 +805,7 @@ wheels = [
 
 [[package]]
 name = "iceberg-ttx"
-version = "0.1.0b3"
+version = "0.1.0b4"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

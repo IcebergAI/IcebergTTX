@@ -7,64 +7,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (see the
 
 ## [Unreleased]
 
-### Added
-- **New launches receive an exact immutable configuration snapshot** (#315) — the first
-  draft-to-active transition now freezes the validated scenario, exercise flags,
-  materialised inject configuration and attachment digests, roster, and prepared
-  communications in one content-addressed record and transaction. Runtime scenario
-  reads use the frozen definition, launch-configured fields cannot drift, and attachment
-  reads verify their frozen digest. Runs launched before the migration are explicitly
-  `unknown`; no upgrade-time row is presented as historical launch truth. Clone,
-  comparison, reporting, and legacy compatibility remain separate follow-up work.
+## [0.1.0-beta.4] - 2026-10-08
 
-### Changed
-- **SQLModel 0.0.48 and a full dependency refresh** — timestamp columns are now plain
-  `datetime` fields that SQLModel maps to its `UTCDateTime` type (still Postgres
-  `timestamptz`, so no migration): values are normalised to UTC on write, come back as
-  aware UTC datetimes, and a naive datetime is rejected at execute time instead of being
-  stored ambiguously. The lock also moves to SQLAlchemy 2.1, Starlette 1.7, FastAPI
-  0.142, websockets 17, uvicorn 0.54, procrastinate 3.10, and the current Anthropic and
-  OpenAI SDKs.
+Fourth beta. The app now scales out horizontally on PostgreSQL alone (no Redis or
+broker) and freezes each exercise's configuration at launch. It also closes a set of
+security and data-integrity gaps found in a bug sweep, and moves the stack to
+SQLModel 0.0.48 / SQLAlchemy 2.1.
 
-### Security
-- **Emailed links are rooted at `PUBLIC_BASE_URL`, never the request host** (#258) —
-  password-reset and invite links previously fell back to the client-supplied `Host`
-  header, so a forged host made the deployment mail a victim a genuine link (carrying a
-  valid single-use reset token) pointing at an attacker. `PUBLIC_BASE_URL` is now
-  required whenever SMTP is configured: startup refuses without it, the admin API
-  refuses to enable email while it is blank, and the reset/invite endpoints return 503
-  rather than send a request-derived link.
-- **OIDC JIT provisioning requires a verified email** (#257) — every adapter computed
-  `email_verified` and nothing read it, so on an IdP allowing self-set addresses an
-  attacker could pre-claim a colleague's email, lock them out, and receive the
-  enrolments facilitators make by email. Denied and audited by default;
-  `OIDC_ALLOW_UNVERIFIED_EMAIL=true` restores the old behaviour for IdPs that never
-  emit the claim.
-- **Secret-bearing sink hosts are pinned to the environment** (#259) — while
-  `SIEM_HTTP_TOKEN`, `SMTP_PASSWORD`, or the proxy credentials are set, the matching
-  destination's origin can no longer be re-pointed at runtime and the secret sent
-  there via the "test" button. Path edits and clearing the sink stay allowed, and any
-  destination change now emits a `critical` audit event.
-- **Releases are gated on the tagged commit's provenance** (#267) — branch protection
-  does not cover tag pushes, so a `v*` tag on any commit published a signed,
-  provenance-attested image. The workflow now verifies the commit is on `main` with a
-  green CI run for that SHA before building.
-
-### Fixed
-- **Scheduled Kubernetes backups cover the uploads PVC** (#268) — the CronJob dumped
-  Postgres only, so a restore produced a database whose injects referenced attachment
-  files that no longer existed. Database and attachments are now captured together
-  under one timestamp.
-- **Three list endpoints no longer query per row** (#263) — facilitator responses,
-  inject comments, and the participant inject list resolved suggestions, visibility,
-  and authors one row at a time. Each now costs a fixed number of queries regardless
-  of exercise activity, with regression tests pinning the ceiling.
-
-## [0.1.0-beta.3] - 2026-07-14
-
-Third beta release focused on runtime configuration, admin usability, a redesigned
-navigation and console layout, and the internal seams (event dispatch, service
-ownership, projection) that the multi-replica work depends on.
+**Upgrade notes:** migrations self-apply on startup. If SMTP is configured,
+`PUBLIC_BASE_URL` is now required (#258). OIDC logins with an unverified email are
+refused unless `OIDC_ALLOW_UNVERIFIED_EMAIL=true` (#257). The `llm-*` extras need the
+httpx2-based SDK majors. Kubernetes users should move to a `k8s/overlays/*` overlay.
 
 ### Added
 - **The app runs on more than one replica** (#213) — every piece of cross-request state
@@ -90,6 +43,112 @@ ownership, projection) that the multi-replica work depends on.
   `k8s/overlays/multi-replica` for two replicas and rolling deploys. Do not front the app
   with a transaction-mode connection pooler: `LISTEN` needs a session that outlives a
   transaction.
+- **New launches receive an exact immutable configuration snapshot** (#315) — the first
+  draft-to-active transition now freezes the validated scenario, exercise flags,
+  materialised inject configuration and attachment digests, roster, and prepared
+  communications in one content-addressed record and transaction. Runtime scenario
+  reads use the frozen definition, launch-configured fields cannot drift, and attachment
+  reads verify their frozen digest. Runs launched before the migration are explicitly
+  `unknown`; no upgrade-time row is presented as historical launch truth. Clone,
+  comparison, reporting, and legacy compatibility remain separate follow-up work.
+- **Opt-in audit retention and an unconditional auth-token purge** (#251) — a daily
+  sweep deletes `AuditEvent` rows older than `AUDIT_RETENTION_DAYS` (also editable on
+  the audit settings page). The default `0` keeps everything, so upgrading never
+  silently destroys security records. Spent and expired password-reset/invite tokens,
+  which previously left a permanent email-address record, are now always removed: used
+  tokens 24 hours after use, unused ones 7 days after expiry. Deletes run in bounded
+  batches and emit one `audit.retention_purge` event when something was removed.
+
+### Changed
+- **SQLModel 0.0.48 and a full dependency refresh** — timestamp columns are now plain
+  `datetime` fields that SQLModel maps to its `UTCDateTime` type (still Postgres
+  `timestamptz`, so no migration): values are normalised to UTC on write, come back as
+  aware UTC datetimes, and a naive datetime is rejected at execute time instead of being
+  stored ambiguously. The lock also moves to SQLAlchemy 2.1, Starlette 1.7, FastAPI
+  0.142, websockets 17, uvicorn 0.54, and procrastinate 3.10.
+- **LLM provider SDKs move to their httpx2-based majors** — the `llm-*` extras now
+  require `anthropic>=1.2` and `openai>=3.6`. The adapters hand the SDK an
+  `httpx2.AsyncClient` for outbound proxying, so an environment pinned to an older SDK
+  must upgrade it along with the app.
+- **Kubernetes manifests are a Kustomize base plus overlays** (#254) — a cloud-agnostic
+  `k8s/base` (`kubectl apply -k k8s/base`), with `overlays/nginx` (standard Ingress),
+  `overlays/eks` (ALB `TargetGroupBinding`), and `overlays/multi-replica`. Deployments
+  that applied the old flat `k8s/` layout should switch to an overlay.
+
+### Security
+- **Emailed links are rooted at `PUBLIC_BASE_URL`, never the request host** (#258) —
+  password-reset and invite links previously fell back to the client-supplied `Host`
+  header, so a forged host made the deployment mail a victim a genuine link (carrying a
+  valid single-use reset token) pointing at an attacker. `PUBLIC_BASE_URL` is now
+  required whenever SMTP is configured: startup refuses without it, the admin API
+  refuses to enable email while it is blank, and the reset/invite endpoints return 503
+  rather than send a request-derived link.
+- **OIDC JIT provisioning requires a verified email** (#257) — every adapter computed
+  `email_verified` and nothing read it, so on an IdP allowing self-set addresses an
+  attacker could pre-claim a colleague's email, lock them out, and receive the
+  enrolments facilitators make by email. Denied and audited by default;
+  `OIDC_ALLOW_UNVERIFIED_EMAIL=true` restores the old behaviour for IdPs that never
+  emit the claim.
+- **Secret-bearing sink hosts are pinned to the environment** (#259) — while
+  `SIEM_HTTP_TOKEN`, `SMTP_PASSWORD`, or the proxy credentials are set, the matching
+  destination's origin can no longer be re-pointed at runtime and the secret sent
+  there via the "test" button. Path edits and clearing the sink stay allowed, and any
+  destination change now emits a `critical` audit event.
+- **Releases are gated on the tagged commit's provenance** (#267) — branch protection
+  does not cover tag pushes, so a `v*` tag on any commit published a signed,
+  provenance-attested image. The workflow now verifies the commit is on `main` with a
+  green CI run for that SHA before building.
+- **Participants no longer receive the branch map** (#266) — released-inject payloads
+  (REST and the `inject_released` frame) carried each option's `next_inject_id`, so a
+  participant could read which choice led where, and which were dead ends, before
+  choosing. Branch topology is now facilitator-only.
+- **The session JWT is no longer persisted to `localStorage`** (#264) — and a live page
+  whose token expires now redirects to login instead of silently freezing. The socket
+  closes with distinct codes for an expired token (4001) and denied access (4003).
+- **The SIEM outbox is bounded** (#260) — with forwarding enabled, every forwarded audit
+  event was retained in memory forever. That leak could be driven by unauthenticated
+  requests. It is now a 500-entry ring buffer.
+
+### Fixed
+- **Scheduled Kubernetes backups cover the uploads PVC** (#268) — the CronJob dumped
+  Postgres only, so a restore produced a database whose injects referenced attachment
+  files that no longer existed. Database and attachments are now captured together
+  under one timestamp.
+- **Three list endpoints no longer query per row** (#263) — facilitator responses,
+  inject comments, and the participant inject list resolved suggestions, visibility,
+  and authors one row at a time. Each now costs a fixed number of queries regardless
+  of exercise activity, with regression tests pinning the ceiling.
+- **Inject lifecycle guards** (#265) — a released inject, which carries responses,
+  comments, and resolution history, can no longer be deleted (409; pending injects
+  remain deletable). A release racing a pause now re-checks the exercise state under
+  its lock rather than landing in a paused exercise.
+- **Progression cursors stay consistent** (#256) — responses to ad-hoc or approved-LLM
+  injects, and responses from outside the release audience, no longer move a team's
+  branch cursor. Previously this could permanently block the team's real next inject.
+- **A stalled WebSocket client can no longer freeze broadcasts** (#252) — sends and
+  closes are bounded and run concurrently. A socket that does not drain within 5s is
+  pruned instead of blocking the request that triggered the broadcast or the heartbeat.
+- **Graceful shutdown drains in-flight work** (#250) — audit persistence, SIEM
+  forwarding, background tasks, and armed timers are drained or cancelled in order, and
+  the database engine is disposed, instead of everything being killed mid-flight.
+- **Duplicate exercise memberships are impossible** (#262) — a unique constraint
+  replaces the check-then-insert (with a migration that collapses existing duplicates),
+  so a double-click no longer yields two memberships with divergent groups.
+- **Reports and exports load only the users they reference** (#245) — instead of every
+  account on the instance.
+- The LLM "test connection" check works on Anthropic (#261); `/participate` shows an
+  error rather than a blank page for a non-member (#269); the sample demo starts on the
+  correct team's inject and arms its schedules (#269); concurrent summary drafts no
+  longer collide (#269); a replaced LLM provider closes its old SDK client (#269); and
+  general-settings saves are audited under their own action name (#269).
+
+## [0.1.0-beta.3] - 2026-07-14
+
+Third beta release focused on runtime configuration, admin usability, a redesigned
+navigation and console layout, and the internal seams (event dispatch, service
+ownership, projection) that the multi-replica work depends on.
+
+### Added
 - **Runtime configuration** — non-secret settings move out of env-only config and into
   the admin UI, following the singleton-row + cached-config pattern already used by
   `/admin/audit` and `/admin/proxy`. Email/SMTP, general settings (registration, token
@@ -205,7 +264,8 @@ before `1.0.0`.
   Reproducible builds via `uv.lock`; images ship an SBOM, SLSA build-provenance
   attestation, and a cosign signature.
 
-[Unreleased]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.3...HEAD
+[Unreleased]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.4...HEAD
+[0.1.0-beta.4]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.3...v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.2...v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/IcebergAI/IcebergTTX/releases/tag/v0.1.0-beta.1
