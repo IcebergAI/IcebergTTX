@@ -698,12 +698,12 @@ scenario cookbook.
 IcebergTTX follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 The current release line is **`0.x` (pre-stable / beta)** — interfaces may change
 before `1.0.0`. Pre-releases carry a suffix (`vX.Y.Z-beta.N`); the latest release is
-**`v0.1.0-beta.2`**.
+**`v0.1.0-beta.4`**.
 
 Container images are published to **GitHub Container Registry**:
 
 ```bash
-docker pull ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.2
+docker pull ghcr.io/icebergai/iceberg-ttx:0.1.0-beta.4
 ```
 
 Each release image ships an SBOM, a signed **SLSA build-provenance** attestation, and a
