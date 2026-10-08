@@ -1,7 +1,5 @@
-# pyright: reportArgumentType=false
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -20,6 +18,4 @@ class LLMSettings(SQLModel, table=True):
     ollama_base_url: str = "http://localhost:11434/v1"
     gemini_model: str = "gemini-2.0-flash"
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

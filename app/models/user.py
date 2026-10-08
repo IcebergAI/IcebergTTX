@@ -1,9 +1,7 @@
-# pyright: reportArgumentType=false
-# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, UniqueConstraint
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 # Local (email + password) accounts carry this as their auth_provider. OIDC
@@ -41,15 +39,11 @@ class User(SQLModel, table=True):
     # cleared when the user next changes it via PUT /auth/me. Enforced UI-side at
     # login (the frontend redirects to /settings until the password is changed).
     must_change_password: bool = Field(default=False)
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     # Token revocation cutoff (#14): tokens issued (iat) before this instant are
     # rejected in get_current_user. Bumped on password or IdP-managed role change
     # to invalidate sessions minted under the previous authorization state.
-    token_valid_after: datetime | None = Field(
-        default=None, sa_type=DateTime(timezone=True)
-    )
+    token_valid_after: datetime | None = None
     # External-identity provenance (#25). auth_provider is "local" for
     # email+password accounts, or an OIDC provider key ("entra"/"authentik") once
     # a provider identity is provisioned. subject is the IdP's stable `sub` claim

@@ -13,8 +13,8 @@ keeping a per-login-attempt write off the WAL. The corresponding Alembic revisio
 the keyword out; ``create_all`` honours the ``prefixes`` below.
 """
 
-from sqlalchemy import Column, DateTime, Index, Integer, String, Table
-from sqlmodel import SQLModel
+from sqlalchemy import Column, Index, Integer, String, Table
+from sqlmodel import SQLModel, UTCDateTime
 
 rate_limit_hits = Table(
     "rate_limit_hits",
@@ -26,7 +26,7 @@ rate_limit_hits = Table(
     # Opaque and caller-defined: an IP, or "ip:email" for login. Attacker-controlled, so
     # it is only ever a bind parameter and never interpolated.
     Column("key", String(320), nullable=False),
-    Column("at", DateTime(timezone=True), nullable=False),
+    Column("at", UTCDateTime(), nullable=False),
     Index("ix_rate_limit_hits_scope_key_at", "scope", "key", "at"),
     prefixes=["UNLOGGED"],
 )

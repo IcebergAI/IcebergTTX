@@ -1,9 +1,7 @@
-# pyright: reportArgumentType=false
-# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime, UniqueConstraint
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -30,9 +28,7 @@ class Response(SQLModel, table=True):
     group_id: str | None = None
     content: str
     selected_option: str | None = None  # option id from scenario definition
-    submitted_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    submitted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     # No FK constraint here — ResponseAssessment.response_id carries the relationship (avoids cycle)
     assessment_id: int | None = None
 

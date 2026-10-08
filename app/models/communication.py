@@ -1,10 +1,8 @@
-# pyright: reportArgumentType=false
-# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import Column, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -52,9 +50,7 @@ class Communication(SQLModel, table=True):
     # generated or sent after launch are runtime history.
     # NULL is intentionally retained for legacy rows whose origin is unknowable.
     created_during_run: bool | None = Field(default=False)
-    sent_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    sent_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     exercise: Optional["Exercise"] = Relationship(back_populates="communications")
     triggered_by_inject: Optional["Inject"] = Relationship(back_populates="communications")
     reads: list["CommunicationRead"] = Relationship(
@@ -83,9 +79,6 @@ class CommunicationRead(SQLModel, table=True):
         ondelete="CASCADE",
         primary_key=True,
     )
-    read_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True), nullable=False),
-    )
+    read_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     communication: Optional["Communication"] = Relationship(back_populates="reads")

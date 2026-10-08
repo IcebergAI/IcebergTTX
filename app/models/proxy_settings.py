@@ -1,8 +1,5 @@
-# pyright: reportArgumentType=false
-# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -25,6 +22,4 @@ class ProxySettings(SQLModel, table=True):
     proxy_url: str = ""
     # Comma-separated hosts/domains/CIDRs that bypass the proxy.
     no_proxy: str = ""
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

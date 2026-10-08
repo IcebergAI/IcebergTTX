@@ -1,7 +1,5 @@
-# pyright: reportArgumentType=false
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -17,6 +15,4 @@ class EmailSettings(SQLModel, table=True):
     smtp_starttls: bool = True
     smtp_tls: bool = False
     public_base_url: str = ""
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -1,10 +1,8 @@
-# pyright: reportArgumentType=false
-# SQLModel's Field stub is narrower than its runtime SQLAlchemy type support.
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime, UniqueConstraint
+from sqlalchemy import Column, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -35,10 +33,8 @@ class SuggestedInject(SQLModel, table=True):
     llm_model: str
     status: SuggestedInjectStatus = Field(default=SuggestedInjectStatus.pending_review)
     reviewed_by: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
-    reviewed_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
-    generated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True)
-    )
+    reviewed_at: datetime | None = None
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     exercise: Optional["Exercise"] = Relationship(back_populates="suggested_injects")
     triggered_by_response: Optional["Response"] = Relationship(
