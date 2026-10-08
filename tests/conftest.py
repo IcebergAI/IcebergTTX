@@ -189,6 +189,16 @@ def _reset_oidc_config_cache():
     oidc_service.reset_registration()
 
 
+@pytest.fixture(autouse=True)
+def _reset_proxy_config_cache():
+    """Keep the process-global outbound-proxy snapshot isolated between tests."""
+    from app.services import proxy
+
+    proxy.set_config(None)
+    yield
+    proxy.set_config(None)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _create_schema():
     # The test suite builds a throwaway schema directly from the models rather

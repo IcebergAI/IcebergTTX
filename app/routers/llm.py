@@ -80,7 +80,7 @@ async def update_llm_settings(
         row = await llm_settings_service.update_settings(session, changes)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
     audit_service.emit(
         "llm.settings_updated",

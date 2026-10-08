@@ -247,7 +247,7 @@ async def create(
         body, attachment = await _request_body_and_attachment(request)
     except (json.JSONDecodeError, ValueError, ValidationError) as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
     exercise = await require_exercise_access(session, exercise_id, current_user)
