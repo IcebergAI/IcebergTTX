@@ -7,6 +7,24 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (see the
 
 ## [Unreleased]
 
+## [0.1.0-beta.5] - 2026-10-31
+
+Maintenance beta: dependency and CI-action updates only, no application changes.
+
+**Upgrade notes:** the `llm-anthropic`/`llm-bedrock`/`llm-all` extras now resolve to
+the `anthropic` 2.x SDK in the lock; the adapter's client construction and
+`messages.create` call are unchanged against it. No new migrations.
+
+### Dependencies
+- Grouped Python update (#376): `anthropic` 1.12.0 → 2.1.0, `fastapi` 0.142.4 →
+  0.161.1, `openai` 3.26.0 → 3.37.0, `authlib` 1.8.0 → 1.9.1, `alembic` 1.20.0 →
+  1.20.1, `pydantic-settings` 2.15.0 → 2.16.1; dev tooling `playwright` 1.64.1,
+  `pytest-playwright` 0.10.0 (drops the `pytest-base-url` dependency),
+  `pytailwindcss` 0.4.2, `ruff` 0.17.2.
+- `certifi` 2026.10.19 (#377) and `filelock` 4.2.1 (#378).
+- CI/release actions: `astral-sh/setup-uv` 10.3.2 (#375), `actions/setup-python` 7.1.0
+  (#374), `docker/login-action` 4.7.0 (#373), `github/codeql-action` 4.38.3 (#369).
+
 ## [0.1.0-beta.4] - 2026-10-08
 
 Fourth beta. The app now scales out horizontally on PostgreSQL alone (no Redis or
@@ -264,7 +282,8 @@ before `1.0.0`.
   Reproducible builds via `uv.lock`; images ship an SBOM, SLSA build-provenance
   attestation, and a cosign signature.
 
-[Unreleased]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.4...HEAD
+[Unreleased]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.5...HEAD
+[0.1.0-beta.5]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.4...v0.1.0-beta.5
 [0.1.0-beta.4]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.3...v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.2...v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/IcebergAI/IcebergTTX/compare/v0.1.0-beta.1...v0.1.0-beta.2
