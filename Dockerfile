@@ -1,5 +1,5 @@
 # ── stage 1: compile Tailwind CSS ───────────────────────────────────────────
-FROM python:3.14-slim AS tailwind-builder
+FROM python:3.15-slim AS tailwind-builder
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ RUN tailwindcss -i static/css/input.css -o static/css/output.css --minify
 
 
 # ── stage 2: runtime ────────────────────────────────────────────────────────
-FROM python:3.14-slim AS runtime
+FROM python:3.15-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
